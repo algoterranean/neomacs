@@ -12,6 +12,8 @@ import stat
 import time
 from pathlib import Path
 
+from neomacs.safeio import read_regular
+
 # Shown before a branch name.  Unicode has no character for a branch; this one,
 # the alternative key symbol, is what is generally used for it.
 BRANCH_SYMBOL = "\u2387"
@@ -30,16 +32,8 @@ _branches: dict[Path, tuple[tuple[int, int, int], str | None]] = {}
 
 
 def _read_start(path: Path) -> str:
-    """The start of the regular file at PATH.  Anything else there (a named pipe
-    with nothing writing to it, say) raises OSError rather than being waited on:
-    this runs on the editor's main loop, on files a project supplies."""
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise OSError(f"{path} is not a regular file")
-        return os.read(fd, _READ_LIMIT).decode("utf-8", errors="replace")
-    finally:
-        os.close(fd)
+    """The start of the regular file at PATH; OSError if it is anything else."""
+    return read_regular(path, _READ_LIMIT).decode("utf-8", errors="replace")
 
 
 def _find_head(directory: Path) -> Path | None:

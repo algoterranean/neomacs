@@ -47,6 +47,7 @@ PLACEMENT: dict[str, Main | InPanel] = {
     "messages": InPanel("bottom", dock="bottom"),
     "search": InPanel("bottom", dock="bottom"),
     "repl": InPanel("bottom", dock="bottom"),
+    "output": InPanel("bottom", dock="bottom"),
     "peek": InPanel("peek", floating="cursor", transient=True),
 }
 

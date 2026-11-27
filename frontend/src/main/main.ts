@@ -3,7 +3,8 @@
 // dialogs, and the files behind image resources (FRONTEND 3, 8.4, 9, 10).
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, type Menu, net as electronNet, protocol, type WebContents } from "electron";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Control, type Engine, LineSocket, startEngine } from "./engine.ts";
@@ -13,6 +14,19 @@ import { runSmoke } from "./smoke.ts";
 const SCHEME = "neomacs-app";
 const RESOURCES = "neomacs-resource";
 const smoke = process.argv.includes("--smoke");
+
+// The smoke test's engines keep to directories of their own: they neither load
+// the configuration of whoever runs the test nor write among their files.
+function engineEnvironment(): Record<string, string> {
+  if (!smoke) return {};
+  const root = mkdtempSync(path.join(os.tmpdir(), "neomacs-smoke-"));
+  return {
+    NEOMACS_CONFIG_DIR: path.join(root, "config"),
+    NEOMACS_DATA_DIR: path.join(root, "data"),
+    NEOMACS_CACHE_DIR: path.join(root, "cache"),
+  };
+}
+const engineEnv = engineEnvironment();
 
 export interface WindowState {
   window: BrowserWindow;
@@ -224,7 +238,7 @@ app.on("before-quit", () => {
 
 /** Start an engine and watch it.  When it stops unasked, say so and offer another. */
 async function launchEngine(): Promise<void> {
-  const started = await startEngine(pythonPath(), repoRoot());
+  const started = await startEngine(pythonPath(), repoRoot(), engineEnv);
   engine = started;
   control = new Control(started.socketPath);
   started.process.on("exit", (code, signal) => {

@@ -97,6 +97,7 @@ class Buffer:
         self.keymap: Any = None  # the buffer's local keymap, if it has one
         self.option_values: dict[str, Any] = {}
         self.project_values: dict[str, Any] = {}
+        self.project_file: Path | None = None  # the settings file they came from
         # Applied to all inserted text; a single-line minibuffer uses it to keep newlines out.
         self.text_filter: Callable[[str], str] | None = None
         # Work that listeners asked to be done once every listener has heard

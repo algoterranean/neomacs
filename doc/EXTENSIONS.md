@@ -83,11 +83,35 @@ A file `~/.config/neomacs/extensions/foo.py` is loaded as the module
 `neomacs_user.foo`. It has no metadata, no dependencies of its own and no lazy
 loading. It is the right size for a few commands.
 
+- The file's name must be a Python identifier. A file whose name starts with
+  `_` is not loaded on its own account; it is there to be imported.
+- `neomacs_user` is a package with no file of its own, whose path is the
+  extensions directory, so one single-file extension can import another:
+  `from neomacs_user import helpers`. A module imported that way before its
+  turn is not loaded a second time.
+- It is loaded through the live evaluation pipeline (ENGINE 9), like a
+  buffer: top-level `await` is allowed, and evaluating the file's buffer
+  again replaces what it registered.
+
 ### 3.3 The init file
 
 `~/.config/neomacs/init.py` is not an extension but is handled by the same
 machinery: it is a module with an ownership record, and re-evaluating it
-replaces what it registered before.
+replaces what it registered before. Its module name is `neomacs_init`.
+
+It is ordinary Python and imports what it uses:
+
+```python
+from neomacs import ed
+from neomacs.commands import command
+from neomacs.keymap import global_map
+
+ed.options.fill_column = 72
+global_map.bind("C-c t", "toggle_comment")
+```
+
+The command `init.open` visits it. Evaluating its buffer (`eval_buffer`)
+applies it at once.
 
 ## 4. The extensions environment
 
@@ -188,6 +212,11 @@ What cannot be done live:
 An extension that fails to import is reported and skipped; the rest load.
 `neomacs --safe` starts with no extensions and no init file.
 
+The user's code is loaded before the engine accepts a connection, so nobody
+is looking when it fails. Each failure goes to `*messages*` with its
+traceback, the last one can be seen with `show_traceback`, and the first
+frame to attach is shown the first failure and how many more there were.
+
 ### 6.2 Lazy loading
 
 At install time the autoload tables of all extensions are compiled into one
@@ -274,6 +303,20 @@ fill_column = 88
   opened, when the file is saved from the editor, and by
   `project.reload_settings`.
 - `describe_option` shows when a value came from a project file and which.
+- **Mode sections follow the mode's ancestry.** A buffer takes the general
+  section, then the section of each named mode its own mode inherits from,
+  then its own mode's, each over the one before. For a buffer in Python mode
+  that is `[options]`, `[mode.fundamental.options]`, `[mode.python.options]`.
+- **An option that is not declared when the file is read is skipped** and
+  named in the message, like any other key that is not applied. When lazy
+  loading arrives (X3) an extension's options may be declared later than
+  that, and this will need another look.
+- **The file is read with care**, since opening any file in the project
+  reads it on the main loop: only a regular file is read, and only its first
+  megabyte. A file that does not parse sets nothing and is reported.
+- A settings file made after the project's files were opened is found by
+  `project.reload_settings`. Saving a buffer under a new name moves it to
+  the project its new place is in.
 
 Running code from a project directory, behind an explicit trust step, is a
 possible later design and is not part of this one.

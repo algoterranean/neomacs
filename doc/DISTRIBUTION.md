@@ -113,6 +113,11 @@ support when the first build is packaged, and raised if either needs it.
   the resulting path is still too long the engine falls back to
   `/tmp/neomacs-<uid>/`, created with mode 0700.
 - The application directory is never written to after installation.
+- **Overrides.** `NEOMACS_CONFIG_DIR`, `NEOMACS_DATA_DIR` and
+  `NEOMACS_CACHE_DIR` each put one of these directories somewhere else. The
+  test suite and the Electron smoke test use them, so that an engine under
+  test neither loads the configuration of whoever runs it nor writes among
+  their files. `neomacs/paths.py` is the one module that knows any of this.
 
 ## 6. Transport per platform
 

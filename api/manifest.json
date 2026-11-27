@@ -177,6 +177,13 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.editor.Editor.after",
+   "kind": "method",
+   "signature": "(self, seconds: 'float', fn: 'Callable[[], Any]') -> 'Timer'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.editor.Editor.buffer",
    "kind": "property",
    "signature": "(self) -> 'Buffer'",
@@ -191,9 +198,23 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.editor.Editor.every",
+   "kind": "method",
+   "signature": "(self, seconds: 'float', fn: 'Callable[[], Any]') -> 'Timer'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.editor.Editor.frame",
    "kind": "property",
    "signature": "(self) -> 'Frame | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.in_thread",
+   "kind": "method",
+   "signature": "(self, fn: 'Callable[..., T]', *args: 'Any') -> 'T'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -212,9 +233,23 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.editor.Editor.run",
+   "kind": "method",
+   "signature": "(self, argv: 'Sequence[str | Path]', *, input: 'str | None' = None, cwd: 'str | Path | None' = None, env: 'Mapping[str, str] | None' = None, check: 'bool' = False, timeout: 'float | None' = None) -> 'Completed'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.editor.Editor.show",
    "kind": "method",
    "signature": "(self, buffer: 'Buffer', role: 'str' = 'document', *, focus: 'bool' = False) -> 'View'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.spawn",
+   "kind": "method",
+   "signature": "(self, argv: 'Sequence[str | Path]', *, on_output: 'Callable[[str], Any] | None' = None, on_exit: 'Callable[[Process], Any] | None' = None, buffer: 'Buffer | None' = None, cwd: 'str | Path | None' = None, env: 'Mapping[str, str] | None' = None, input: 'bool' = False) -> 'Process'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -243,6 +278,13 @@
    "name": "neomacs.editor.Editor.view",
    "kind": "property",
    "signature": "(self) -> 'View'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.when_idle",
+   "kind": "method",
+   "signature": "(self, seconds: 'float', fn: 'Callable[[], Any]') -> 'Timer'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -299,6 +341,41 @@
    "name": "neomacs.hooks.Hook.run",
    "kind": "method",
    "signature": "(self, *args: 'Any', buffer: 'Any' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.journal.Entry",
+   "kind": "class",
+   "signature": "(path: 'Path', name: 'str', file: 'Path | None', time: 'float', text: 'str', file_changed: 'bool' = False) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.journal.Journal",
+   "kind": "class",
+   "signature": "(editor: 'Editor', root: 'Path') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.journal.Journal.discard",
+   "kind": "method",
+   "signature": "(self, entry: 'Entry') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.journal.Journal.left_behind",
+   "kind": "method",
+   "signature": "(self) -> 'list[Entry]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.journal.Journal.recover",
+   "kind": "method",
+   "signature": "(self, entry: 'Entry') -> 'Buffer'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -691,6 +768,111 @@
    "name": "neomacs.panels.Panel.show",
    "kind": "method",
    "signature": "(self, buffer: 'Buffer', *, focus: 'bool' = False) -> 'View'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.Completed",
+   "kind": "class",
+   "signature": "(argv: 'tuple[str, ...]', returncode: 'int', stdout: 'str', stderr: 'str') -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.Process",
+   "kind": "class",
+   "signature": "(editor: 'Editor', argv: 'list[str]', *, on_output: 'Callable[[str], Any] | None', on_exit: 'Callable[[Process], Any] | None', buffer: 'Buffer | None') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.Process.close_input",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.Process.interrupt",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.Process.kill",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.Process.running",
+   "kind": "property",
+   "signature": "(self) -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.Process.terminate",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.Process.wait",
+   "kind": "method",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.Process.write",
+   "kind": "method",
+   "signature": "(self, text: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.ProcessError",
+   "kind": "class",
+   "signature": "(message: 'str', completed: 'Completed | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.proc.shell_argv",
+   "kind": "function",
+   "signature": "(command: 'str') -> 'list[str]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.project.Project",
+   "kind": "class",
+   "signature": "(root: 'Path', file: 'Path', general: 'dict[str, Any]' = <factory>, by_mode: 'dict[str, dict[str, Any]]' = <factory>, skipped: 'list[str]' = <factory>, error: 'str | None' = None) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.project.Projects",
+   "kind": "class",
+   "signature": "(editor: 'Editor') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.project.Projects.of",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer') -> 'Project | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.project.Projects.reload",
+   "kind": "method",
+   "signature": "(self, root: 'Path | None' = None) -> 'list[Project]'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -1566,6 +1748,20 @@
    "name": "neomacs.text.undo.UndoLog.undo",
    "kind": "method",
    "signature": "(self) -> 'UndoGroup | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.timers.Timer",
+   "kind": "class",
+   "signature": "(timers: 'Timers', kind: 'str', seconds: 'float', fn: 'Callable[[], Any]', owner: 'str', key: 'Any', context: 'contextvars.Context') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.timers.Timer.cancel",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
    "tier": "provisional",
    "since": "0.1"
   },

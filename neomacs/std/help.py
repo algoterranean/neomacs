@@ -153,6 +153,8 @@ async def describe_option() -> None:
     if option is None:
         raise NeomacsError(f"No option called {name}")
     origin, value = ed.buffer.options.origin(option.name)
+    if origin == "project" and ed.buffer.project_file is not None:
+        origin = f"the project file {ed.buffer.project_file}"
 
     def write(buffer: Buffer) -> None:
         _heading(buffer, option.name)

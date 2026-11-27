@@ -112,6 +112,7 @@ def ack(conn: Connection, seq: int) -> None:
 def _input(conn: Connection, kind: str, value: Any) -> None:
     frame = _frame(conn)
     conn.editor.last_frame = frame
+    conn.editor.timers.activity()
     conn.editor.dispatcher.put(frame, kind, value)
 
 

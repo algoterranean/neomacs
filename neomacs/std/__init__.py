@@ -14,7 +14,9 @@ from neomacs.std import (
     movement,
     prefix,
     prompts,
+    recovery,
     search,
+    shell,
     structure,
     windows,
 )
@@ -31,6 +33,8 @@ __all__ = [
     "movement",
     "prefix",
     "prompts",
+    "recovery",
+    "shell",
     "windows",
 ]
 
@@ -90,7 +94,7 @@ _BINDINGS = {
     "C-x C-s": "files.save", "s-s": "files.save",
     "C-x C-w": "files.save_as",
     "C-x b": "buffers.switch", "C-x k": "buffers.kill",
-    "M-x": "execute_command",
+    "M-x": "execute_command", "M-!": "shell_command",
     "C-x 5 2": "new_frame",
     "C-x C-c": "engine.exit",
     # evaluation
@@ -117,6 +121,8 @@ MENU = [
     ("File/Save", "files.save"),
     ("File/Save As…", "files.save_as"),
     ("File/New Window", "new_frame"),
+    ("File/Recover Unsaved Text…", "recover"),
+    ("File/Open Init File", "init.open"),
     ("Edit/Undo", "undo"),
     ("Edit/Redo", "redo"),
     ("Edit/Cut", "kill_selection"),
@@ -132,6 +138,7 @@ MENU = [
     ("Tools/Evaluate Buffer", "eval_buffer"),
     ("Tools/Evaluate Definition", "eval_definition"),
     ("Tools/Python REPL", "repl"),
+    ("Tools/Shell Command…", "shell_command"),
     ("Tools/Toggle Breakpoint", "debug.toggle_breakpoint"),
     ("Tools/Inspect Last Error", "debug.inspect"),
     ("View/Split Below", "split_window_below"),

@@ -32,7 +32,7 @@ def _watch_parent(editor: Editor) -> None:
     threading.Thread(target=watch, name="parent-watch", daemon=True).start()
 
 
-def _tui(attach: str | None, file: str | None) -> int:
+def _tui(attach: str | None, file: str | None, safe: bool = False) -> int:
     """Run the terminal frontend, on its own engine unless told to attach to one."""
     from neomacs.frontends import tui
 
@@ -41,7 +41,8 @@ def _tui(attach: str | None, file: str | None) -> int:
         return 0
     path = paths.socket_path(f"tui-{os.getpid()}")
     engine = subprocess.Popen(
-        [sys.executable, "-m", "neomacs", "--listen", str(path), "--exit-with-parent"],
+        [sys.executable, "-m", "neomacs", "--listen", str(path), "--exit-with-parent"]
+        + (["--safe"] if safe else []),
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
@@ -71,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="exit when the parent process does",
     )
+    parser.add_argument(
+        "--safe", action="store_true", help="start with no extensions and no init file"
+    )
     parser.add_argument("--tui", action="store_true", help="run the terminal frontend")
     parser.add_argument(
         "--attach", metavar="PATH", help="with --tui: attach to the engine listening at PATH"
@@ -88,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.tui:
-        return _tui(args.attach, args.file)
+        return _tui(args.attach, args.file, args.safe)
 
     listen: Path | None = None
     if args.listen:
@@ -98,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         listen = paths.socket_path()
 
     editor = Editor()
+    editor.safe = args.safe
     if args.exit_with_parent:
         _watch_parent(editor)
 
@@ -107,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"NEOMACS-LISTENING {listen}", flush=True)
 
     try:
-        editor.run(listen=listen, stdio=args.stdio, ready=ready)
+        editor.serve_forever(listen=listen, stdio=args.stdio, ready=ready)
     except KeyboardInterrupt:
         pass
     return 0
