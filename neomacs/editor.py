@@ -95,6 +95,8 @@ class Editor:
         # Key-to-flush times in seconds, collected while this is a list
         # (`python -m neomacs.tools.bench`); None when not measuring.
         self.latency: list[float] | None = None
+        # Round-trip times of requests to frontends, in seconds, likewise.
+        self.request_times: list[float] | None = None
         self.tasks: list[TaskInfo] = []
 
     # -- context (ENGINE 7.7) -------------------------------------------------

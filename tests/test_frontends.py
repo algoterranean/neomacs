@@ -232,3 +232,68 @@ def test_tui_in_a_pseudo_terminal(tmp_path: Path) -> None:
             proc.wait()
         os.close(fd)
     assert path.read_text() == "xxxfirst line\nsecond line edited in a termina\n"
+
+
+def test_geometry_comparison_against_the_reference_frontend() -> None:
+    """The tool behind Gate C, run against a frontend that is the reference layout itself."""
+    import time
+
+    from neomacs.testing import running_engine
+    from neomacs.testing.headless import HeadlessUI
+    from neomacs.tools import geometry_check
+
+    assert max(len(line) for line in geometry_check.sample_text().split("\n")) > 500
+    with running_engine() as path, HeadlessUI(path, rows=24, cols=63) as ui:
+        ui.eval(
+            "from neomacs.tools import geometry_check as _gc\n"
+            f"_g = ed.buffers.new('geometry', _gc.sample_text()); ed.frames[{ui.frame_id}].window.show(_g)\n"
+            "_geo = None"
+        )
+        gutter = ui.mono.gutter_width
+        ui.client.eval(
+            "async def _run():\n"
+            "    global _geo\n"
+            f"    _geo = await _gc.compare(ed.frames[{ui.frame_id}], {63 - gutter}, {ui.text_rows}, 1, 1, {gutter})\n"
+            "ed.start_task(_run())"
+        )
+        deadline = time.monotonic() + 60
+        while ui.client.eval("_geo is None") == "True":
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
+        report = eval(ui.client.eval("_geo"))  # noqa: S307 - a repr from our own engine
+        assert report["mismatched"] == 0, report["mismatches"][:5]
+        assert report["total"] > 3000 and report["checked"]["move"] > 2500
+        assert report["checked"]["line_edge"] > 100 and report["checked"]["rect"] > 20
+        # And it does notice a frontend that lays out differently: one column narrower.
+        ui.client.eval(
+            "_geo = None\n"
+            "async def _run():\n"
+            "    global _geo\n"
+            f"    _geo = await _gc.compare(ed.frames[{ui.frame_id}], {63 - gutter - 1}, {ui.text_rows}, 1, 1, {gutter})\n"
+            "ed.start_task(_run())"
+        )
+        while ui.client.eval("_geo is None") == "True":
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
+        assert eval(ui.client.eval("_geo['mismatched']")) > 500  # noqa: S307
+        ui.client.notify("ui.detach")
+
+
+def test_a_frontend_that_cannot_get_the_lines_gives_up_and_the_engine_falls_back() -> None:
+    from neomacs.testing import NotReady, running_engine
+    from neomacs.testing.headless import HeadlessUI
+
+    def never(*args: object) -> object:
+        raise NotReady("never")
+
+    with running_engine() as path, HeadlessUI(path, rows=10, cols=40) as ui:
+        ui.eval(
+            f"_f = ed.buffers.new('f', 'one\\ntwo\\nthree'); ed.frames[{ui.frame_id}].window.show(_f)"
+        )
+        ui.client.defer_seconds = 0.05
+        ui.client.request_handlers["layout.move"] = never
+        started = time.monotonic()
+        ui.keys("<down>")
+        assert ui.cursors() == [(2, 0)]  # moved by logical line instead
+        assert time.monotonic() - started < 2.0
+        ui.client.notify("ui.detach")

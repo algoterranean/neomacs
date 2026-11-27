@@ -56,6 +56,8 @@ class MonoView:
         self.width = width
         self.height = height
         self._cache: dict[int, tuple[int, int, list[Row]]] = {}
+        # Lines whose rows were asked for but are not held: the layout guessed.
+        self.missing: set[int] = set()
 
     def resize(self, width: int, height: int) -> None:
         self.width, self.height = width, height
@@ -103,6 +105,8 @@ class MonoView:
         """The visual rows of line NUMBER.  A line that is not held is one empty row."""
         line = self.model.line(number)
         if line is None:
+            if 1 <= number <= self.model.line_count:
+                self.missing.add(number)
             return [Row(number, 0, [], 0, 0, True)]
         cached = self._cache.get(number)
         text_width = self.text_width

@@ -26,6 +26,12 @@ class RemoteError(Exception):
         self.data: Any = error.get("data")
 
 
+class NotReady(Exception):
+    """Raised by a request handler that cannot answer yet.  The client asks it
+    again after each later notification, and replies with an error if it is
+    still not ready when the time allowed runs out."""
+
+
 class Client:
     """Connects to an engine socket.  Replies and notifications arrive on a thread."""
 
@@ -37,9 +43,13 @@ class Client:
         self._next_id = 1
         self._replies: dict[int, queue.SimpleQueue[dict[str, Any]]] = {}
         self._lock = threading.Lock()
+        self._defer_lock = threading.RLock()
         self.notifications: queue.SimpleQueue[tuple[str, list[Any]]] = queue.SimpleQueue()
         # Handlers for requests the engine sends us: name -> fn(*params) -> result.
         self.request_handlers: dict[str, Callable[..., Any]] = {}
+        # Requests whose handler raised NotReady: (message, deadline).
+        self._deferred: list[tuple[dict[str, Any], float]] = []
+        self.defer_seconds = 0.25
         # Called on the reader thread for each notification, before it is queued.
         self.on_notification: Callable[[str, list[Any]], None] | None = None
         self.closed = threading.Event()
@@ -71,16 +81,34 @@ class Client:
         finally:
             self.closed.set()
 
-    def _answer(self, msg: dict[str, Any]) -> None:
+    def _answer(self, msg: dict[str, Any], deadline: float | None = None) -> None:
         handler = self.request_handlers.get(msg["method"])
         if handler is None:
             reply: dict[str, Any] = {"error": {"code": -32601, "message": "method not found"}}
         else:
             try:
                 reply = {"result": handler(*(msg.get("params") or []))}
+            except NotReady as exc:
+                import time
+
+                if deadline is None:
+                    deadline = time.monotonic() + self.defer_seconds
+                if time.monotonic() < deadline:
+                    self._deferred.append((msg, deadline))
+                    if len(self._deferred) == 1:
+                        threading.Timer(self.defer_seconds + 0.02, self.retry_deferred).start()
+                    return
+                reply = {"error": {"code": -32000, "message": f"not available: {exc}"}}
             except Exception as exc:
                 reply = {"error": {"code": -32000, "message": f"{type(exc).__name__}: {exc}"}}
         self._send({"jsonrpc": "2.0", "id": msg["id"], **reply})
+
+    def retry_deferred(self) -> None:
+        """Ask the handlers of deferred requests again."""
+        with self._defer_lock:
+            waiting, self._deferred = self._deferred, []
+            for msg, deadline in waiting:
+                self._answer(msg, deadline)
 
     def call(self, method: str, *params: Any, timeout: float | None = None) -> Any:
         """Send a request and return its result, raising RemoteError on an error reply."""

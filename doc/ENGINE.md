@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 21, 2026-11-27. Stages 0 to 3 are implemented; see
+Status: draft 22, 2026-11-27. Stages 0 to 3 are implemented; see
 IMPLEMENTATION.md for what exists. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
@@ -365,10 +365,15 @@ always answers against the same text the engine has.
 | `layout.move(win, positions, unit, count)` | For each `[line, offset, goal_x]` in `positions`, the position `count` units away, where `unit` is `visual_line` or `page`, and the horizontal goal to pass next time. Takes a list so that vertical motion with many cursors is one round trip. |
 | `layout.line_edge(win, line, offset, which)` | The start or end of the visual row containing the position. |
 | `layout.viewport(win)` | First and last visible line and lines per page, when the engine cannot wait for the next `view.viewport`. |
-| `layout.rect(win, line, offset)` | Pixel rectangle of a position, for the rare extension that needs it. |
+| `layout.rect(win, line, offset)` | In view coordinates: the character's left edge and width, and the top and height of the visual row it is on. For the rare extension that needs it. |
 
 Because commands are coroutines (D2), a geometry request is just an `await`
 and costs one local round trip.
+
+A page, for `layout.move`, is the number of whole rows of the default face
+that fit in the view, less one, so a row of context stays on screen. The
+goal is the frontend's own business: the engine stores what it is given and
+hands it back, and never interprets it.
 
 ### 4.5 Clipboard
 

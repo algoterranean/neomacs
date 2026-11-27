@@ -1,8 +1,10 @@
 // One view in the DOM (FRONTEND 5.1, 5.4): only the lines near the viewport
 // exist as elements; the rest is a spacer of estimated height.
 
+import { Geometry } from "./geometry.ts";
 import { HeightIndex } from "./heights.ts";
 import type { FrameModel, Line, Run, ViewModel } from "./model.ts";
+import { cpLength } from "./positions.ts";
 
 export type Viewport = [first: number, last: number, pageLines: number];
 
@@ -12,12 +14,19 @@ function runSpan(run: Run): HTMLSpanElement {
     // An inline object.  Drawing images and embedded minibuffers is stage F3;
     // until then it is a placeholder.
     span.className = "nm-object";
-    if (run[0] !== null) span.dataset["o"] = String(run[0]);
+    if (run[0] !== null) {
+      span.dataset["o"] = String(run[0]);
+      span.dataset["n"] = String((run[1] as { covers?: number }).covers ?? 0);
+    }
     span.textContent = "\u25af";
     return span;
   }
   if (run[2] !== 0) span.className = `f${run[2]}`;
-  if (run[0] !== null) span.dataset["o"] = String(run[0]);
+  if (run[0] !== null) {
+    // Where this run's text is in the buffer line, in code points (FRONTEND 6).
+    span.dataset["o"] = String(run[0]);
+    span.dataset["n"] = String(cpLength(run[1]));
+  }
   span.textContent = run[1]; // text, never markup
   return span;
 }
@@ -25,12 +34,32 @@ function runSpan(run: Run): HTMLSpanElement {
 export class ViewElement {
   readonly root: HTMLDivElement;
   readonly scroller: HTMLDivElement;
+  readonly model: ViewModel;
+  readonly geometry: Geometry;
+  /** A minibuffer: no modeline, and as tall as its text within limits. */
+  readonly mini: boolean;
+  /** Whether this view has the keyboard: its cursor is solid and blinks. */
+  focused = false;
+  /** Set while a key is auto-repeating: the cursor then moves without animating. */
+  repeating = false;
+  minLines = 1;
+  maxLines = 1;
   private spacer: HTMLDivElement;
   private linesEl: HTMLDivElement;
+  private selectionLayer: HTMLDivElement;
+  private cursorLayer: HTMLDivElement;
+  private preeditEl: HTMLSpanElement;
+  private cursorEls: HTMLDivElement[] = [];
   private modelineEl: HTMLDivElement;
-  private model: ViewModel;
   private frame: FrameModel;
   private heights: HeightIndex;
+  private charWidth = 8;
+  private lineHeight = 20; // of a row in the default face; `heights.estimate` is an average
+  private seenStyle = -1;
+  private extra: [number, number] | null = null; // lines a geometry request needs laid out
+  private batchWaiters: (() => void)[] = [];
+  private drawnDomFirst = -1;
+  private lastCursor: { x: number; y: number } | null = null;
   private elements = new Map<Line, HTMLDivElement>();
   private domFirst = 1;
   private domLast = 0;
@@ -46,13 +75,15 @@ export class ViewElement {
     frame: FrameModel,
     onViewport: (viewport: Viewport) => void,
     requestRender: () => void,
+    mini = false,
   ) {
+    this.mini = mini;
     this.model = model;
     this.frame = frame;
     this.onViewport = onViewport;
     this.requestRender = requestRender;
     this.root = document.createElement("div");
-    this.root.className = "nm-view";
+    this.root.className = mini ? "nm-view nm-mini" : "nm-view";
     this.scroller = document.createElement("div");
     this.scroller.className = "nm-scroller";
     this.spacer = document.createElement("div");
@@ -61,25 +92,52 @@ export class ViewElement {
     this.linesEl.className = "nm-lines";
     this.modelineEl = document.createElement("div");
     this.modelineEl.className = "nm-modeline";
-    this.scroller.append(this.spacer, this.linesEl);
-    this.root.append(this.scroller, this.modelineEl);
+    this.selectionLayer = document.createElement("div");
+    this.selectionLayer.className = "nm-layer nm-selections";
+    this.cursorLayer = document.createElement("div");
+    this.cursorLayer.className = "nm-layer nm-cursors";
+    this.preeditEl = document.createElement("span");
+    this.preeditEl.className = "nm-preedit";
+    this.preeditEl.hidden = true;
+    this.cursorLayer.append(this.preeditEl);
+    // Selections are drawn under the text and cursors over it.
+    this.scroller.append(this.spacer, this.selectionLayer, this.linesEl, this.cursorLayer);
+    this.root.append(this.scroller);
+    if (!mini) this.root.append(this.modelineEl);
+    this.geometry = new Geometry(this);
     this.heights = new HeightIndex(model, 20);
     model.observer = this.heights;
     this.scroller.addEventListener("scroll", () => this.scrolled(), { passive: true });
   }
 
-  /** Call once the element is in the document: measures the default line height. */
+  /** Bumped whenever a face is defined or the faces are cleared. */
+  static styleVersion = 0;
+
+  /** Call once the element is in the document. */
   mounted(): void {
+    this.measureDefaults();
+  }
+
+  /** Measure a row and a character of the default face. */
+  private measureDefaults(): void {
+    this.seenStyle = ViewElement.styleVersion;
     const probe = document.createElement("div");
     probe.className = "nm-line";
     const content = document.createElement("div");
     content.className = "nm-content";
-    content.textContent = "x";
+    content.textContent = "0000000000";
     probe.append(content);
     this.linesEl.append(probe);
     const height = probe.getBoundingClientRect().height;
+    const range = document.createRange();
+    range.selectNodeContents(content);
+    const width = range.getBoundingClientRect().width / 10;
     probe.remove();
-    if (height > 0) this.heights.estimate = height;
+    if (height > 0) {
+      this.lineHeight = height;
+      this.heights.estimate = height;
+    }
+    if (width > 0) this.charWidth = width;
   }
 
   destroy(): void {
@@ -185,11 +243,13 @@ export class ViewElement {
     this.root.classList.toggle("nm-nowrap", !info.wrap);
     this.linesEl.style.tabSize = String(Math.max(1, info.tab_width));
 
-    // A change of width re-wraps everything: measured heights are stale.
+    // A change of width re-wraps everything, and a change of faces can change
+    // every size: either way the measured heights are stale.
     const width = this.scroller.clientWidth;
-    if (width !== this.lastWidth) {
+    if (width !== this.lastWidth || this.seenStyle !== ViewElement.styleVersion) {
       this.lastWidth = width;
       h.invalidate();
+      if (this.seenStyle !== ViewElement.styleVersion) this.measureDefaults();
     }
 
     this.adoptScroll();
@@ -200,6 +260,11 @@ export class ViewElement {
     }
     model.topLine = Math.max(1, Math.min(model.topLine, model.lineCount));
 
+    if (this.mini) {
+      // A minibuffer is as tall as its text, between its minimum and maximum.
+      const lines = Math.max(this.minLines, Math.min(this.maxLines, model.lineCount));
+      this.scroller.style.height = `${lines * this.lineHeight}px`;
+    }
     const page = Math.max(1, this.scroller.clientHeight);
     // Lay out twice at most: measuring the lines can move them.
     for (let pass = 0; pass < 2; pass++) {
@@ -208,8 +273,12 @@ export class ViewElement {
       const firstVisible = model.topLine;
       const lastVisible = h.lineAt(scrollTop + page - 1).line;
       const margin = Math.max(10, lastVisible - firstVisible + 1);
-      const first = Math.max(model.first, firstVisible - margin);
-      const last = Math.min(model.last, lastVisible + margin);
+      let first = Math.max(model.first, firstVisible - margin);
+      let last = Math.min(model.last, lastVisible + margin);
+      if (this.extra && this.extra[1] - this.extra[0] < 1000) {
+        first = Math.max(model.first, Math.min(first, this.extra[0]));
+        last = Math.min(model.last, Math.max(last, this.extra[1]));
+      }
       this.syncLines(first, last);
       if (!this.measure()) break;
     }
@@ -217,7 +286,10 @@ export class ViewElement {
 
     const total = h.total;
     this.spacer.style.height = `${total}px`;
-    this.linesEl.style.transform = `translateY(${h.top(this.domFirst)}px)`;
+    const offset = `translateY(${h.top(this.domFirst)}px)`;
+    this.linesEl.style.transform = offset;
+    this.selectionLayer.style.transform = offset;
+    this.cursorLayer.style.transform = offset;
     const maxScroll = Math.max(0, total - page);
     const scrollTop = Math.min(maxScroll, h.top(model.topLine) + model.topOffset);
     if (Math.abs(this.scroller.scrollTop - scrollTop) > 0.5) {
@@ -227,8 +299,203 @@ export class ViewElement {
     }
     this.knownScrollTop = this.scroller.scrollTop;
 
-    this.renderModeline();
+    this.drawSelections();
+    if (!this.mini) this.renderModeline();
     this.report(scrollTop, page);
+  }
+
+  // -- selections and cursors (FRONTEND 5.5) ----------------------------------
+
+  private drawSelections(): void {
+    const model = this.model;
+    const geometry = this.geometry;
+    const origin = this.linesEl.getBoundingClientRect();
+    const selectionFace = this.frame.uiFaces["selection"] ?? 0;
+    const cursorFace = this.frame.uiFaces["cursor"] ?? 0;
+    const highlights: HTMLDivElement[] = [];
+    const box = (left: number, top: number, width: number, height: number, cls: string) => {
+      const el = document.createElement("div");
+      el.className = cls;
+      el.style.left = `${left - origin.left}px`;
+      el.style.top = `${top - origin.top}px`;
+      el.style.width = `${width}px`;
+      el.style.height = `${height}px`;
+      return el;
+    };
+
+    let shown = 0;
+    const dense = model.selections.length > 8;
+    model.selections.forEach((selection, index) => {
+      const [anchorLine, anchorOffset, headLine, headOffset] = selection;
+      const forward = anchorLine < headLine || (anchorLine === headLine && anchorOffset <= headOffset);
+      const [startLine, startOffset, endLine, endOffset] = forward
+        ? [anchorLine, anchorOffset, headLine, headOffset]
+        : [headLine, headOffset, anchorLine, anchorOffset];
+      // The selected text, a rectangle per piece of each row.
+      for (let n = Math.max(startLine, this.domFirst); n <= Math.min(endLine, this.domLast); n++) {
+        const from = n === startLine ? startOffset : 0;
+        const to = n === endLine ? endOffset : geometry.lineLength(n);
+        const a = geometry.caret(n, from);
+        const b = geometry.caret(n, to);
+        if (!a || !b) continue;
+        if (to > from) {
+          const bands = geometry.bands(n);
+          const first = geometry.bandOf(bands, a);
+          const last = geometry.bandOf(bands, b);
+          const content = this.lineElement(n)?.querySelector(".nm-content")?.getBoundingClientRect();
+          for (let i = first; i <= last; i++) {
+            const band = bands[i];
+            if (!band || !content) continue;
+            const left = i === first ? a.left : content.left;
+            const right = i === last ? b.left : content.right;
+            highlights.push(box(left, band.top, Math.max(0, right - left), band.bottom - band.top, `nm-selection f${selectionFace}`));
+          }
+        }
+        if (n < endLine) {
+          // The line break is selected too: show it as a sliver at the end of the line.
+          highlights.push(box(b.left, b.top, this.charWidth * 0.6, b.bottom - b.top, `nm-selection f${selectionFace}`));
+        }
+      }
+      // The cursor, at the head.
+      const caret = headLine >= this.domFirst && headLine <= this.domLast ? geometry.caret(headLine, headOffset) : null;
+      if (!caret) return;
+      let el = this.cursorEls[shown];
+      if (!el) {
+        el = document.createElement("div");
+        this.cursorEls[shown] = el;
+        this.cursorLayer.append(el);
+      }
+      shown += 1;
+      const shape = this.focused ? model.shape : "hollow";
+      const primary = index === model.primary;
+      el.className = `nm-cursor nm-cursor-${shape} f${cursorFace}${primary ? " nm-primary" : ""}${this.focused ? " nm-blink" : ""}`;
+      const x = caret.left - origin.left;
+      const y = caret.top - origin.top;
+      const width = shape === "bar" ? 2 : caret.width || this.charWidth;
+      el.style.width = `${width}px`;
+      el.style.height = `${caret.bottom - caret.top}px`;
+      if (primary) {
+        // Glide, unless that would read as lag (FRONTEND F12).
+        const far = this.lastCursor !== null && Math.abs(y - this.lastCursor.y) > this.scroller.clientHeight;
+        const relaid = this.drawnDomFirst !== this.domFirst;
+        const still = !ViewElement.cursorAnimation || dense || far || relaid || this.repeating || this.lastCursor === null;
+        this.cursorLayer.classList.toggle("nm-no-anim", still);
+        this.lastCursor = { x, y };
+      }
+      el.style.transform = `translate(${x}px, ${y}px)`;
+    });
+    for (const el of this.cursorEls.splice(shown)) el.remove();
+    this.selectionLayer.replaceChildren(...highlights);
+    this.drawnDomFirst = this.domFirst;
+    if (!this.preeditEl.hidden) this.placePreedit();
+  }
+
+  /** The primary cursor's rectangle in client coordinates, for the input method. */
+  cursorRect(): DOMRect | null {
+    const el = this.cursorLayer.querySelector(".nm-primary");
+    return el ? el.getBoundingClientRect() : null;
+  }
+
+  /** Show text an input method is composing, at the primary cursor.  Empty hides it. */
+  setPreedit(text: string): void {
+    this.preeditEl.hidden = text.length === 0;
+    this.preeditEl.textContent = text;
+    this.placePreedit();
+  }
+
+  private placePreedit(): void {
+    const selection = this.model.selections[this.model.primary];
+    const caret = selection ? this.geometry.caret(selection[2], selection[3]) : null;
+    if (!caret) return;
+    const origin = this.linesEl.getBoundingClientRect();
+    this.preeditEl.style.transform = `translate(${caret.left - origin.left}px, ${caret.top - origin.top}px)`;
+  }
+
+  // -- for geometry requests ----------------------------------------------------
+
+  static cursorAnimation = true;
+
+  lineElement(line: number): HTMLDivElement | null {
+    const held = this.model.line(line);
+    const el = held ? this.elements.get(held) : undefined;
+    return el && el.isConnected ? el : null;
+  }
+
+  /** Whole rows that fit in the view, less one: what a page motion moves by. */
+  pageRows(): number {
+    return Math.max(1, Math.floor(this.scroller.clientHeight / this.lineHeight) - 1);
+  }
+
+  /** Scroll by a number of rows of the default height. */
+  scrollRows(rows: number): void {
+    this.scroller.scrollTop += rows * this.lineHeight;
+    this.adoptScroll();
+  }
+
+  /** Called when a batch from the engine has been applied to the model. */
+  batchApplied(): void {
+    for (const waiter of this.batchWaiters.splice(0)) waiter();
+  }
+
+  /**
+   * Make sure lines `first` to `last` are held and laid out, asking the engine
+   * for them if need be.  Throws if they have not arrived within 250 ms; the
+   * engine then falls back to motion by logical line (FRONTEND 7).
+   */
+  async ensureLines(first: number, last: number): Promise<void> {
+    const deadline = performance.now() + 250;
+    first = Math.max(1, first);
+    last = Math.min(this.model.lineCount, last);
+    for (;;) {
+      let held = true;
+      for (let n = first; n <= last; n++) if (!this.model.line(n)) held = false;
+      if (held) {
+        let laidOut = true;
+        for (let n = first; n <= last; n++) if (!this.lineElement(n)) laidOut = false;
+        if (!laidOut) {
+          this.extra = this.extra ? [Math.min(this.extra[0], first), Math.max(this.extra[1], last)] : [first, last];
+          this.render();
+        }
+        return;
+      }
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) throw new Error(`lines ${first} to ${last} are not available`);
+      const page = Math.max(1, Math.round(this.scroller.clientHeight / this.heights.estimate));
+      this.reported = null; // the next render reports the real viewport again
+      this.onViewport([first, last, page]);
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, remaining);
+        this.batchWaiters.push(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+  }
+
+  /** A geometry request has been answered: its extra lines need not stay laid out. */
+  endGeometry(): void {
+    this.extra = null;
+  }
+
+  viewportInfo(): { first: number; last: number; page_lines: number } {
+    const scrollTop = this.scroller.scrollTop;
+    const page = Math.max(1, this.scroller.clientHeight);
+    return {
+      first: this.lineAtScroll(scrollTop).line,
+      last: this.heights.lineAt(scrollTop + page - 1).line,
+      page_lines: Math.max(1, Math.floor(page / this.lineHeight)),
+    };
+  }
+
+  metrics(): { charWidth: number; lineHeight: number; rows: number; contentWidth: number } {
+    const content = this.linesEl.querySelector<HTMLElement>(".nm-content");
+    return {
+      charWidth: this.charWidth,
+      lineHeight: this.lineHeight,
+      rows: Math.floor(this.scroller.clientHeight / this.lineHeight),
+      contentWidth: content ? content.getBoundingClientRect().width : this.scroller.clientWidth,
+    };
   }
 
   private syncLines(first: number, last: number): void {
@@ -358,6 +625,9 @@ export class ViewElement {
       firstVisibleText: firstEl?.querySelector(".nm-content")?.textContent ?? null,
       firstVisibleY: firstEl ? firstEl.getBoundingClientRect().top - scrollerTop : null,
       modeline: this.modelineEl.textContent,
+      cursors: this.cursorEls.length,
+      selections: this.selectionLayer.childElementCount,
+      cursorAnimated: !this.cursorLayer.classList.contains("nm-no-anim"),
     };
   }
 }

@@ -18,7 +18,7 @@ from typing import Any
 from neomacs.frontends.model import FrameModel, ViewModel
 from neomacs.frontends.monolayout import MonoView
 from neomacs.rpc.api import PROTOCOL
-from neomacs.testing.client import Client
+from neomacs.testing.client import Client, NotReady
 
 
 class Session:
@@ -111,6 +111,7 @@ class Session:
             flushed = self.model.apply(params[0])
             self.batches += 1
             self._relayout()
+            self.client.retry_deferred()  # a question may have been waiting for these lines
             if self.auto_ack:
                 for seq in flushed:
                     self.client.notify("view.ack", seq)
@@ -176,15 +177,34 @@ class Session:
     def _mono(self, view_id: int) -> MonoView:
         return self.layout(self.model.view(view_id))
 
-    def _move(self, view: int, positions: list[list[Any]], unit: str, count: int) -> Any:
+    def _answer[T](self, view_id: int, compute: Callable[[MonoView], T]) -> T:
+        """Answer a geometry request, but only from lines that are held.
+
+        If the answer depended on a line this frontend does not hold, ask the
+        engine for it and raise NotReady; the request is tried again when the
+        next batch has been applied (FRONTEND 7).
+        """
         with self.lock:
-            result = self._mono(view).move(positions, unit, count)
+            mono = self._mono(view_id)
+            model = mono.model
+            top = (model.top_line, model.top_row)
+            mono.missing.clear()
+            result = compute(mono)
+            if mono.missing:
+                model.top_line, model.top_row = top  # undo any scrolling: it will be redone
+                first, last = min(mono.missing), max(mono.missing)
+                mono.missing.clear()
+                self._reported.pop(view_id, None)  # the real viewport is reported again after
+                self.client.notify("view.viewport", view_id, first, last, mono.height)
+                raise NotReady(f"lines {first} to {last}")
             self._report_viewports()
             return result
 
+    def _move(self, view: int, positions: list[list[Any]], unit: str, count: int) -> Any:
+        return self._answer(view, lambda mono: mono.move(positions, unit, count))
+
     def _line_edge(self, view: int, line: int, offset: int, which: str) -> Any:
-        with self.lock:
-            return self._mono(view).line_edge(line, offset, which)
+        return self._answer(view, lambda mono: mono.line_edge(line, offset, which))
 
     def _viewport(self, view: int) -> Any:
         with self.lock:
@@ -192,8 +212,7 @@ class Session:
             return {"first": first, "last": last, "page_lines": page}
 
     def _rect(self, view: int, line: int, offset: int) -> Any:
-        with self.lock:
-            return self._mono(view).rect(line, offset)
+        return self._answer(view, lambda mono: mono.rect(line, offset))
 
     def _clipboard_get(self, which: str, formats: list[str]) -> Any:
         return {"text": self.clipboard}

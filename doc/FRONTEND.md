@@ -1,6 +1,6 @@
 # Electron frontend design
 
-Status: draft 7, 2026-11-27. Stages F0 and F1 are implemented in `frontend/`. The decisions in
+Status: draft 8, 2026-11-27. Stages F0 to F2 are implemented in `frontend/`. The decisions in
 section 2 are confirmed.
 
 This describes the Electron frontend of `neomacs`. It is the client side of the
@@ -260,17 +260,47 @@ The engine snaps whatever is reported to a grapheme cluster boundary
 | Request | How it is answered |
 |---|---|
 | `layout.move(view, positions, "visual_line", count)` | For each position: take its caret rectangle; step `count` visual rows using the rows' own rectangles, crossing into neighbouring logical lines as needed; hit-test at the goal x on the destination row. Returns position and goal x. |
-| `layout.move(…, "page", count)` | Scroll by `count` viewport heights, then hit-test at the goal x on the row at the same distance from the top as before. |
+| `layout.move(…, "page", count)` | A page is the number of whole rows of the default face that fit in the view, less one. Scroll by `count` pages, then move each position that many visual rows, as for `visual_line`. |
 | `layout.line_edge(view, line, offset, which)` | First or last position on the visual row containing the caret rectangle. |
 | `layout.viewport(view)` | From the height index and scroll offset. |
-| `layout.rect(view, line, offset)` | The caret rectangle in view coordinates. |
+| `layout.rect(view, line, offset)` | In view coordinates: the character's left edge and width, and the top and height of the visual row it is on. |
 
-If answering needs a line that is not held, the renderer scrolls or extends
-its viewport report, waits for the `lines` event, and then answers. The
-engine can send lines while a command is awaiting the reply, because view
-updates do not depend on the command lane. If the line has not arrived
-within 250 ms the renderer replies with an error and the engine falls back to
-motion by logical line.
+If answering needs a line that is not held, the renderer reports a viewport
+that covers it, waits for the `lines` event, and then answers. The engine
+can send lines while a command is awaiting the reply, because view updates
+do not depend on the command lane. If the line has not arrived within 250 ms
+the renderer replies with an error and the engine falls back to motion by
+logical line. The reference terminal frontend does the same.
+
+**As built.**
+
+- Answers come from the rectangles of laid-out text (`Range.getClientRects`),
+  never from hit-testing a point. Hit-testing only works for points that are
+  on screen, and a cursor moving down from the last visible row is asking
+  about a row that is laid out but out of sight. A visual row is found by
+  grouping a line's rectangles by vertical overlap, so text of several sizes
+  on one row is one row. The position at an x-coordinate is found by binary
+  search over offsets, first for the row and then within it.
+- That search assumes a larger offset is further right along a row. It is
+  wrong for bidirectional text, which is not handled yet.
+- The goal x is in pixels from the left edge of the line's text. It means
+  "the character that contains this x", so a cursor can sit up to one
+  character's width left of the goal.
+- A view measures a row and a character of the default face when it is
+  created and again whenever a face is defined, and discards its measured
+  line heights then. Without that, a theme change left the page size and
+  column count stale.
+- Asking about a line far from the viewport makes the engine drop the lines
+  it had sent and send those; the next render reports the real viewport and
+  gets the first lot back. Correct, but two round trips of churn. A request
+  for specific lines that does not move the held range would avoid it.
+- Not tested in Electron: the 250 ms give-up. It is tested in the reference
+  frontend.
+- Compared with the reference monospace layout, all answers agree when the
+  face is monospaced and the wrapped lines have no break opportunities
+  (`python -m neomacs.tools.geometry_check`, run by `npm run smoke`). With
+  spaces in a wrapped line they differ by design: the browser wraps at
+  words, the reference at the column.
 
 ## 8. Input
 

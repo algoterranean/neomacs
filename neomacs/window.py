@@ -697,7 +697,14 @@ class Frame:
         self._update(force=True)
         conn = self.conn
         assert conn is not None
-        return await conn.request(method, *params, timeout=timeout)
+        times = self.editor.request_times
+        if times is None:
+            return await conn.request(method, *params, timeout=timeout)
+        started = time.perf_counter()
+        try:
+            return await conn.request(method, *params, timeout=timeout)
+        finally:
+            times.append(time.perf_counter() - started)
 
     # -- attachment ---------------------------------------------------------
 

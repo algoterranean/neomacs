@@ -244,6 +244,244 @@ export async function runSmoke(
       { before: [beforeReload.firstVisibleText, beforeReload.visible], after: [afterReload.view?.firstVisibleText, afterReload.view?.visible], resetsBefore },
     );
 
+    // ---------------------------------------------------------------------------
+    // Step 6 (F2): keys, cursors and selections, prompts, input-method text.
+    // Keys are real key events delivered to the page by Chromium.
+    const contents = state.window.webContents;
+    contents.focus();
+    await js<void>("document.getElementById('root').focus()");
+    const press = (keyCode: string, modifiers: ("shift" | "control" | "alt" | "meta")[] = []) => {
+      contents.sendInputEvent({ type: "keyDown", keyCode, modifiers });
+      contents.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+    };
+    const type = (text: string) => {
+      for (const ch of text) press(ch === " " ? "Space" : ch);
+    };
+    const pyText = async (expr: string) => (await control.eval(expr)) as string;
+    // A value from the engine as JSON, by way of base64 so no quoting can go wrong.
+    const pyJson = async <T>(expr: string): Promise<T> => {
+      const repr = (await control.eval(`__import__('base64').b64encode(__import__('json').dumps(${expr}).encode()).decode()`)) as string;
+      return JSON.parse(Buffer.from(repr.slice(1, -1), "base64").toString("utf8")) as T;
+    };
+    interface Ui {
+      focus: number | null;
+      mainView: number | null;
+      selections: [number, number, number, number][];
+      view: ViewSnapshot & { cursors: number; selections: number; cursorAnimated: boolean };
+      chrome: { prompt: string | null; promptText: string | null; popup: string[] | null; popupSelected: string | null; message: string; keys: string };
+      input: { keys: number; texts: number; editContext: boolean };
+      activeIsRoot: boolean;
+    }
+    const ui = () => js<Ui>("window.neomacsDebug.snapshot()");
+
+    await control.eval(`ed.faces.define('default', fg='#d4d4d4', bg='#1e1e1e')\n_k = ed.buffers.new('keys')\n${win}.show(_k)`);
+    await settle();
+    type("hello world");
+    await settle();
+    let u = await ui();
+    check("f2.focus_is_on_the_page", u.activeIsRoot && u.input.editContext, [u.activeIsRoot, u.input.editContext]);
+    check("f2.typing", (await pyText("_k.text")) === "'hello world'", [await pyText("_k.text"), u.input.keys]);
+    check("f2.cursor_drawn", u.view.cursors === 1, u.view.cursors);
+    press("Home");
+    press("f", ["alt"]);
+    await settle();
+    u = await ui();
+    check("f2.meta_key", JSON.stringify(u.selections) === "[[1,5,1,5]]", u.selections);
+    press("Right", ["shift"]);
+    press("Right", ["shift"]);
+    press("Right", ["shift"]);
+    await settle();
+    u = await ui();
+    check("f2.shift_selects_and_is_drawn", JSON.stringify(u.selections) === "[[1,5,1,8]]" && u.view.selections >= 1, [u.selections, u.view.selections]);
+    press("q", ["control"]);
+    await settle();
+    u = await ui();
+    check("f2.message_strip", u.chrome.message === "C-q is undefined", u.chrome.message);
+
+    // Several cursors.
+    await control.eval(`_k.replace(0, len(_k), 'aaa\\nbbb\\nccc'); ${win}.selections.set([(0, 0)])`);
+    await settle();
+    press("n", ["control", "alt"]);
+    press("n", ["control", "alt"]);
+    type("xy");
+    await settle();
+    u = await ui();
+    check("f2.three_cursors_edit_three_places", (await pyText("_k.text")) === "'xyaaa\\nxybbb\\nxyccc'" && u.view.cursors === 3, [await pyText("_k.text"), u.view.cursors]);
+    check("f2.cursor_glides", u.view.cursorAnimated, u.view.cursorAnimated);
+    await control.eval(`_k.replace(0, len(_k), '\\n'.join('line' for _ in range(12))); ${win}.selections.set([(n * 5, n * 5) for n in range(12)])`);
+    await settle();
+    press("Right");
+    await settle();
+    u = await ui();
+    check("f2.many_cursors_do_not_animate", u.view.cursors === 12 && !u.view.cursorAnimated, [u.view.cursors, u.view.cursorAnimated]);
+    press("g", ["control"]);
+    await settle();
+
+    // A prompt with completion, then the prompt of the command it ran.
+    press("x", ["alt"]);
+    await settle();
+    u = await ui();
+    check("f2.prompt_opens", u.chrome.prompt === "M-x " && (u.chrome.popup?.length ?? 0) > 10 && u.focus !== u.mainView, [u.chrome.prompt, u.chrome.popup?.length]);
+    type("goto");
+    await settle();
+    u = await ui();
+    check("f2.completion_narrows", JSON.stringify(u.chrome.popup) === '["goto_line"]' && u.chrome.promptText === "goto", [u.chrome.popup, u.chrome.promptText]);
+    press("Return");
+    await settle();
+    u = await ui();
+    check("f2.nested_prompt", u.chrome.prompt === "Go to line: " && u.chrome.popup === null, [u.chrome.prompt, u.chrome.popup]);
+    type("7");
+    press("Return");
+    await settle();
+    u = await ui();
+    check("f2.prompt_answered", u.chrome.prompt === null && JSON.stringify(u.selections) === "[[7,0,7,0]]" && u.focus === u.mainView, [u.chrome.prompt, u.selections]);
+
+    // Text committed through the EditContext, as an input method would.
+    await contents.insertText("日本語");
+    await settle();
+    u = await ui();
+    check("f2.committed_text", (await pyText("_k.line_text(7)")) === "'日本語line'" && u.input.texts >= 1, [await pyText("_k.line_text(7)"), u.input.texts]);
+
+    // Visual-line motion in wrapped proportional text, across lines of different sizes.
+    await control.eval(
+      `ed.faces.define('default', family='Helvetica Neue', fg='#d4d4d4', bg='#1e1e1e')\n` +
+        `_words = ' '.join(['the quick brown fox jumps over the lazy dog'] * 12)\n` +
+        `_m = ed.buffers.new('mixed', '\\n'.join([_words] * 8))\n` +
+        `${win}.show(_m)\n` +
+        `for _n in (2, 4, 6):\n    _m.layer('h').add(_m.line_start(_n), _m.line_end(_n), face='heading-1')\n` +
+        `${win}.selections.set([(40, 40)])`,
+    );
+    await settle();
+    interface CursorX { x: number; line: number; offset: number; height: number }
+    const cursorX = () => js<CursorX | null>("window.neomacsDebug.cursorX()");
+    const start = await cursorX();
+    press("Down");
+    await settle();
+    const oneDown = await cursorX();
+    check(
+      "f2.visual_line_motion_in_a_wrapped_line",
+      start !== null && oneDown !== null && oneDown.line === 1 && oneDown.offset > start.offset + 20 && Math.abs(oneDown.x - start.x) <= 24,
+      { start, oneDown },
+    );
+
+    // Gate C2: the horizontal goal survives rows of different heights and fonts.
+    const walk: CursorX[] = [];
+    for (let i = 0; i < 24; i++) {
+      press("Down");
+      await settle();
+      const c = await cursorX();
+      if (c) walk.push(c);
+    }
+    const heights = new Set(walk.map((c) => Math.round(c.height)));
+    const worstDrift = start ? Math.max(...walk.map((c) => Math.abs(c.x - start.x))) : Infinity;
+    check("gateC.rows_differ_in_height", heights.size >= 2 && Math.max(...heights) > 1.4 * Math.min(...heights), [...heights]);
+    check("gateC.goal_kept_going_down", walk.length === 24 && new Set(walk.map((c) => c.line)).size >= 4 && worstDrift <= 24, { worstDrift, lines: [...new Set(walk.map((c) => c.line))] });
+    for (let i = 0; i < 25; i++) press("Up");
+    await settle();
+    const back = await cursorX();
+    check("gateC.goal_kept_coming_back", start !== null && back !== null && back.line === start.line && back.offset === start.offset, { start, back });
+
+    // Gate C3: what a vertical motion costs, from the key arriving at the engine
+    // to its redraw leaving, including the round trip to this frontend.
+    await control.eval("ed.latency = []; ed.request_times = []");
+    for (let i = 0; i < 240; i++) {
+      press(Math.floor(i / 12) % 2 === 0 ? "Down" : "Up");
+      await control.call("engine.idle", 10);
+    }
+    const timings = await pyJson<[number[], number[]]>("[ed.latency, ed.request_times]");
+    await control.eval("ed.latency = None; ed.request_times = None");
+    const stats = (seconds: number[]) => {
+      const ms = seconds.map((s) => s * 1000).sort((a, b) => a - b);
+      const at = (q: number) => Math.round((ms[Math.min(ms.length - 1, Math.floor(q * ms.length))] ?? 0) * 100) / 100;
+      return { n: ms.length, p50: at(0.5), p90: at(0.9), p99: at(0.99), max: at(1) };
+    };
+    const keyToFlush = stats(timings[0]);
+    const roundTrip = stats(timings[1]);
+    results["gateC.round_trip_ms"] = roundTrip;
+    check("gateC.vertical_motion_within_budget", keyToFlush.n >= 200 && roundTrip.n >= 200 && keyToFlush.p99 < 5, keyToFlush);
+
+    // Gate C1: with a monospaced face and ASCII text, every answer equals the reference layout's.
+    await control.eval(
+      `ed.faces.define('default', fg='#d4d4d4', bg='#1e1e1e')\n` +
+        `from neomacs.tools import geometry_check as _gc\n` +
+        `_g = ed.buffers.new('geometry', _gc.sample_text())\n${win}.show(_g)\n_geo = None`,
+    );
+    await settle();
+    const metrics = await js<{ charWidth: number; lineHeight: number; rows: number; contentWidth: number }>("window.neomacsDebug.metrics()");
+    const gutterPx = await js<number>(
+      "document.querySelector('.nm-line .nm-content').getBoundingClientRect().left - document.querySelector('.nm-scroller').getBoundingClientRect().left",
+    );
+    const cols = Math.floor(metrics.contentWidth / metrics.charWidth + 1e-6);
+    await control.eval(
+      `import asyncio\n` +
+        `async def _run_geo():\n` +
+        `    global _geo\n` +
+        `    try:\n` +
+        `        _geo = await _gc.compare(ed.frames[${frame}], ${cols}, ${metrics.rows}, ${metrics.charWidth}, ${metrics.lineHeight}, ${gutterPx})\n` +
+        `    except Exception as exc:\n` +
+        `        _geo = {'error': repr(exc)}\n` +
+        `ed.start_task(_run_geo())`,
+    );
+    interface Geo { error?: string; total?: number; mismatched?: number; checked?: Record<string, number>; mismatches?: unknown[] }
+    const waitForGeo = async (): Promise<Geo | null> => {
+      for (let i = 0; i < 900; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const found = await pyJson<Geo | null>("_geo");
+        if (found !== null) return found;
+      }
+      return null;
+    };
+    const geo = await waitForGeo();
+    results["gateC.geometry_metrics"] = { ...metrics, cols, gutterPx };
+    check(
+      "gateC.answers_equal_the_reference",
+      geo !== null && geo.error === undefined && (geo.total ?? 0) > 1000 && geo.mismatched === 0,
+      geo === null ? "no result" : { total: geo.total, mismatched: geo.mismatched, checked: geo.checked, error: geo.error, first: geo.mismatches?.slice(0, 6) },
+    );
+
+    // A geometry question about a line the frontend does not hold: it has to
+    // fetch the line, answer, and leave the view where it was.
+    await control.eval(`${win}.show(_big); ${win}.reveal(_big.line_start(200), 'top')`);
+    await settle();
+    const beforeFar = await view();
+    await control.eval(
+      `_far = None\n` +
+        // Two short lines in a row, far from anything the frontend holds.
+        `_far_line = next(n for n in range(60000, 60100) if len(_big.line_text(n)) < 30 and len(_big.line_text(n + 1)) < 30)\n` +
+        `async def _ask_far():\n` +
+        `    global _far\n` +
+        `    try:\n` +
+        `        _far = await ed.frames[${frame}].request('layout.move', ${win}.id, [[_far_line, 0, None]], 'visual_line', 1, timeout=5)\n` +
+        `    except Exception as exc:\n` +
+        `        _far = repr(exc)\n` +
+        `ed.start_task(_ask_far())`,
+    );
+    let far: unknown = null;
+    for (let i = 0; i < 60 && far === null; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      far = await pyJson<unknown>("_far");
+    }
+    await settle();
+    const afterFar = await view();
+    const farLine = await pyJson<number>("_far_line");
+    check(
+      "f2.geometry_for_a_line_not_held",
+      JSON.stringify(far) === `[[${farLine + 1},0,0]]` && afterFar.visible[0] === beforeFar.visible[0] && afterFar.missingVisible === 0,
+      { far, farLine, held: beforeFar.held, visible: [beforeFar.visible, afterFar.visible] },
+    );
+
+    // Ten cursors moving a row at once: one request carries all of them.
+    await control.eval(`${win}.show(_m); ${win}.selections.set([(n * 37 + 5, n * 37 + 5) for n in range(10)])`);
+    await settle();
+    await control.eval("ed.latency = []; ed.request_times = []");
+    for (let i = 0; i < 60; i++) {
+      press(Math.floor(i / 6) % 2 === 0 ? "Down" : "Up");
+      await control.call("engine.idle", 10);
+    }
+    const many = await pyJson<[number[], number[]]>("[ed.latency, ed.request_times]");
+    await control.eval("ed.latency = None; ed.request_times = None");
+    results["gateC.ten_cursors_ms"] = { keyToFlush: stats(many[0]), roundTrip: stats(many[1]) };
+
     // Security: hostile text is shown as text.
     await control.eval(
       `_evil = ed.buffers.new('evil', '<img src=x onerror="window.__pwned=1">\\n<script>window.__pwned=2</script>\\n` +
