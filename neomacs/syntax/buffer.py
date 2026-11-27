@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from neomacs.options import options
 from neomacs.stability import provisional
 from neomacs.syntax.scan import Scanner
 from neomacs.syntax.table import DEFAULT, Syntax
+from neomacs.syntax.tree import BufferTree
 
 if TYPE_CHECKING:
     from neomacs.text.buffer import Buffer
@@ -16,8 +18,53 @@ if TYPE_CHECKING:
 class BufferSyntax:
     def __init__(self, buffer: Buffer) -> None:
         self.buffer = buffer
-        self.tree: Any = None  # a parse tree, when a grammar is loaded (stage 6)
+        self._tree: BufferTree | None = None
+        self._tree_looked_for = False
         self._scanner: Scanner | None = None
+
+    @property
+    @provisional("0.1")
+    def tree(self) -> BufferTree | None:
+        """The parse tree, if the buffer's mode names a grammar that can be loaded."""
+        if not self._tree_looked_for:
+            self._tree_looked_for = True
+            grammar = getattr(self.buffer.mode, "grammar", None)
+            if grammar:
+                from neomacs.syntax import tree as tree_module
+
+                policy = str(self.buffer.options.get("tree_sitter", "auto"))
+                lang = tree_module.language(grammar, policy)
+                if lang is not None:
+                    self._tree = BufferTree(self.buffer, grammar, lang)
+                else:
+                    _note_once(
+                        f"No parse tree for {grammar} ({tree_module.failure(grammar)}); "
+                        "the syntax table is used instead"
+                    )
+        return self._tree
+
+    def reconsider_tree(self) -> None:
+        """The `tree_sitter` option changed: decide again whether to have a tree."""
+        if self._tree is not None:
+            self._tree.close()
+            self._tree = None
+        self._tree_looked_for = False
+        self.buffer.invalidate(0, len(self.buffer))
+
+    def close(self) -> None:
+        if self._tree is not None:
+            self._tree.close()
+            self._tree = None
+        if self._scanner is not None:
+            self.buffer.remove_listener(self._scanner._changed)  # pyright: ignore[reportPrivateUsage]
+
+    def _trusted_tree(self, start: int, end: int) -> BufferTree | None:
+        """The tree, if there is one and the code around [START, END) parsed.
+        While code is being typed it often has not, and the scanner answers."""
+        tree = self.tree
+        if tree is None or tree.ensure() is None or tree.broken_near(start, end):
+            return None
+        return tree
 
     @property
     @provisional("0.1")
@@ -80,10 +127,41 @@ class BufferSyntax:
     @provisional("0.1")
     def kind_at(self, pos: int) -> str:
         """ "code", "string" or "comment"."""
-        return self.scanner.kind_at(self.buffer.clamp(pos))
+        pos = self.buffer.clamp(pos)
+        tree = self._trusted_tree(pos, pos)
+        if tree is not None and pos < len(self.buffer):
+            node = tree.node_at(pos)
+            while node is not None:
+                if node.type == "comment":
+                    return "comment"
+                if node.type == "string" or node.type.startswith("string_"):
+                    return "string"
+                if node.type == "interpolation":
+                    return "code"
+                node = node.parent
+            return "code"
+        return self.scanner.kind_at(pos)
 
     @provisional("0.1")
     def matching_bracket(self, pos: int) -> int | None:
+        tree = self._trusted_tree(pos, pos) if 0 <= pos < len(self.buffer) else None
+        if tree is not None:
+            pairs = dict(self.table.brackets)
+            closers = {c: o for o, c in pairs.items()}
+            ch = self.buffer[pos]
+            node = tree.node_at(pos)
+            if node is not None and node.type == ch and node.parent is not None:
+                siblings = node.parent.children
+                if ch in pairs:
+                    partner = next((n for n in reversed(siblings) if n.type == pairs[ch]), None)
+                elif ch in closers:
+                    partner = next((n for n in siblings if n.type == closers[ch]), None)
+                else:
+                    partner = None
+                if partner is not None:
+                    return tree.pos(partner.start_byte)
+            if ch not in pairs and ch not in closers:
+                return None
         return self.scanner.matching_bracket(pos)
 
     @provisional("0.1")
@@ -91,6 +169,16 @@ class BufferSyntax:
         """The next larger range around [START, END): a bracket pair, then the
         line, then the paragraph."""
         buf = self.buffer
+        tree = self._trusted_tree(start, end)
+        if tree is not None:
+            a, b = tree.byte(start), tree.byte(end)
+            root = tree.ensure().root_node
+            node = root.named_descendant_for_byte_range(a, max(a, b))
+            while node is not None and tree.span(node) == (start, end):
+                node = node.parent
+            if node is not None and node.parent is not None:
+                return tree.span(node)
+            return (0, len(buf)) if (start, end) != (0, len(buf)) else None
         found = self.scanner.enclosing_brackets(start, end)
         if found is not None:
             return found
@@ -164,8 +252,15 @@ class BufferSyntax:
 
     @provisional("0.1")
     def indent_for(self, line: int) -> int | None:
-        """A suggested indentation for LINE: the previous line's, adjusted by bracket depth."""
+        """A suggested indentation for LINE: the mode's, or failing that the
+        previous line's, adjusted by bracket depth."""
         buf = self.buffer
+        mode = buf.mode
+        if mode is not None:
+            mode_class = cast(Any, type(mode))
+            wanted: int | None = mode_class.indent_for(buf, line)
+            if wanted is not None:
+                return wanted
         previous = line - 1
         while previous >= 1 and not buf.line_text(previous).strip():
             previous -= 1
@@ -186,5 +281,53 @@ class BufferSyntax:
 
     @provisional("0.1")
     def unit_at(self, pos: int, name: str) -> tuple[int, int] | None:
-        """The function, class or other named unit at POS.  None without a grammar."""
-        return None
+        """The innermost function, class or other named unit containing POS.
+        None without a grammar, or where the code does not parse."""
+        tree = self._trusted_tree(pos, pos)
+        if tree is None:
+            return None
+        end = min(len(self.buffer), pos + 1)
+        found = [
+            (a, b) for a, b, capture, _ in tree.captures("textobjects", pos, end)
+            if capture == name and a <= pos <= b
+        ]  # fmt: skip
+        if not found:
+            return None
+        start, stop = min(found, key=lambda r: r[1] - r[0])
+        # With its decorators, when it has them.
+        return min((r for r in found if r[1] == stop and r[0] <= start), key=lambda r: r[0])
+
+    @provisional("0.1")
+    def units(self, name: str, start: int, end: int) -> list[tuple[int, int]]:
+        """Every unit called NAME that intersects [START, END), outermost form
+        of each, in order.  Empty without a grammar."""
+        tree = self.tree
+        if tree is None or tree.ensure() is None:
+            return []
+        by_end: dict[int, int] = {}
+        for a, b, capture, _ in tree.captures("textobjects", start, end):
+            if capture == name:
+                by_end[b] = min(a, by_end.get(b, a))
+        return sorted((a, b) for b, a in by_end.items())
+
+
+def _note_once(text: str) -> None:
+    from neomacs.editor import _current  # pyright: ignore[reportPrivateUsage]
+
+    editor = _current.get(None)
+    if editor is not None:
+        editor.note_once(text)
+
+
+def _tree_option_changed(value: Any, buffer: Any = None) -> None:
+    from neomacs.editor import _current  # pyright: ignore[reportPrivateUsage]
+
+    editor = _current.get(None)
+    targets = [buffer] if buffer is not None else list(editor.buffers) if editor else []
+    for target in targets:
+        syntax = target.locals.get("_syntax")
+        if isinstance(syntax, BufferSyntax):
+            syntax.reconsider_tree()
+
+
+options["tree_sitter"].on_change.add(_tree_option_changed)

@@ -87,10 +87,12 @@ class ViewModel:
 class FrameModel:
     def __init__(self) -> None:
         self.faces: dict[int, dict[str, Any]] = {}
+        self.resources: dict[int, tuple[str, dict[str, Any]]] = {}
         self.ui_faces: dict[str, int] = {}
         self.layout: dict[str, Any] | None = None
         self.views: dict[int, ViewModel] = {}
         self.focus: int | None = None
+        self.last_window: int | None = None
         self.title = ""
         self.resets = 0
         # Minibuffers shown outside the text: view id -> (host, options).
@@ -115,12 +117,45 @@ class FrameModel:
                 return self.view(view_id), options
         return None
 
+    def windows(self) -> list[int]:
+        """The ids of the windows in the main area, in reading order."""
+        found: list[int] = []
+
+        def walk(node: list[Any]) -> None:
+            if node[0] == "win":
+                found.append(node[1])
+            else:
+                for child in node[4]:
+                    walk(child)
+
+        if self.layout is not None:
+            walk(self.layout["main"])
+        return found
+
+    def layout_views(self) -> set[int]:
+        """Every view the layout mentions: windows and the tabs of panels."""
+        found = set(self.windows())
+        if self.layout is not None:
+            for panel in self.layout.get("panels", []):
+                found.update(tab["view"] for tab in panel.get("tabs", []))
+        return found
+
     @property
     def main_view(self) -> ViewModel | None:
-        if self.layout is None:
+        """The window of the main area that has, or last had, the focus."""
+        windows = self.windows()
+        if not windows:
             return None
-        main = self.layout["main"]
-        return self.view(main[1]) if main[0] == "win" else None
+        if self.last_window not in windows:
+            self.last_window = windows[0]
+        return self.view(self.last_window)
+
+    def panel_of(self, view_id: int) -> dict[str, Any] | None:
+        if self.layout is not None:
+            for panel in self.layout.get("panels", []):
+                if any(tab["view"] == view_id for tab in panel.get("tabs", [])):
+                    return panel
+        return None
 
     def apply(self, events: list[list[Any]]) -> list[int]:
         """Apply one batch.  Returns the sequence numbers of the flushes in it."""
@@ -131,6 +166,7 @@ class FrameModel:
                 flushed.append(args[0])
             elif name == "reset":
                 self.faces.clear()
+                self.resources.clear()
                 self.ui_faces = {}
                 self.layout = None
                 self.views.clear()
@@ -141,14 +177,24 @@ class FrameModel:
                 self.resets += 1
             elif name == "face_define":
                 self.faces[args[0]] = args[1]
+            elif name == "resource_define":
+                self.resources[args[0]] = (args[1], args[2])
             elif name == "ui_faces":
                 self.ui_faces = args[0]
             elif name == "layout":
+                before = self.layout_views()
                 self.layout = args[0]
+                # A view that was in the layout and no longer is has been closed.
+                for gone in before - self.layout_views():
+                    self.views.pop(gone, None)
+                if self.focus in self.windows():
+                    self.last_window = self.focus
             elif name == "title":
                 self.title = args[0]
             elif name == "focus":
                 self.focus = args[0]
+                if self.focus in self.windows():
+                    self.last_window = self.focus
             elif name == "win_info":
                 self.view(args[0]).info = args[1]
             elif name == "held":

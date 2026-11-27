@@ -20,9 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def module_files() -> list[Path]:
     files = sorted((ROOT / "std").glob("*.py"))
-    files.append(ROOT / "modes.py")
-    if (ROOT / "modes").is_dir():
-        files.extend(sorted((ROOT / "modes").rglob("*.py")))
+    files.extend(sorted((ROOT / "modes").rglob("*.py")))
     return files
 
 

@@ -7,6 +7,8 @@ the first changed line on, so a question usually costs a scan of one line.
 
 from __future__ import annotations
 
+import functools
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -21,6 +23,7 @@ State = tuple[str, str]
 CODE: State = ("code", "")
 
 SEARCH_LINES = 5000  # how far a search for a matching bracket goes
+RESCAN_LINES = 20000  # how far past an edit the states of lines are compared at once
 
 
 @dataclass(slots=True)
@@ -30,50 +33,75 @@ class LineScan:
     end: State
 
 
+@functools.cache
+def _code_pattern(table: Syntax) -> re.Pattern[str] | None:
+    """Matches the next thing in code that the scanner cares about.  Where
+    two could start at one place the earlier alternative wins, so a comment
+    opener is preferred to a quote and a longer quote to a shorter one."""
+    parts: list[str] = []
+    if table.line_comment:
+        parts.append(table.line_comment)
+    if table.block_comment:
+        parts.append(table.block_comment[0])
+    parts.extend(sorted(table.quotes, key=len, reverse=True))
+    parts.extend(ch for pair in table.brackets for ch in pair)
+    return re.compile("|".join(re.escape(part) for part in parts)) if parts else None
+
+
+@functools.cache
+def _string_pattern(escape: str | None, closer: str) -> re.Pattern[str]:
+    """Matches the next escaped character, or the end of a string."""
+    if escape:
+        return re.compile(f"({re.escape(escape)}(?:.|$))|{re.escape(closer)}", re.DOTALL)
+    return re.compile(re.escape(closer))
+
+
 def scan_line(text: str, state: State, table: Syntax) -> LineScan:
     """Scan one line (without its newline) starting in STATE."""
     segments: list[tuple[int, int, str]] = []
     brackets: list[tuple[int, str]] = []
-    opens = {o for o, _ in table.brackets}
-    closes = {c for _, c in table.brackets}
+    code = _code_pattern(table)
+    quotes = set(table.quotes)
+    block_open = table.block_comment[0] if table.block_comment else None
     i, n = 0, len(text)
     kind, closer = state
     seg_start = 0
+    # Each turn of the loop jumps to the next character that matters, so a
+    # long line costs what it has in it, not its length.
     while i < n:
         if kind == "string":
-            if table.escape and text.startswith(table.escape, i):
-                i += len(table.escape) + 1
-                continue
-            if text.startswith(closer, i):
-                i += len(closer)
-                segments.append((seg_start, i, "string"))
-                kind, closer = "code", ""
-                continue
-            i += 1
+            pattern = _string_pattern(table.escape, closer)
+            found = pattern.search(text, i)
+            while found is not None and found.group(1 if table.escape else 0) and table.escape:
+                found = pattern.search(text, found.end())  # an escaped character: skip it
+            if found is None:
+                break
+            i = found.end()
+            segments.append((seg_start, i, "string"))
+            kind, closer = "code", ""
         elif kind == "comment":
-            if closer and text.startswith(closer, i):
-                i += len(closer)
-                segments.append((seg_start, i, "comment"))
-                kind, closer = "code", ""
-                continue
-            i += 1
+            at = text.find(closer, i) if closer else -1
+            if at == -1:
+                break
+            i = at + len(closer)
+            segments.append((seg_start, i, "comment"))
+            kind, closer = "code", ""
         else:
-            if table.line_comment and text.startswith(table.line_comment, i):
-                segments.append((i, n, "comment"))
+            found = code.search(text, i) if code is not None else None
+            if found is None:
+                break
+            token = found.group()
+            at = found.start()
+            if token == table.line_comment:
+                segments.append((at, n, "comment"))
                 return LineScan(segments, brackets, CODE)
-            if table.block_comment and text.startswith(table.block_comment[0], i):
-                kind, closer, seg_start = "comment", table.block_comment[1], i
-                i += len(table.block_comment[0])
-                continue
-            quote = next((q for q in table.quotes if text.startswith(q, i)), None)
-            if quote is not None:
-                kind, closer, seg_start = "string", quote, i
-                i += len(quote)
-                continue
-            ch = text[i]
-            if ch in opens or ch in closes:
-                brackets.append((i, ch))
-            i += 1
+            if token == block_open and table.block_comment is not None:
+                kind, closer, seg_start = "comment", table.block_comment[1], at
+            elif token in quotes:
+                kind, closer, seg_start = "string", token, at
+            else:
+                brackets.append((at, token))
+            i = found.end()
     if kind != "code":
         segments.append((seg_start, n, kind))
         # A string with a one-character delimiter does not run past its line.
@@ -91,9 +119,34 @@ class Scanner:
         buffer.add_listener(self._changed)
 
     def _changed(self, change: Change) -> None:
-        if change.text_changed:
-            del self._states[change.line :]
-            self._lines.clear()
+        if not change.text_changed:
+            return
+        self._lines.clear()
+        first = change.line  # the first line whose text changed
+        # The first line the change did not touch, as it was numbered and as
+        # it is now.  A change of whole lines leaves the line it ends on alone.
+        whole = 0 if change.whole_lines else 1
+        old_after = first + change.old_newlines + whole
+        new_after = first + change.new_newlines + whole
+        before = self._states[old_after - 1] if old_after <= len(self._states) else None
+        old_tail = self._states[old_after - 1 :]
+        del self._states[max(1, first - 1 + whole) :]
+        if before is None or new_after > self.buffer.line_count:
+            return
+        # Did the edit change what the following lines are inside (a string
+        # opened or closed, say)?  If so they look different though their text
+        # is the same, and whoever shows them has to be told.
+        last = None
+        for i in range(min(len(old_tail), RESCAN_LINES)):
+            number = new_after + i
+            if number > self.buffer.line_count:
+                break
+            if self.state_at(number) == old_tail[i]:
+                break
+            last = number
+        if last is not None:
+            through = last
+            self.buffer.after_notify(lambda: self.buffer.invalidate_lines(new_after, through))
 
     def state_at(self, line: int) -> State:
         """The state at the start of 1-based LINE."""

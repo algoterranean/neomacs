@@ -61,6 +61,7 @@ class Change:
     new_newlines: int
     text_changed: bool = True
     whole_lines: bool = False
+    removed: str = ""  # the text that was replaced
 
     @property
     def lines(self) -> tuple[int, int, int]:
@@ -98,6 +99,13 @@ class Buffer:
         self.project_values: dict[str, Any] = {}
         # Applied to all inserted text; a single-line minibuffer uses it to keep newlines out.
         self.text_filter: Callable[[str], str] | None = None
+        # Work that listeners asked to be done once every listener has heard
+        # about the change in hand.
+        self._after_notify: list[Callable[[], None]] = []
+        self.in_notify = False  # listeners are being told about a change
+        # Called by a view before it works out what to send (a parse tree
+        # catches up with the text here).
+        self.display_preparers: list[Callable[[], None]] = []
         self.undo = UndoLog(self)
         # How the text is written back to its file.
         self.encoding = "utf-8"
@@ -265,10 +273,88 @@ class Buffer:
             removed.count("\n"),
             text.count("\n"),
             whole_lines=whole_lines,
+            removed=removed,
         )
-        for listener in tuple(self._listeners):
-            listener(change)
+        self.in_notify = True
+        try:
+            for listener in tuple(self._listeners):
+                listener(change)
+        finally:
+            self.in_notify = False
+        self.run_after_notify()
         after_change.run(self, start, end, start + inserted, buffer=self)
+
+    def after_notify(self, fn: Callable[[], None]) -> None:
+        """Call FN once every listener has been told about the change being
+        announced.  A listener that wants to announce something itself (that
+        more lines need redisplay, say) must wait until then, or the others
+        would hear the two out of order."""
+        self._after_notify.append(fn)
+
+    def run_after_notify(self) -> None:
+        while self._after_notify:
+            pending, self._after_notify = self._after_notify, []
+            for fn in pending:
+                fn()
+
+    # -- modes (ENGINE 7.3) ------------------------------------------------------
+
+    @provisional("0.1")
+    def set_mode(self, mode: Any) -> Any:
+        """Make MODE, a mode class or the name of one, this buffer's major mode."""
+        from neomacs import modes
+        from neomacs.hooks import mode_enabled
+        from neomacs.live.patch import kept
+
+        cls = modes.lookup(mode) if isinstance(mode, str) else kept(mode)
+        if cls is None:
+            raise KeyError(f"no mode called {mode}")
+        old = self.mode
+        if old is not None:
+            if type(old) is cls:
+                return old
+            old.disable(self)
+        instance = cls()
+        instance.buffer = self
+        self.mode = instance
+        # Another table and perhaps another grammar: the scanner and the tree start again.
+        syntax = self.locals.pop("_syntax", None)
+        if syntax is not None:
+            syntax.close()
+        instance.enable(self)
+        mode_enabled.run(self, instance, buffer=self)
+        self.invalidate(0, len(self))
+        return instance
+
+    @provisional("0.1")
+    def minor(self, mode: Any) -> Any:
+        """This buffer's instance of the minor mode MODE, or None if it is off."""
+        from neomacs.live.patch import kept
+
+        mode = kept(mode)
+        return next((m for m in self.minor_modes if type(m) is mode), None)
+
+    @provisional("0.1")
+    def enable_minor(self, mode: Any) -> Any:
+        from neomacs.hooks import mode_enabled
+        from neomacs.live.patch import kept
+
+        existing = self.minor(mode)
+        if existing is not None:
+            return existing
+        instance = kept(mode)()
+        instance.buffer = self
+        self.minor_modes.append(instance)
+        instance.enable(self)
+        mode_enabled.run(self, instance, buffer=self)
+        return instance
+
+    @provisional("0.1")
+    def disable_minor(self, mode: Any) -> None:
+        instance = self.minor(mode)
+        if instance is not None:
+            self.minor_modes.remove(instance)
+            instance.disable(self)
 
     @provisional("0.1")
     def invalidate(self, start: int, end: int) -> None:
@@ -281,6 +367,13 @@ class Buffer:
         change = Change(start, end, end, line, newlines, newlines, text_changed=False)
         for listener in tuple(self._listeners):
             listener(change)
+
+    @provisional("0.1")
+    def invalidate_lines(self, first: int, last: int) -> None:
+        """Ask for lines FIRST to LAST to be redisplayed."""
+        last = min(last, self.line_count)
+        if first <= last:
+            self.invalidate(self.line_start(first), self.line_end(last))
 
     def add_listener(self, listener: Listener) -> None:
         if listener not in self._listeners:
@@ -517,6 +610,9 @@ class BufferList:
         buffer.encoding, buffer.bom, buffer.newline = encoding, bom, newline
         buffer.decode_fallback = fallback
         self._buffers[buffer.name] = buffer
+        from neomacs import modes
+
+        buffer.set_mode(modes.mode_for(resolved.name, text.split("\n", 1)[0]))
         buffer_created.run(buffer, buffer=buffer)
         return buffer
 

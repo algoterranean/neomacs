@@ -17,7 +17,6 @@ import tty
 from pathlib import Path
 from typing import Any
 
-from neomacs.frontends.monolayout import Row
 from neomacs.frontends.session import Session
 from neomacs.testing.client import Client
 
@@ -169,51 +168,30 @@ class Tui:
 
     # -- drawing ------------------------------------------------------------
 
-    def _row_text(self, row: Row | None, faces: dict[int, dict[str, Any]], width: int) -> str:
-        base = faces.get(0, {})
-        session = self.session
-        view = session.model.main_view
-        assert view is not None
-        layout = session.layout(view)
-        out: list[str] = [sgr({}, base)]
-        used = 0
-        if row is not None:
-            gutter = layout.gutter_text(row)
-            gutter_face = faces.get(session.model.ui_faces.get("gutter", 0), {})
-            out.append(sgr(gutter_face, base) + gutter)
-            used = len(gutter)
-            current: int | None = None
-            for cell in row.cells:
-                if used + cell.width > width:
-                    break
-                if cell.face != current:
-                    current = cell.face
-                    out.append(sgr(faces.get(cell.face, {}), base))
-                out.append(cell.text)
-                used += cell.width
-        out.append(sgr({}, base) + " " * max(0, width - used))
-        return "".join(out)
-
     def draw(self) -> None:
         session = self.session
         with session.lock:
-            view = session.model.main_view
-            if view is None:
+            if session.model.main_view is None:
                 return
             faces = session.model.faces
             base = faces.get(0, {})
-            layout = session.layout(view)
             width = session.cols
-            text_rows = session.text_rows
+            main_rows = session.main_rows
             out: list[str] = ["\x1b[?25l\x1b[H"]
-            for y, row in enumerate(layout.visible()):
-                out.append(f"\x1b[{y + 1};1H" + self._row_text(row, faces, width))
-            runs = view.modeline or []
-            modeline = "".join(str(run[1]) for run in runs)[:width].ljust(width)
-            face = faces.get(runs[0][2], {}) if runs else {}
-            out.append(f"\x1b[{text_rows + 1};1H" + sgr(face, base) + modeline + "\x1b[0m")
+            plain = sgr({}, base)
+            own = {-1: plain + "\x1b[7m", -2: plain + "\x1b[2m"}  # the active tab; other chrome
+            for y, cells in enumerate(session.compose()):
+                out.append(f"\x1b[{y + 1};1H")
+                current: int | None = None
+                for text, face in cells:
+                    if face != current:
+                        current = face
+                        style = own[face] if face < 0 else sgr(faces.get(face, {}), base)
+                        out.append("\x1b[0m" + style)
+                    out.append(text)
+            out.append("\x1b[0m")
 
-            # Under the modeline: the prompt, or the latest message.
+            # Under the main area: the prompt, or the latest message.
             prompt = session.model.prompt
             label = session.prompt_label()
             bottom: list[str] = []
@@ -226,37 +204,19 @@ class Tui:
                 bottom = [session.bottom_text()]
             for i in range(session.prompt_rows):
                 text = bottom[i] if i < len(bottom) else ""
-                out.append(
-                    f"\x1b[{text_rows + 2 + i};1H" + sgr({}, base) + text[:width].ljust(width)
-                )
+                out.append(f"\x1b[{main_rows + 1 + i};1H" + plain + text[:width].ljust(width))
 
-            # Completion candidates, drawn over the last text rows.
+            # Completion candidates, drawn over the last rows of the main area.
             popup = session.model.popup
             if popup is not None and popup["items"]:
-                items = popup["items"][: max(1, min(8, text_rows - 1))]
-                first_row = text_rows - len(items) + 1
+                items = popup["items"][: max(1, min(8, main_rows - 2))]
+                first_row = main_rows - len(items) + 1
                 for i, item in enumerate(items):
                     line = f" {item[0]}  {item[1]}"[:width].ljust(width)
                     style = "\x1b[7m" if i == popup["selected"] else ""
-                    out.append(
-                        f"\x1b[{first_row + i};1H" + sgr({}, base) + style + line + "\x1b[0m"
-                    )
+                    out.append(f"\x1b[{first_row + i};1H" + plain + style + line + "\x1b[0m")
 
-            cursor = None
-            focused = session.focused
-            if (
-                prompt is not None
-                and focused is not None
-                and focused is prompt[0]
-                and focused.selections
-            ):
-                sel = focused.selections[focused.primary]
-                cell = session.layout(focused).cursor_cell(sel[2], sel[3])
-                if cell is not None:
-                    cursor = (text_rows + 1 + cell[0], len(label) + cell[1])
-            elif view.selections:
-                sel = view.selections[view.primary]
-                cursor = layout.cursor_cell(sel[2], sel[3])
+            cursor = session.cursor_position()
             if cursor is not None:
                 out.append(f"\x1b[{cursor[0] + 1};{cursor[1] + 1}H\x1b[?25h")
         self.terminal.write("".join(out))

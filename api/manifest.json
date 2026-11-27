@@ -156,6 +156,20 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.display.resources.Resources",
+   "kind": "class",
+   "signature": "() -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.display.resources.Resources.image",
+   "kind": "method",
+   "signature": "(self, path: 'Path | str | None' = None, *, data: 'bytes | None' = None, mime: 'str | None' = None) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.editor.Editor",
    "kind": "class",
    "signature": "() -> 'None'",
@@ -208,6 +222,13 @@
    "name": "neomacs.editor.Editor.start_task",
    "kind": "method",
    "signature": "(self, coro: 'Coroutine[Any, Any, Any]', *, name: 'str | None' = None, frame: 'Frame | None' = None) -> 'TaskInfo'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.toggle_global_mode",
+   "kind": "method",
+   "signature": "(self, mode: 'Any', on: 'bool | None' = None) -> 'bool'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -459,14 +480,56 @@
   {
    "name": "neomacs.modes.FundamentalMode",
    "kind": "class",
-   "signature": "()",
+   "signature": "() -> 'None'",
    "tier": "provisional",
    "since": "0.1"
   },
   {
    "name": "neomacs.modes.Mode",
    "kind": "class",
-   "signature": "()",
+   "signature": "() -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.modes.Mode.disable",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.modes.Mode.enable",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.modes.ProgMode",
+   "kind": "class",
+   "signature": "() -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.modes.TextMode",
+   "kind": "class",
+   "signature": "() -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.modes.lookup",
+   "kind": "function",
+   "signature": "(name: 'str') -> 'type[Mode] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.modes.mode_for",
+   "kind": "function",
+   "signature": "(filename: 'str | None', first_line: 'str' = '') -> 'type[Mode]'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -558,6 +621,76 @@
    "name": "neomacs.ownership.Ownership.release",
    "kind": "method",
    "signature": "(self, owner: 'str', *, keep: 'set[tuple[str, Any]] | None' = None) -> 'list[tuple[str, Any]]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.panels.InPanel",
+   "kind": "class",
+   "signature": "(name: 'str', dock: 'str | None' = None, floating: 'Any' = None, transient: 'bool' = False, size: 'float' = 0.3) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.panels.Main",
+   "kind": "class",
+   "signature": "(split: 'str | None' = None) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.panels.Panel",
+   "kind": "class",
+   "signature": "(frame: 'Frame', name: 'str', *, mode: 'str' = 'docked', side: 'str' = 'bottom', anchor: 'Any' = 'center', transient: 'bool' = False, size: 'float' = 0.3) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.panels.Panel.activate",
+   "kind": "method",
+   "signature": "(self, view: 'View') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.panels.Panel.close",
+   "kind": "method",
+   "signature": "(self, view: 'View') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.panels.Panel.dock",
+   "kind": "method",
+   "signature": "(self, side: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.panels.Panel.float",
+   "kind": "method",
+   "signature": "(self, anchor: 'Any' = 'center') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.panels.Panel.hide",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.panels.Panel.reveal",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.panels.Panel.show",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer', *, focus: 'bool' = False) -> 'View'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -863,9 +996,23 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.syntax.buffer.BufferSyntax.tree",
+   "kind": "property",
+   "signature": "(self) -> 'BufferTree | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.syntax.buffer.BufferSyntax.unit_at",
    "kind": "method",
    "signature": "(self, pos: 'int', name: 'str') -> 'tuple[int, int] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.units",
+   "kind": "method",
+   "signature": "(self, name: 'str', start: 'int', end: 'int') -> 'list[tuple[int, int]]'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -947,6 +1094,20 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.text.buffer.Buffer.disable_minor",
+   "kind": "method",
+   "signature": "(self, mode: 'Any') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.enable_minor",
+   "kind": "method",
+   "signature": "(self, mode: 'Any') -> 'Any'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.text.buffer.Buffer.insert",
    "kind": "method",
    "signature": "(self, pos: 'int', text: 'str') -> 'None'",
@@ -957,6 +1118,13 @@
    "name": "neomacs.text.buffer.Buffer.invalidate",
    "kind": "method",
    "signature": "(self, start: 'int', end: 'int') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.invalidate_lines",
+   "kind": "method",
+   "signature": "(self, first: 'int', last: 'int') -> 'None'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -1024,6 +1192,13 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.text.buffer.Buffer.minor",
+   "kind": "method",
+   "signature": "(self, mode: 'Any') -> 'Any'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.text.buffer.Buffer.modified",
    "kind": "property",
    "signature": "(self) -> 'bool'",
@@ -1076,6 +1251,13 @@
    "name": "neomacs.text.buffer.Buffer.search",
    "kind": "method",
    "signature": "(self, pattern: 'str | re.Pattern[str]', start: 'int' = 0, end: 'int | None' = None, *, backward: 'bool' = False) -> 're.Match[str] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.set_mode",
+   "kind": "method",
+   "signature": "(self, mode: 'Any') -> 'Any'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -1402,6 +1584,13 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.window.Frame.delete_window",
+   "kind": "method",
+   "signature": "(self, window: 'Window') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.window.Frame.focus_view",
    "kind": "method",
    "signature": "(self, view: 'View') -> 'None'",
@@ -1447,6 +1636,27 @@
    "name": "neomacs.window.Frame.show_message",
    "kind": "method",
    "signature": "(self, text: 'str', kind: 'str' = 'info') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Frame.split",
+   "kind": "method",
+   "signature": "(self, window: 'Window', direction: 'str' = 'v', *, focus: 'bool' = True) -> 'Window'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Frame.views_in_order",
+   "kind": "method",
+   "signature": "(self) -> 'list[View]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Frame.windows",
+   "kind": "method",
+   "signature": "(self) -> 'list[Window]'",
    "tier": "provisional",
    "since": "0.1"
   },

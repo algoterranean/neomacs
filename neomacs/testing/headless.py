@@ -80,6 +80,28 @@ class HeadlessUI(Session):
             modeline = "".join(run[1] for run in (self.view.modeline or []))
             return [*rows, modeline, *self.bottom_rows()]
 
+    def grid(self) -> list[str]:
+        """Everything above the prompt rows as it would be drawn: windows with
+        their modelines, panels with their tab lines, floating boxes."""
+        return ["".join(text for text, _ in row).rstrip() for row in self.compose()]
+
+    def view_showing(self, title: str) -> ViewModel | None:
+        """The view whose buffer is called TITLE, if one is on show."""
+        with self.lock:
+            for view in self.model.views.values():
+                if view.info.get("name") == title:
+                    return view
+        return None
+
+    def panels(self) -> dict[str, dict[str, Any]]:
+        """The frame's panels by name, as the last layout described them."""
+        layout = self.model.layout or {}
+        return {panel["name"]: panel for panel in layout.get("panels", [])}
+
+    def lines_of(self, view: ViewModel) -> list[str]:
+        """The text of the lines a view holds."""
+        return ["".join(str(run[1]) for run in line[1] if len(run) == 3) for line in view.lines]
+
     def text_rows_shown(self) -> list[str]:
         """The text rows without trailing empty ones."""
         with self.lock:

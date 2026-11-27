@@ -114,6 +114,10 @@ def follow_link() -> None:
 @command
 def quit_window() -> None:
     """Leave this buffer and go back to the one shown before it."""
+    panel: Any = getattr(ed.view, "panel", None)
+    if panel is not None:
+        panel.close(ed.view)  # a tab of a panel: close it and go back to the text
+        return
     window = ed.window
     current = window.buffer
     previous = ed.buffers.get(current.locals.get("_shown_over", "")) if current.locals else None
@@ -133,6 +137,7 @@ class ReplMode(Mode):
     """A buffer in which each input is evaluated in the scratch module."""
 
     name = "repl"
+    interactive = False
     keymap = Keymap("repl")
 
 
@@ -156,9 +161,9 @@ def repl() -> None:
     buffer = ed.buffers.get("*repl*")
     if buffer is None:
         buffer = ed.buffers.new("*repl*", PROMPT)
-        buffer.mode = ReplMode()
+        buffer.set_mode(ReplMode)
         _input_starts()[buffer] = buffer.marker(len(buffer))
-    view = ed.show(buffer, focus=True)
+    view = ed.show(buffer, "repl", focus=True)
     view.selections.set([(len(buffer), len(buffer))])
 
 

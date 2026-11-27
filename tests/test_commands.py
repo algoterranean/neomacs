@@ -748,7 +748,7 @@ def test_messages_menu_and_new_frame(ui: HeadlessUI) -> None:
     assert ui.model.messages[-1] == ("careful", "warning")  # a log message is recorded, not shown
     assert ui.client.eval("ed.messages[-1]") == "'quiet'"
     menu = {item["label"]: item for item in ui.model.menu}
-    assert list(menu) == ["File", "Edit", "Tools", "Help"]
+    assert list(menu) == ["File", "Edit", "Tools", "View", "Help"]
     opened = menu["File"]["children"][0]
     assert opened == {"label": "Open…", "command": "files.find", "key": "s-o", "enabled": True}
     ui.eval("ed.menu.add('Tools/Mine', 'forward_word')")
@@ -762,9 +762,12 @@ def test_messages_menu_and_new_frame(ui: HeadlessUI) -> None:
 
 def test_show_by_role(ui: HeadlessUI) -> None:
     ui.eval("_h = ed.buffers.new('*help*', 'help text'); _v = ed.show(_h, role='help')")
-    assert ui.text_rows_shown() == [" 1 help text"]  # every role is in the main area for now
-    assert ui.client.eval("_v is ed.window") == "True"
-    ui.eval("ed.show(_b, focus=True); ed.buffers.kill(_h)")
+    side = ui.panels()["side"]
+    assert side["visible"] and side["side"] == "right" and side["tabs"][0]["title"] == "*help*"
+    assert ui.client.eval("(_v is ed.window, ed.frame.focus is ed.window)") == "(False, True)"
+    assert ui.lines_of(ui.model.view(side["active"])) == ["help text"]
+    ui.eval("_v.panel.close(_v); ed.buffers.kill(_h)")
+    assert not ui.panels()["side"]["visible"]
 
 
 def test_definitions_in_evaluated_code_are_owned_by_its_module(ui: HeadlessUI) -> None:

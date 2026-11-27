@@ -37,6 +37,7 @@ class DebugMode(Mode):
 
     name = "debug"
     minor = True
+    interactive = False
     keymap = Keymap("debug")
 
 
@@ -155,6 +156,9 @@ def entered(debugger: Debugger) -> None:
         # working on; that is put back when it resumes.
         frame.locals_before_pause = (frame.window, frame.window.buffer, frame.focus)
     show_frame(debugger)
+    stack = ed.buffers.get("*debug*")
+    if stack is not None and frame is not None and frame.id in ed.frames and frame.draws_panels:
+        ed.show(stack, "debug")  # the stack and variables, beside the source
 
 
 def left(debugger: Debugger) -> None:
@@ -248,7 +252,7 @@ def show() -> None:
     write_stack(debugger)
     buffer = ed.buffers.get("*debug*")
     assert buffer is not None
-    view = ed.show(buffer, "help", focus=True)
+    view = ed.show(buffer, "debug", focus=True)
     view.selections.set([(0, 0)])
 
 

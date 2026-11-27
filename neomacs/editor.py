@@ -97,9 +97,13 @@ class Editor:
         self.options = OptionView()
         self.commands = commands_module.commands
         self.buffers = BufferList(self)
-        self.buffers.new("*scratch*")
+        self.buffers.new("*scratch*").set_mode("python")
+        self.global_modes: list[Any] = []
         self.buffers.new("*messages*")
         self.faces = FaceTable()
+        from neomacs.display.resources import Resources
+
+        self.resources = Resources()
         self.faces.on_change.append(self.update_frames)
         self.frame_detach_timeout = 600.0
         self.main_dispatcher = Dispatcher(self)
@@ -316,20 +320,11 @@ class Editor:
 
     @provisional("0.1")
     def show(self, buffer: Buffer, role: str = "document", *, focus: bool = False) -> View:
-        """Show BUFFER where its ROLE belongs (ENGINE 8.5).
+        """Show BUFFER where its ROLE belongs: the `placement` option says
+        where that is (ENGINE 8.5).  The view gets the keyboard only if FOCUS."""
+        from neomacs import panels
 
-        Until panels exist every role is placed in the main area: a window
-        already showing the buffer is used, otherwise the current window.
-        """
-        frame = self._need_frame()
-        target: View = frame.window
-        if target.buffer is not buffer:
-            if role in ("help", "traceback"):
-                buffer.locals["_shown_over"] = target.buffer.name  # for quit_window
-            target.show(buffer)
-        if focus:
-            frame.focus_view(target)
-        return target
+        return panels.place(self._need_frame(), buffer, role, focus=focus)
 
     # -- tasks ----------------------------------------------------------------
 
@@ -450,6 +445,18 @@ class Editor:
             self.debugger.uninstall()
             _owner.release()
 
+    @provisional("0.1")
+    def toggle_global_mode(self, mode: Any, on: bool | None = None) -> bool:
+        """Turn a global minor mode on or off.  Returns whether it is on now."""
+        existing = next((m for m in self.global_modes if type(m) is mode), None)
+        want = existing is None if on is None else on
+        if want and existing is None:
+            self.global_modes.append(mode())
+        elif not want and existing is not None:
+            self.global_modes.remove(existing)
+        self.update_frames()
+        return want
+
     def _fill_scratch(self) -> None:
         """Give the scratch module the public API, so it need not be imported."""
         from neomacs import commands, completion, hooks, keymap, live, modes, options, selection
@@ -526,6 +533,7 @@ class _EdProxy:
 ed: Any = _EdProxy()
 
 # Importing these registers RPC methods, standard commands and default key bindings.
+from neomacs import panels as _panels  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
 from neomacs import std as _std  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
 from neomacs.debug import ui as _debug_ui  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
 from neomacs.rpc import ui as _ui  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]

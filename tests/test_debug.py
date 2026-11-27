@@ -115,8 +115,9 @@ def test_break_in_a_builtin_command_look_around_change_a_local_and_continue(ui: 
     ui.type("(n, sel.pos)")
     ui.keys("<return>")
     assert ui.message == "(4, 0)"
-    ui.keys("C-c", "s")
-    shown = value(ui, "_w.buffer.text")
+    # The stack and variables are in a panel beside the source, kept up to date.
+    assert ui.panels()["bottom"]["visible"] and value(ui, "_w.frame.focus is _w")
+    shown = value(ui, "ed.buffers.get('*debug*').text")
     assert shown.startswith(
         "Paused: breakpoint\n\nStack, innermost first:\n> forward_char  movement.py:"
     )

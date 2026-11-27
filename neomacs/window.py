@@ -251,6 +251,8 @@ class View:
             for run in line[1]:
                 if len(run) == 3:
                     self.frame.use_face(run[2])
+                elif "image" in run[1]:
+                    self.frame.use_resource(run[1]["image"])
             for mark in line[0].get("gutter", {}).values():
                 self.frame.use_face(mark[1])
             built.append(line)
@@ -259,6 +261,8 @@ class View:
     def sync(self, events: list[Any]) -> None:
         """Append the events that bring the frontend's copy of this view up to date."""
         buf = self.buffer
+        for prepare in tuple(buf.display_preparers):
+            prepare()
         count = buf.line_count
         info = self.info()
         if info != self._sent_info:
@@ -370,10 +374,35 @@ class Window(View):
         line, _ = buf.line_offset(self.cursor.pos)
         state = "*" if buf.modified else "-"
         text = f" {state} {buf.name}   L{line} C{self.cursor.column} "
+        mode = buf.mode
+        names = [mode.title()] if mode is not None and mode.name != "fundamental" else []
+        names += [m.title() for m in buf.minor_modes if m.name and m.name != "debug"]
+        if names:
+            text += f"  ({' '.join(names)}) "
         status = self.frame.editor.debugger.status
         if status:
             text += f"  [{status}] "
         return [[None, text, self.frame.editor.faces.id_for("modeline")]]
+
+
+class Split:
+    """A node of the window tree: its children side by side ("h") or one above
+    another ("v"), sharing the space in the given ratios."""
+
+    def __init__(self, direction: str, children: list[Any]) -> None:
+        self.id = next(_view_ids)
+        self.direction = direction
+        self.children: list[Any] = children
+        self.ratios: list[float] = [1 / len(children)] * len(children)
+
+    def describe(self) -> list[Any]:
+        return [
+            "split",
+            self.id,
+            self.direction,
+            [round(r, 4) for r in self.ratios],
+            [c.describe() if isinstance(c, Split) else ["win", c.id] for c in self.children],
+        ]
 
 
 @provisional("0.1")
@@ -391,6 +420,8 @@ class Frame:
         self.stalled = False
         self._faces_sent: set[int] = set()
         self._new_faces: list[int] = []
+        self._resources_sent: set[int] = set()
+        self._new_resources: list[int] = []
         self._faces_generation = -1
         self._seq = 0
         self._in_flight: set[int] = set()
@@ -428,6 +459,10 @@ class Frame:
             scratch = editor.buffers.new("*scratch*")
         self.window: Window = Window(self, scratch)
         self.focus: View = self.window
+        # The main area: a tree of splits whose leaves are windows (ENGINE 8.2).
+        self.root: Any = self.window
+        # Panels by name (ENGINE 8.5).
+        self.panels: dict[str, Any] = {}
         editor.frames[self.id] = self
         self.schedule_update()
 
@@ -442,14 +477,123 @@ class Frame:
 
     # -- focus, minibuffers, messages -----------------------------------------
 
+    @property
+    def draws_panels(self) -> bool:
+        """Whether the frontend said it draws panels and splits when it attached."""
+        return "panels" in self.capabilities
+
+    # -- the window tree (ENGINE 8.2) -------------------------------------------
+
+    @provisional("0.1")
+    def windows(self) -> list[Window]:
+        """The windows of the main area, in reading order."""
+        found: list[Window] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, Split):
+                for child in node.children:
+                    walk(child)
+            else:
+                found.append(node)
+
+        walk(self.root)
+        return found
+
+    def _parent_of(self, target: Any, node: Any = None) -> Split | None:
+        node = self.root if node is None else node
+        if isinstance(node, Split):
+            for child in node.children:
+                if child is target:
+                    return node
+                found = self._parent_of(target, child)
+                if found is not None:
+                    return found
+        return None
+
+    @provisional("0.1")
+    def split(self, window: Window, direction: str = "v", *, focus: bool = True) -> Window:
+        """Divide WINDOW in two, the new one below it ("v") or to its right
+        ("h"), showing the same buffer at the same place."""
+        if direction not in ("h", "v"):
+            raise ValueError(f"not a direction: {direction}")
+        new = Window(self, window.buffer)
+        new.selections.set(window.selections.ranges(), window.selections.primary_index)
+        new.viewport = window.viewport
+        parent = self._parent_of(window)
+        if parent is not None and parent.direction == direction:
+            # Another window in the same row or column: all of them share evenly.
+            parent.children.insert(parent.children.index(window) + 1, new)
+            parent.ratios = [1 / len(parent.children)] * len(parent.children)
+        else:
+            node = Split(direction, [window, new])
+            if parent is None:
+                self.root = node
+            else:
+                parent.children[parent.children.index(window)] = node
+        if focus:
+            self.focus_view(new)
+        self.schedule_update()
+        return new
+
+    @provisional("0.1")
+    def delete_window(self, window: Window) -> None:
+        """Remove WINDOW from the main area; its neighbours take its space."""
+        parent = self._parent_of(window)
+        if parent is None:
+            raise NoFrame("the only window cannot be removed")
+        index = parent.children.index(window)
+        parent.children.pop(index)
+        if len(parent.children) == 1:
+            # A split with one child left is replaced by that child.
+            only = parent.children[0]
+            above = self._parent_of(parent)
+            if above is None:
+                self.root = only
+            else:
+                above.children[above.children.index(parent)] = only
+        else:
+            parent.ratios = [1 / len(parent.children)] * len(parent.children)
+        remaining = self.windows()
+        neighbour = remaining[min(index, len(remaining) - 1)]
+        if self.window is window:
+            self.window = neighbour
+        if self.focus is window:
+            self.focus = neighbour
+            self._popup_dirty = True
+        window.close()
+        self.schedule_update()
+
+    @provisional("0.1")
+    def views_in_order(self) -> list[View]:
+        """The windows, then the active tab of each visible panel, which is
+        the order `other_view` steps through."""
+        found: list[View] = list(self.windows())
+        for panel in self.panels.values():
+            if panel.visible and panel.active is not None:
+                found.append(panel.active)
+        return found
+
+    def layout(self) -> dict[str, Any]:
+        root = self.root
+        main = root.describe() if isinstance(root, Split) else ["win", root.id]
+        return {"main": main, "panels": [p.describe() for p in self.panels.values()]}
+
     @provisional("0.1")
     def focus_view(self, view: View) -> None:
         """Give VIEW the keyboard."""
         if view.id not in self.views or view is self.focus:
             return
+        previous = self.focus
         self.focus = view
         if isinstance(view, Window):
             self.window = view
+        panel = getattr(view, "panel", None)
+        if panel is not None:
+            panel.active = view
+            panel.visible = True
+        left = getattr(previous, "panel", None)
+        if left is not None and left is not panel and left.transient:
+            left.visible = False  # a transient panel closes when focus leaves it
         from neomacs.hooks import window_changed
 
         window_changed.run(self)
@@ -622,6 +766,11 @@ class Frame:
         if self._stall_timer is None:
             self._stall_timer = loop.call_later(STALL_SECONDS, self._stall)
 
+    def use_resource(self, resource_id: int) -> None:
+        if resource_id not in self._resources_sent:
+            self._resources_sent.add(resource_id)
+            self._new_resources.append(resource_id)
+
     def use_face(self, face_id: int) -> None:
         if face_id not in self._faces_sent:
             self._faces_sent.add(face_id)
@@ -635,6 +784,7 @@ class Frame:
             self._pending_reset = False
             prefix.append(["reset"])
             self._faces_sent.clear()
+            self._resources_sent.clear()
             self._sent_layout = self._sent_title = self._sent_focus = None
             self._faces_generation = -1
             self._sent_minibuffers = {}
@@ -652,7 +802,7 @@ class Frame:
             ui_faces = {name: faces.id_for(name) for name in UI_FACES}
             for face_id in ui_faces.values():
                 self.use_face(face_id)
-        layout = {"main": ["win", self.window.id], "panels": []}
+        layout = self.layout()
         if layout != self._sent_layout:
             body.append(["layout", layout])
             self._sent_layout = layout
@@ -665,6 +815,11 @@ class Frame:
         if self.focus.id != self._sent_focus:
             body.append(["focus", self.focus.id])
             self._sent_focus = self.focus.id
+        for resource_id in self._new_resources:
+            described = self.editor.resources.describe(resource_id)
+            if described is not None:
+                prefix.append(["resource_define", resource_id, *described])
+        self._new_resources = []
         for face_id in self._new_faces:
             prefix.append(["face_define", face_id, faces.attrs(face_id)])
         self._new_faces = []

@@ -195,6 +195,35 @@ def interrupt(conn: Connection) -> None:
     by the time it is dispatched here there is nothing left to do."""
 
 
+@method("ui.panel")
+def panel(conn: Connection, panel: int, action: str, arg: Any = None) -> None:
+    """The user acted on a panel in the frontend: `activate_tab` or `close_tab`
+    (ARG is the tab's view), `hide`, `dock` (ARG is a side) or `float`.  The
+    engine stays the authority and answers with a new `layout`."""
+    frame = _frame(conn)
+    target = next((p for p in frame.panels.values() if p.id == panel), None)
+    if target is None:
+        raise RpcError(f"no such panel: {panel}")
+    if action in ("activate_tab", "close_tab"):
+        view = frame.views.get(int(arg))
+        if view is None or view not in target.tabs:
+            raise RpcError(f"panel {target.name} has no tab {arg}")
+        if action == "activate_tab":
+            target.activate(view)
+            frame.focus_view(view)
+        else:
+            target.close(view)
+    elif action == "hide":
+        target.hide()
+    elif action == "dock":
+        target.dock(str(arg))
+    elif action == "float":
+        target.float(arg or "center")
+    else:
+        raise RpcError(f"unknown panel action: {action}")
+    conn.editor.last_frame = frame
+
+
 class IdleRequest:
     """An `engine.idle` request that has not been answered.  The loop that
     took it may be frozen by the debugger before it can answer; the loop that
