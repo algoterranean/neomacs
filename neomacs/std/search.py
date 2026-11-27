@@ -169,6 +169,7 @@ async def _search(direction: int) -> None:
                 end = buffer.syntax.next_word_end(at)
                 pattern += buffer[at:end].lower() if _folds(pattern) else buffer[at:end]
                 matches = find_all(buffer, pattern)
+                added.clear()  # they matched the pattern as it was
                 locate(current[0] if current is not None else start_pos, 1, wrap=True)
             elif action == "all":
                 done(restore=False)

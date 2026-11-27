@@ -583,3 +583,19 @@ def test_without_a_highlight_query_the_table_highlights(ui: HeadlessUI, tree: bo
         assert faces_on(ui, 3)[:3] == [("def", "keyword"), (" ", ""), ("greet", "function")]
     finally:
         ui.eval("_tm._queries[('python', 'highlights')] = _saved; _b.invalidate(0, len(_b))")
+
+
+def test_extending_the_pattern_by_a_word_forgets_matches_kept_for_the_old_one(
+    ui: HeadlessUI,
+) -> None:
+    ui.eval("_b.replace(0, len(_b), 'foo bar foo baz'); _w.selections.set([(0, 0)])")
+    ui.keys("C-s")
+    ui.type("foo")
+    ui.keys("M-n")
+    assert value(ui, "_w.selections.ranges()") == [(0, 3), (8, 11)]
+    ui.keys("C-w")  # the pattern is now "foo baz": the first "foo" no longer matches it
+    assert value(ui, "[s.text for s in _w.selections]") == ["foo baz"]
+    ui.keys("<return>")
+    ui.type("X")
+    assert value(ui, "_b.text") == "foo bar X"
+    ui.keys("C-g", "C-/")
