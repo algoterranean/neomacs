@@ -1,6 +1,6 @@
 # Electron frontend design
 
-Status: draft 8, 2026-11-27. Stages F0 to F2 are implemented in `frontend/`. The decisions in
+Status: draft 9, 2026-11-27. Stages F0 to F4 are implemented in `frontend/`. The decisions in
 section 2 are confirmed.
 
 This describes the Electron frontend of `neomacs`. It is the client side of the
@@ -467,6 +467,47 @@ buffer; kill the socket and recover.
 
 **F5: finish** (engine stage 7). Performance budgets enforced, themes, basic accessibility
 (section 1), packaging hooks for DISTRIBUTION.md.
+
+### 13.1 As built: F3 and F4
+
+- **The arrangement is rebuilt, the views are not.** When a `layout` event
+  differs from the last, the containers (splits, dividers, panels, tab
+  strips) are built again and the existing view elements are moved into
+  them. A moved element forgets its scroll offset, so a view is told when it
+  has been moved and puts back the position its model has.
+- **Dividers and panel edges** are dragged locally and then reported:
+  `view.split_resized(split, ratios)` and `ui.panel(panel, "resize",
+  fraction)`. Both were added to the protocol for this. Tab clicks, the
+  close, float, dock and hide buttons, and dragging a tab strip to a side
+  (dock there) or to the middle (float) send `ui.panel` and change nothing
+  until the engine's `layout` arrives.
+- **The capability `panels`** is claimed at attach, which is what makes the
+  engine use panels and allow splits for this frontend.
+- **Resources.** The URL is `neomacs-resource://frame-N/ID`. (A bare number
+  as the host is read as an address.) The main process learns which files
+  may be served by reading `resource_define` out of the lines it relays from
+  the engine, the one place it looks inside them; nothing the page says can
+  add a file. A resource sent as data becomes a blob URL.
+- **Clipboard.** This Electron's clipboard calls are asynchronous and take
+  no selection type in their declarations; the Linux primary selection is
+  passed through untyped and is untested.
+- **Mouse.** A click lands on the nearer edge of the character under it.
+  A middle click sends the click, which moves the cursor, and then
+  `input.paste` with the selection or clipboard.
+- **The menu** shows a key beside an item only when it is a single chord;
+  a sequence such as `C-x C-f` cannot be shown by a native menu. Keys are
+  displayed, not registered: the key itself still goes to the engine.
+  Edit > Paste sends `input.paste`.
+- **Engine gone.** A dialog shows the last 25 lines the engine wrote and
+  offers to start a new one; every window then attaches afresh.
+- **Not done or not verified:** dropping files (the code is there; a real
+  drop cannot be made from the smoke test); a popup anchored to a position
+  in a buffer (only the prompt's popup is drawn); gutter columns on the
+  right and image marks in the gutter (drawn, but the engine does not send
+  either yet); `bell` and `busy`; named places for minibuffers; resizing a
+  floating panel; the native dialog itself, which the smoke test answers in
+  code. Everything was run off screen: pictures of the page were saved and
+  looked at, but nobody has used the window by hand.
 
 ## 14. Open questions
 

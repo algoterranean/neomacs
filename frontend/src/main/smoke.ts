@@ -1,10 +1,12 @@
 // A scripted run of the real app against a real engine: the checks for F0, F1 and Gate A
 // (doc/IMPLEMENTATION.md).  Prints one line, `SMOKE-RESULT {json}`, and exits 0 or 1.
 
-import type { BrowserWindow } from "electron";
+import { type BrowserWindow, clipboard } from "electron";
+import type { Shell } from "./main.ts";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import type { Control } from "./engine.ts";
 
 interface State {
@@ -57,6 +59,7 @@ export async function runSmoke(
   state: State,
   control: Control,
   whenAttached: (state: never) => Promise<void>,
+  shell: Shell,
 ): Promise<number> {
   const results: Record<string, unknown> = {};
   const failures: string[] = [];
@@ -91,7 +94,7 @@ export async function runSmoke(
   const timer = setTimeout(() => {
     console.log("SMOKE-RESULT " + JSON.stringify({ ok: false, failures: ["timed out"], results }));
     process.exit(1);
-  }, 120_000);
+  }, 300_000);
 
   try {
     await whenAttached(state as never);
@@ -621,6 +624,416 @@ export async function runSmoke(
       "({ node: typeof process !== 'undefined', require: typeof require !== 'undefined' })",
     );
     check("security.no_node_in_page", !sandbox.node && !sandbox.require, sandbox);
+
+    // ---------------------------------------------------------------------------
+    // Step 10 (F3, F4): the whole interface.
+    interface Shown { id: number; name: string; rect: number[]; focused: boolean; modeline: string; inPanel: string | null; inline: boolean; text: string }
+    interface PanelShown { id: number; name: string; floating: boolean; rect: number[]; tabs: string[]; active: string | null }
+    interface Arrangement { views: Shown[]; panels: PanelShown[]; dividers: number[][]; workspace: number[] }
+    const arrangement = () => js<Arrangement>("window.neomacsDebug.arrangement()");
+    const fr = `ed.frames[${frame}]`;
+    const mouseAt = async (x: number, y: number, clicks = 1, modifiers: ("shift" | "control" | "alt" | "meta")[] = []) => {
+      contents.sendInputEvent({ type: "mouseDown", x: Math.round(x), y: Math.round(y), button: "left", clickCount: clicks, modifiers });
+      contents.sendInputEvent({ type: "mouseUp", x: Math.round(x), y: Math.round(y), button: "left", clickCount: clicks, modifiers });
+      await frames(4);
+      await settle();
+    };
+    const dragFrom = async (x0: number, y0: number, x1: number, y1: number) => {
+      contents.sendInputEvent({ type: "mouseDown", x: Math.round(x0), y: Math.round(y0), button: "left", clickCount: 1 });
+      for (let i = 1; i <= 6; i++) {
+        const t = i / 6;
+        contents.sendInputEvent({ type: "mouseMove", x: Math.round(x0 + (x1 - x0) * t), y: Math.round(y0 + (y1 - y0) * t), button: "left", modifiers: ["leftbuttondown"] });
+        await frames(2);
+      }
+      contents.sendInputEvent({ type: "mouseUp", x: Math.round(x1), y: Math.round(y1), button: "left", clickCount: 1 });
+      await frames(4);
+      await settle();
+    };
+    const pointAt = (view: number, line: number, offset: number) =>
+      js<{ x: number; y: number; width: number } | null>(`window.neomacsDebug.pointAt(${view}, ${line}, ${offset})`);
+    const centre = (rect: number[]) => [(rect[0] as number) + (rect[2] as number) / 2, (rect[1] as number) + (rect[3] as number) / 2] as [number, number];
+    // With NEOMACS_SMOKE_SHOTS set to a directory, pictures of the page are saved there to be looked at.
+    const shotDir = process.env["NEOMACS_SMOKE_SHOTS"];
+    const shot = async (name: string) => {
+      if (!shotDir) return;
+      await frames(4);
+      writeFileSync(path.join(shotDir, `${name}.png`), (await contents.capturePage()).toPNG());
+    };
+    check("f3.claims_panels", (await pyText(`${fr}.draws_panels`)) === "True");
+
+    // -- the debugger's layout: source, a bottom panel, breakpoints in the gutter --
+    await control.eval(
+      `_sc.replace(0, len(_sc), "@command\\ndef dbg_demo() -> None:\\n    first = 1\\n    second = first + 1\\n    ed.message(f'demo {second}')\\n")\n${win}.show(_sc)`,
+    );
+    await settle();
+    press("c", ["control"]);
+    press("b", ["control"]);
+    await settle();
+    await control.eval(`_bp.toggle(ed.debugger, _sc, 3); global_map.bind('<f7>', 'dbg_demo'); ${win}.show(_k)`);
+    await settle();
+    press("F7");
+    await settle();
+    let shown = await arrangement();
+    const source = shown.views.find((v) => v.name === "*scratch*");
+    const stack = shown.views.find((v) => v.name === "*debug*");
+    const bottom = shown.panels.find((p) => p.name === "bottom");
+    const gutterMarks = await js<string[]>(
+      "[...document.querySelectorAll('.nm-window .nm-gutter-col[data-column=\"signs\"]')].map((c) => c.textContent).filter((t) => t)",
+    );
+    await shot("1-debugger");
+    check(
+      "f3.debugger_layout",
+      source !== undefined && stack !== undefined && bottom !== undefined && source.inPanel === null && stack.inPanel === "bottom" &&
+        (bottom.tabs.includes("*debug*")) && stack.text.includes("Stack, innermost first") && stack.text.includes("dbg_demo") &&
+        (source.rect[1] as number) + (source.rect[3] as number) <= (bottom.rect[1] as number) + 1 && (bottom.rect[3] as number) > 80 &&
+        source.modeline.includes("[paused]") && stack.modeline === "" && gutterMarks.includes("▶") && source.focused,
+      { source: source && { rect: source.rect, modeline: source.modeline, focused: source.focused }, bottom, gutterMarks, stackText: stack?.text.slice(0, 60) },
+    );
+    press("F10");
+    await settle();
+    shown = await arrangement();
+    check("f3.debugger_panel_follows", (shown.views.find((v) => v.name === "*debug*")?.text ?? "").includes("first = 1"), shown.views.find((v) => v.name === "*debug*")?.text.slice(0, 200));
+    press("F5");
+    await settle();
+    await control.eval(`_bp.toggle(ed.debugger, _sc, 3); global_map.unbind('<f7>'); ${fr}.panels.pop('bottom', None); ${win}.show(_k)`);
+    await settle();
+    shown = await arrangement();
+    check("f3.panel_goes_when_the_engine_says", shown.panels.length === 0 && shown.views.length === 1, shown.panels);
+
+    // -- the mouse: click, double click, drag, the gutter --
+    await control.eval(`_k.replace(0, len(_k), 'alpha beta gamma\\nsecond line here\\nthird'); ${win}.selections.set([(0, 0)])`);
+    await settle();
+    const mainId = (await ui()).mainView as number;
+    let at = await pointAt(mainId, 2, 7);
+    await mouseAt((at?.x ?? 0) + 1, at?.y ?? 0);
+    u = await ui();
+    check("f4.click_puts_the_cursor", at !== null && JSON.stringify(u.selections) === "[[2,7,2,7]]", { at, selections: u.selections });
+    at = await pointAt(mainId, 1, 7);
+    await mouseAt((at?.x ?? 0) + 1, at?.y ?? 0, 2);
+    check("f4.double_click_selects_the_word", (await pyText(`${win}.selections.primary.text`)) === "'beta'", await pyText(`${win}.selections.primary.text`));
+    const from = await pointAt(mainId, 1, 0);
+    const to = await pointAt(mainId, 2, 6);
+    await dragFrom((from?.x ?? 0), from?.y ?? 0, (to?.x ?? 0), to?.y ?? 0);
+    const dragged = await pyText(`${win}.selections.primary.text`);
+    check("f4.drag_selects", dragged === "'alpha beta gamma\\nsecond'", dragged);
+    const gutterBox = await js<number[]>(
+      "(() => { const r = document.querySelector('.nm-window .nm-line[data-line=\"3\"] .nm-gutter-col').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()",
+    );
+    await mouseAt(gutterBox[0] as number, gutterBox[1] as number);
+    const afterGutter = (await ui()).chrome.message;
+    check("f4.gutter_click", afterGutter.startsWith("Breakpoint at line 3"), afterGutter);
+    await mouseAt(gutterBox[0] as number, gutterBox[1] as number);
+    const mouseSent = (await js<{ mouse: { sent: number } }>("window.neomacsDebug.snapshot()")).mouse.sent;
+    check("f4.mouse_events_sent", mouseSent >= 8, mouseSent);
+
+    // -- splits: two windows, a divider that drags, a click that changes focus --
+    press("x", ["control"]);
+    press("2");
+    await settle();
+    shown = await arrangement();
+    const twoWindows = shown.views.filter((v) => v.name === "keys");
+    check(
+      "f3.split_shows_two_windows",
+      twoWindows.length === 2 && shown.dividers.length === 1 && twoWindows.every((v) => v.modeline.includes("keys")) &&
+        twoWindows.filter((v) => v.focused).length === 1 && Math.abs((twoWindows[0]?.rect[3] ?? 0) - (twoWindows[1]?.rect[3] ?? 99)) <= 8,
+      { views: twoWindows.map((v) => ({ id: v.id, rect: v.rect, focused: v.focused })), dividers: shown.dividers },
+    );
+    await shot("2-split");
+    const bar = shown.dividers[0] as number[];
+    const [bx, by] = centre(bar);
+    await dragFrom(bx, by, bx, by - 120);
+    const ratios = await pyJson<number[]>(`${fr}.root.ratios`);
+    shown = await arrangement();
+    const resized = shown.views.filter((v) => v.name === "keys").sort((a, b) => (a.rect[1] as number) - (b.rect[1] as number));
+    check(
+      "f3.divider_drag_resizes",
+      ratios.length === 2 && (ratios[0] as number) < 0.4 && (resized[0]?.rect[3] ?? 999) + 60 < (resized[1]?.rect[3] ?? 0),
+      { ratios, heights: resized.map((v) => v.rect[3]) },
+    );
+    const unfocused = resized.find((v) => !v.focused);
+    const [ux, uy] = centre(unfocused?.rect ?? [0, 0, 0, 0]);
+    await mouseAt(ux, uy - 10);
+    const focusNow = (await ui()).focus;
+    check("f3.click_focuses_the_other_window", unfocused !== undefined && focusNow === unfocused.id, { focusNow, wanted: unfocused?.id });
+    press("x", ["control"]);
+    press("1");
+    await settle();
+    check("f3.one_window_again", (await arrangement()).views.length === 1);
+
+    // -- panels: a docked one with tabs, acted on with the mouse --
+    await control.eval(
+      `_p1 = ed.buffers.new('*one*', 'first tab'); _p2 = ed.buffers.new('*two*', 'second tab')\n` +
+        `from neomacs import panels as _pn\n_v1 = _pn.place(${fr}, _p1, 'help', focus=False); _v2 = _pn.place(${fr}, _p2, 'help', focus=False)`,
+    );
+    await settle();
+    shown = await arrangement();
+    let side = shown.panels.find((p) => p.name === "side");
+    const mainRect = shown.views.find((v) => v.name === "keys")?.rect ?? [0, 0, 0, 0];
+    check(
+      "f3.docked_panel_with_tabs",
+      side !== undefined && !side.floating && JSON.stringify(side.tabs) === '["*one*","*two*"]' && side.active === "*two*" &&
+        (side.rect[0] as number) >= (mainRect[0] as number) + (mainRect[2] as number) - 2 &&
+        (shown.views.find((v) => v.name === "*two*")?.text ?? "") === "second tab",
+      { side, mainRect },
+    );
+    await shot("3-side-panel");
+    const rebuildsBefore = (await js<{ layoutRebuilds: number }>("window.neomacsDebug.snapshot()")).layoutRebuilds;
+    const tabPoint = await js<number[]>(
+      "(() => { const r = [...document.querySelectorAll('.nm-tab')].find((t) => t.textContent.includes('*one*')).getBoundingClientRect(); return [r.left + 12, r.top + r.height / 2]; })()",
+    );
+    await mouseAt(tabPoint[0] as number, tabPoint[1] as number);
+    shown = await arrangement();
+    side = shown.panels.find((p) => p.name === "side");
+    check(
+      "f3.tab_click_asks_the_engine",
+      side?.active === "*one*" && (await pyText(`${fr}.panels['side'].active.buffer.name`)) === "'*one*'" &&
+        (await js<{ layoutRebuilds: number }>("window.neomacsDebug.snapshot()")).layoutRebuilds > rebuildsBefore,
+      { active: side?.active },
+    );
+    const floatPoint = await js<number[]>(
+      "(() => { const r = document.querySelector('.nm-tab-tool[data-action=\"float\"]').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()",
+    );
+    await mouseAt(floatPoint[0] as number, floatPoint[1] as number);
+    shown = await arrangement();
+    side = shown.panels.find((p) => p.name === "side");
+    const ws = shown.workspace;
+    await shot("4-floating-panel");
+    check(
+      "f3.floating_panel",
+      side !== undefined && side.floating && (await pyText(`${fr}.panels['side'].mode`)) === "'floating'" &&
+        (side.rect[0] as number) > (ws[0] as number) + 40 && (side.rect[0] as number) + (side.rect[2] as number) < (ws[0] as number) + (ws[2] as number) - 40 &&
+        (shown.views.find((v) => v.name === "keys")?.rect[2] ?? 0) > (ws[2] as number) - 4,
+      { side, workspace: ws },
+    );
+    // Drag its tab strip to the bottom edge: it docks there.
+    const stripPoint = await js<number[]>(
+      "(() => { const r = document.querySelector('.nm-floating .nm-tabs').getBoundingClientRect(); return [r.left + r.width * 0.6, r.top + r.height / 2]; })()",
+    );
+    await dragFrom(stripPoint[0] as number, stripPoint[1] as number, (ws[0] as number) + (ws[2] as number) / 2, (ws[1] as number) + (ws[3] as number) - 12);
+    shown = await arrangement();
+    side = shown.panels.find((p) => p.name === "side");
+    check(
+      "f3.drag_docks_at_a_side",
+      side !== undefined && !side.floating && (await pyText(`(${fr}.panels['side'].mode, ${fr}.panels['side'].side)`)) === "('docked', 'bottom')" &&
+        (side.rect[1] as number) > (ws[1] as number) + (ws[3] as number) / 2,
+      { side },
+    );
+    const closePoint = await js<number[]>(
+      "(() => { const r = document.querySelector('.nm-tab-active .nm-tab-close').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()",
+    );
+    await mouseAt(closePoint[0] as number, closePoint[1] as number);
+    shown = await arrangement();
+    check("f3.close_button_closes_a_tab", JSON.stringify(shown.panels.find((p) => p.name === "side")?.tabs) === '["*two*"]', shown.panels);
+    await control.eval(`${fr}.panels.pop('side'); ed.buffers.kill(_p1); ed.buffers.kill(_p2)`);
+    await settle();
+
+    // -- margins, a maximum width, paragraph attributes, an embedded minibuffer --
+    const plainLeft = await js<number>("document.querySelector('.nm-window .nm-content').getBoundingClientRect().left");
+    await control.eval(
+      `_k.replace(0, len(_k), 'Title\\nbody')\n_k.locals['margins'] = {'left': 4, 'right': 2}; _k.locals['max_width'] = 30\n` +
+        `_al = _k.layer('para').add(0, 5, line={'align': 'center'}); _k.invalidate(0, len(_k))`,
+    );
+    await settle();
+    const laid = await js<{ left: number; width: number; align: string; em: number }>(
+      "(() => { const c = document.querySelector('.nm-window .nm-line[data-line=\"1\"] .nm-content'); const r = c.getBoundingClientRect(); return { left: r.left, width: r.width, align: getComputedStyle(c).textAlign, em: parseFloat(getComputedStyle(document.querySelector('.nm-frame')).fontSize) }; })()",
+    );
+    check(
+      "f3.margins_max_width_and_alignment",
+      laid.left > plainLeft + 3 * laid.em && Math.abs(laid.width - 30 * laid.em) < 2 && laid.align === "center",
+      { plainLeft, ...laid },
+    );
+    await control.eval(`_al.remove(); _k.locals.pop('margins'); _k.locals.pop('max_width'); _k.invalidate(0, len(_k))`);
+    await settle();
+    await control.eval(
+      `from neomacs.minibuffer import Minibuffer\n_k.replace(0, len(_k), 'Name: [] end')\n` +
+        `_mb = Minibuffer(${fr}, placeholder='type here'); ${win}.embed(_mb, 7); ${fr}.focus_view(_mb.view)`,
+    );
+    await settle();
+    type("hi");
+    await settle();
+    shown = await arrangement();
+    await shot("6-inline-minibuffer");
+    const embedded = shown.views.find((v) => v.inline);
+    const host = shown.views.find((v) => v.name === "keys");
+    check(
+      "f3.inline_minibuffer",
+      embedded !== undefined && embedded.text === "hi" && (await pyText("_mb.text")) === "'hi'" && host !== undefined &&
+        (embedded.rect[0] as number) > (host.rect[0] as number) && (embedded.rect[1] as number) >= (host.rect[1] as number) - 1 &&
+        (embedded.rect[3] as number) < 60,
+      { embedded, hostRect: host?.rect },
+    );
+    await control.eval(`_mb.close(); ${fr}.focus_view(${win})`);
+    await settle();
+    check("f3.inline_minibuffer_goes", (await arrangement()).views.every((v) => !v.inline));
+
+    // -- images, through the private resource scheme --
+    // A real picture: 8 by 8, solid orange.
+    const makePng = (size: number, rgb: [number, number, number]) => {
+      const chunk = (type: string, data: Buffer) => {
+        const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+        const length = Buffer.alloc(4);
+        length.writeUInt32BE(data.length);
+        const crc = Buffer.alloc(4);
+        crc.writeUInt32BE(zlib.crc32(body) >>> 0);
+        return Buffer.concat([length, body, crc]);
+      };
+      const header = Buffer.alloc(13);
+      header.writeUInt32BE(size, 0);
+      header.writeUInt32BE(size, 4);
+      header.set([8, 2, 0, 0, 0], 8); // 8 bits a channel, RGB
+      const row = Buffer.concat([Buffer.from([0]), Buffer.from(new Array<number[]>(size).fill(rgb).flat())]);
+      const pixels = zlib.deflateSync(Buffer.concat(new Array<Buffer>(size).fill(row)));
+      return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", pixels), chunk("IEND", Buffer.alloc(0))]);
+    };
+    const png = makePng(8, [255, 140, 0]);
+    const pngPath = path.join(os.tmpdir(), `neomacs-smoke-${process.pid}.png`);
+    writeFileSync(pngPath, png);
+    const secretPath = path.join(os.tmpdir(), `neomacs-smoke-secret-${process.pid}.png`);
+    writeFileSync(secretPath, png);
+    await control.eval(
+      `_k.replace(0, len(_k), 'see X and Y here')\n_img = ed.resources.image(${JSON.stringify(pngPath)})\n` +
+        `_raw = ed.resources.image(data=__import__('base64').b64decode(${JSON.stringify(png.toString("base64"))}), mime='image/png')\n` +
+        `_s1 = _k.layer('img').add(4, 5, display={'image': _img, 'width': 24, 'height': 24, 'alt': 'dot'})\n` +
+        `_s2 = _k.layer('img').add(10, 11, display={'image': _raw, 'alt': 'raw'})`,
+    );
+    await settle();
+    await frames(6);
+    await shot("5-images");
+    const images = await js<{ src: string; complete: boolean; naturalWidth: number; width: number; alt: string }[]>("window.neomacsDebug.images()");
+    check(
+      "f4.images_show",
+      images.length === 2 && images.every((i) => i.complete && i.naturalWidth === 8) && (images[0]?.src ?? "").startsWith(`neomacs-resource://frame-${frame}/`) &&
+        (images[1]?.src ?? "").startsWith("blob:") && images[0]?.width === 24 && images[0]?.alt === "dot",
+      images,
+    );
+    // Only what the engine defined is served: not another id, and not a path of the page's choosing.
+    const refused = await js<string[]>(`Promise.all([
+      "neomacs-resource://frame-${frame}/9999",
+      "neomacs-resource://frame-${frame}/" + encodeURIComponent(${JSON.stringify(secretPath)}),
+      "neomacs-resource://frame-${frame + 1000}/1",
+      "file://" + ${JSON.stringify(secretPath)},
+    ].map((src) => new Promise((resolve) => { const i = new Image(); i.onload = () => resolve("loaded"); i.onerror = () => resolve("refused"); i.src = src; })))`);
+    check("f4.only_defined_resources_are_served", refused.every((r) => r === "refused"), refused);
+    await control.eval("_s1.remove(); _s2.remove()");
+    await settle();
+
+    // -- the clipboard, through the main process --
+    const savedClipboard = await clipboard.readText();
+    try {
+      await control.eval(`_k.replace(0, len(_k), 'copy this text'); ${win}.selections.set([(5, 9)])`);
+      await settle();
+      press("w", ["alt"]);
+      await settle();
+      await frames(4);
+      const copied = await clipboard.readText();
+      clipboard.writeText("from outside");
+      await control.eval(`${win}.selections.set([(len(_k), len(_k))])`);
+      await settle();
+      press("y", ["control"]);
+      await settle();
+      check("f4.clipboard_both_ways", copied === "this" && (await pyText("_k.text")) === "'copy this textfrom outside'", { copied, text: await pyText("_k.text") });
+
+      // -- the application menu, built from the engine's `menu` event --
+      const menu = shell.appMenu();
+      const labels = (menu?.items ?? []).map((item) => item.label);
+      const find = (top: string, label: string) => menu?.items.find((i) => i.label === top)?.submenu?.items.find((i) => i.label === label);
+      const selectAll = find("Edit", "Select All");
+      const open = find("File", "Open…");
+      selectAll?.click();
+      await frames(4);
+      await settle();
+      const selectedAll = await pyText(`${win}.selections.primary.text`);
+      clipboard.writeText(" MENU");
+      await control.eval(`${win}.selections.set([(len(_k), len(_k))])`);
+      await settle();
+      find("Edit", "Paste")?.click();
+      await frames(6);
+      await settle();
+      check(
+        "f4.application_menu",
+        ["File", "Edit", "Tools", "View", "Help"].every((l) => labels.includes(l)) && selectAll !== undefined &&
+          selectedAll === "'copy this textfrom outside'" && (await pyText("_k.text")).endsWith(" MENU'") &&
+          (process.platform !== "darwin" || (labels[0] !== "File" && open?.accelerator === "Cmd+O")),
+        { labels, selectedAll, text: await pyText("_k.text"), openAccelerator: open?.accelerator },
+      );
+    } finally {
+      clipboard.writeText(savedClipboard);
+    }
+
+    // -- a second window on the same buffer --
+    await control.eval(`_k.replace(0, len(_k), 'shared text'); ${win}.selections.set([(0, 0)])`);
+    await settle();
+    const windowsBefore = shell.windows.size;
+    press("x", ["control"]);
+    press("5");
+    press("2");
+    await settle();
+    let second: { window: BrowserWindow; frame: number | null } | undefined;
+    for (let i = 0; i < 100 && (second === undefined || second.frame === null); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      second = [...shell.windows.values()].find((w) => w.window !== state.window);
+    }
+    const js2 = <T>(code: string) => (second as { window: BrowserWindow }).window.webContents.executeJavaScript(code, true) as Promise<T>;
+    const secondFrame = second?.frame ?? -1;
+    await control.eval(`ed.frames[${secondFrame}].window.show(_k)`);
+    await control.call("engine.idle", 10);
+    await js2<void>("window.neomacsDebug.frames(4)");
+    type("typed in the first, ");
+    await settle();
+    await js2<void>("window.neomacsDebug.frames(4)");
+    const inSecond = await js2<string>("document.querySelector('.nm-window .nm-content').textContent");
+    check(
+      "f4.second_window_same_buffer",
+      shell.windows.size === windowsBefore + 1 && secondFrame > 0 && secondFrame !== frame &&
+        inSecond === "typed in the first, shared text" && (await pyText("len(ed.frames)")) === "2",
+      { windows: shell.windows.size, secondFrame, inSecond },
+    );
+    second?.window.destroy();
+    for (let i = 0; i < 60 && (await pyText("len(ed.frames)")) !== "1"; i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    check("f4.closing_a_window_removes_its_frame", (await pyText("len(ed.frames)")) === "1" && shell.windows.size === windowsBefore);
+
+    // -- the socket is killed: reconnect and reattach to the same frame --
+    const beforeDrop = await js<{ attaches: number; resets: number }>("window.neomacsDebug.snapshot()");
+    (state as unknown as { socket: { destroy(): void } }).socket.destroy();
+    let afterDrop = beforeDrop as { attaches: number; resets: number; frame?: number | null };
+    for (let i = 0; i < 100 && afterDrop.attaches === beforeDrop.attaches; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      afterDrop = await js("window.neomacsDebug.snapshot()");
+    }
+    await settle();
+    type("back ");
+    await settle();
+    check(
+      "f4.socket_killed_and_recovered",
+      afterDrop.attaches === beforeDrop.attaches + 1 && state.frame === frame && (await pyText("len(ed.frames)")) === "1" &&
+        (await pyText("_k.text")) === "'typed in the first, back shared text'" &&
+        (await js<string>("document.querySelector('.nm-window .nm-content').textContent")) === "typed in the first, back shared text",
+      { before: beforeDrop.attaches, after: afterDrop.attaches, frame: state.frame, text: await pyText("_k.text") },
+    );
+
+    // -- the engine dies: say so, start another, attach afresh --
+    shell.answerEngineGone = () => true;
+    const oldEngine = shell.engine();
+    oldEngine?.process.kill("SIGKILL");
+    for (let i = 0; i < 200 && (shell.engineRestarts === 0 || state.frame === null || shell.engine() === oldEngine); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const fresh = shell.control();
+    await fresh?.call("engine.idle", 10);
+    await frames(6);
+    type("alive");
+    for (let i = 0; i < 60; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (((await fresh?.eval("ed.buffers.get('*scratch*').text")) as string) === "'alive'") break;
+    }
+    const revived = (await fresh?.eval("(len(ed.frames), ed.buffers.get('*scratch*').text, ed.buffers.get('keys') is None)")) as string;
+    check(
+      "f4.engine_gone_and_restarted",
+      shell.engineRestarts === 1 && shell.engine() !== oldEngine && revived === "(1, 'alive', True)" &&
+        shell.lastEngineGoneDetail.includes("The engine stopped (SIGKILL)") &&
+        (await js<string>("document.querySelector('.nm-window .nm-content').textContent")) === "alive",
+      { restarts: shell.engineRestarts, revived, detail: shell.lastEngineGoneDetail.slice(0, 80) },
+    );
   } catch (error) {
     failures.push(`exception: ${String(error)}`);
   }

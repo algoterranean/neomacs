@@ -50,7 +50,8 @@ body {
 
 .nm-line {
   display: flex;
-  align-items: flex-start;
+  /* A line's number sits on the baseline of its first row, however tall that row is. */
+  align-items: baseline;
 }
 
 .nm-gutter-col {
@@ -278,4 +279,267 @@ body {
   opacity: 0.6;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* -- the main area: windows, dividers, panels (FRONTEND 5.6) ------------------ */
+
+.nm-workspace {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
+.nm-workspace > * {
+  flex: 1 1 0;
+}
+
+.nm-window,
+.nm-split,
+.nm-dock,
+.nm-dock-rest {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.nm-window {
+  flex-direction: column;
+}
+
+.nm-split-h,
+.nm-dock-row {
+  flex-direction: row;
+}
+
+.nm-split-v,
+.nm-dock-column {
+  flex-direction: column;
+}
+
+.nm-dock-rest {
+  flex: 1 1 0;
+}
+
+.nm-divider {
+  flex: 0 0 5px;
+  background: #333;
+  z-index: 3;
+}
+
+.nm-split-h > .nm-divider {
+  cursor: col-resize;
+}
+
+.nm-split-v > .nm-divider {
+  cursor: row-resize;
+}
+
+.nm-divider:hover,
+.nm-panel-grip:hover {
+  background: #0e639c;
+}
+
+.nm-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  background: #1e1e1e;
+}
+
+.nm-panel-bottom {
+  border-top: 1px solid #454545;
+}
+
+.nm-panel-top {
+  border-bottom: 1px solid #454545;
+}
+
+.nm-panel-left {
+  border-right: 1px solid #454545;
+}
+
+.nm-panel-right {
+  border-left: 1px solid #454545;
+}
+
+.nm-panel-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.nm-panel.nm-dragging {
+  opacity: 0.6;
+}
+
+.nm-panel-grip {
+  position: absolute;
+  z-index: 4;
+}
+
+.nm-panel-bottom > .nm-panel-grip {
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 6px;
+  cursor: row-resize;
+}
+
+.nm-panel-top > .nm-panel-grip {
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 6px;
+  cursor: row-resize;
+}
+
+.nm-panel-left > .nm-panel-grip {
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.nm-panel-right > .nm-panel-grip {
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.nm-tabs {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  background: #252526;
+  white-space: pre;
+  overflow: hidden;
+  cursor: default;
+}
+
+.nm-tab {
+  display: flex;
+  align-items: center;
+  gap: 1ch;
+  padding: 0.1em 1ch;
+  opacity: 0.65;
+  border-right: 1px solid #1e1e1e;
+}
+
+.nm-tab-active {
+  opacity: 1;
+  background: #1e1e1e;
+}
+
+.nm-tab-close,
+.nm-tab-tool {
+  opacity: 0.6;
+  padding: 0 0.3ch;
+  border-radius: 3px;
+}
+
+.nm-tab-close:hover,
+.nm-tab-tool:hover {
+  opacity: 1;
+  background: #454545;
+}
+
+.nm-tab-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5ch;
+  padding: 0 1ch;
+}
+
+.nm-floating-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.nm-floating {
+  position: absolute;
+  pointer-events: auto;
+  min-height: 6em;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+/* A view that does not have the keyboard is a little quieter. */
+.nm-window .nm-view:not(.nm-focused) .nm-modeline {
+  opacity: 0.6;
+}
+
+/* -- margins, maximum width, inline objects ---------------------------------- */
+
+.nm-lines {
+  box-sizing: border-box;
+}
+
+.nm-capped .nm-content {
+  max-width: var(--nm-max-width);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.nm-object {
+  display: inline-block;
+  vertical-align: bottom;
+}
+
+.nm-image {
+  display: block;
+  max-width: 100%;
+}
+
+.nm-gutter-image {
+  height: 1em;
+  vertical-align: middle;
+}
+
+.nm-inline-minibuffer {
+  min-width: 12ch;
+  vertical-align: top;
+  border: 1px solid #454545;
+  border-radius: 3px;
+}
+
+.nm-inline-minibuffer .nm-view {
+  display: block;
+}
+
+/* -- scroll bars, in keeping with the rest ------------------------------------- */
+
+.nm-scroller::-webkit-scrollbar,
+.nm-popup::-webkit-scrollbar {
+  width: 10px;
+}
+
+.nm-scroller::-webkit-scrollbar-track,
+.nm-popup::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nm-scroller::-webkit-scrollbar-thumb,
+.nm-popup::-webkit-scrollbar-thumb {
+  background: #4a4a4a;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.nm-scroller::-webkit-scrollbar-thumb:hover {
+  background: #6a6a6a;
+  background-clip: content-box;
 }

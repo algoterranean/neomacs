@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 25, 2026-11-27. Stages 0 to 6 are implemented; see
+Status: draft 26, 2026-11-27. Stages 0 to 6 are implemented; see
 IMPLEMENTATION.md for what exists. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
@@ -183,6 +183,8 @@ timestamp, to a file for debugging.
 | `view.split_resized(split, ratios)` | notification | The user dragged a divider. |
 | `ui.panel(panel, action, arg)` | notification | The user acted on a panel in the frontend (4.3). |
 | `view.ack(seq)` | notification | The batch whose `flush` carried `seq` has been applied (4.8). |
+| `view.split_resized(split, ratios)` | request | The user dragged a divider: the children of that split now share its space in these ratios. The engine normalises them and answers with a `layout`. |
+| `ui.panel(panel, action, arg)` | request | The user acted on a panel: `activate_tab` or `close_tab` (a view), `hide`, `dock` (a side), `float`, or `resize` (a fraction of the frame). The engine answers with a `layout`. |
 | `input.key(key)` | notification | One key in canonical notation (4.7). |
 | `input.text(text)` | notification | Committed text from an input method. |
 | `input.paste(text, which)` | notification | A paste the frontend started itself: a menu item, a drop, a middle click. Handled by the `paste` command as one undo step. |

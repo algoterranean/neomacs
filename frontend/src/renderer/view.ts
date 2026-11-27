@@ -8,19 +8,68 @@ import { cpLength } from "./positions.ts";
 
 export type Viewport = [first: number, last: number, pageLines: number];
 
-function runSpan(run: Run): HTMLSpanElement {
+/** What a view needs from the page around it. */
+export interface ViewHost {
+  /** The URL an image resource is loaded from, or null if it is not defined. */
+  resourceUrl(id: number): string | null;
+  /** The element of a minibuffer embedded in the text, created if need be. */
+  inlineRoot(view: number): HTMLElement | null;
+}
+
+/** What is under a point in a view: where in the text, or which part of the view. */
+export interface Hit {
+  area: string; // "text", "gutter:<column>" or "modeline"
+  line: number;
+  offset: number;
+}
+
+const MAX_IMAGE = 4096; // pixels, either way
+
+/** An inline object standing for buffer text: an image, or an embedded minibuffer (ENGINE 4.3). */
+function objectSpan(run: Run, host: ViewHost | null): HTMLSpanElement {
   const span = document.createElement("span");
-  if (typeof run[1] !== "string") {
-    // An inline object.  Drawing images and embedded minibuffers is stage F3;
-    // until then it is a placeholder.
-    span.className = "nm-object";
-    if (run[0] !== null) {
-      span.dataset["o"] = String(run[0]);
-      span.dataset["n"] = String((run[1] as { covers?: number }).covers ?? 0);
-    }
-    span.textContent = "\u25af";
-    return span;
+  const object = run[1] as unknown as Record<string, unknown>;
+  span.className = "nm-object";
+  if (run[0] !== null) {
+    span.dataset["o"] = String(run[0]);
+    span.dataset["n"] = String(object["covers"] ?? 0);
   }
+  const image = object["image"];
+  const minibuffer = object["minibuffer"];
+  if (typeof image === "number") {
+    const url = host?.resourceUrl(image) ?? null;
+    const alt = typeof object["alt"] === "string" ? object["alt"] : "";
+    if (url) {
+      const img = document.createElement("img");
+      img.className = "nm-image";
+      img.alt = alt;
+      img.draggable = false;
+      const size = (value: unknown) => (typeof value === "number" && value > 0 ? Math.min(MAX_IMAGE, value) : null);
+      const width = size(object["width"]);
+      const height = size(object["height"]);
+      if (width !== null) img.width = width;
+      if (height !== null) img.height = height;
+      img.dataset["resource"] = String(image);
+      img.src = url;
+      span.append(img);
+    } else {
+      span.textContent = alt ? `[${alt}]` : "\u25af";
+    }
+  } else if (typeof minibuffer === "number") {
+    span.classList.add("nm-inline-minibuffer");
+    span.dataset["minibuffer"] = String(minibuffer);
+    const root = host?.inlineRoot(minibuffer) ?? null;
+    if (root) span.append(root);
+    else span.textContent = "\u25af";
+  } else {
+    span.textContent = "\u25af";
+  }
+  return span;
+}
+
+function runSpan(run: Run, host: ViewHost | null = null): HTMLSpanElement {
+  if (typeof run[1] !== "string") return objectSpan(run, host);
+  const span = document.createElement("span");
   if (run[2] !== 0) span.className = `f${run[2]}`;
   if (run[0] !== null) {
     // Where this run's text is in the buffer line, in code points (FRONTEND 6).
@@ -113,6 +162,20 @@ export class ViewElement {
   /** Bumped whenever a face is defined or the faces are cleared. */
   static styleVersion = 0;
 
+  /** The page's services to every view: image URLs and embedded minibuffers. */
+  static host: ViewHost | null = null;
+
+  /**
+   * The element was moved to another place in the page.  A detached element
+   * forgets its scroll offset; put back the one the model has, rather than
+   * reading the reset as the user having scrolled.
+   */
+  reparented(): void {
+    this.knownScrollTop = this.scroller.scrollTop;
+    this.lastWidth = -1;
+    this.lastCursor = null;
+  }
+
   /** Call once the element is in the document. */
   mounted(): void {
     this.measureDefaults();
@@ -198,41 +261,87 @@ export class ViewElement {
 
   // -- rendering ------------------------------------------------------------
 
-  private gutterColumns(): { id: string; kind: string; width: string }[] {
+  private gutterColumns(side: string): { id: string; kind: string; width: string }[] {
     const digits = Math.max(2, String(this.model.lineCount).length);
     return this.model.info.gutter
-      .filter((c) => (c.side ?? "left") === "left")
+      .filter((c) => (c.side ?? "left") === side)
       .map((c) => ({
         id: c.id,
         kind: c.kind,
+        // A numbers column is as wide as the largest number; a marks column's width is in ems.
         width: c.kind === "numbers" ? `${digits + 1}ch` : `${(c.width ?? 1) + 1}ch`,
       }));
+  }
+
+  private gutterCell(line: Line, column: { id: string; kind: string; width: string }): HTMLSpanElement {
+    const gutterFace = this.frame.uiFaces["gutter"] ?? 0;
+    const cell = document.createElement("span");
+    cell.className = `nm-gutter-col f${gutterFace}`;
+    cell.dataset["column"] = column.id;
+    cell.dataset["kind"] = column.kind;
+    cell.style.width = column.width;
+    if (column.kind !== "numbers") {
+      const mark = line[0].gutter?.[column.id] as [unknown, number] | undefined;
+      if (mark) {
+        if (mark[1] !== 0) cell.className = `nm-gutter-col f${mark[1]}`;
+        const what = mark[0];
+        if (typeof what === "string") cell.textContent = what;
+        else if (what && typeof what === "object" && typeof (what as { image?: unknown }).image === "number") {
+          // A mark may be an image resource.
+          const url = ViewElement.host?.resourceUrl((what as { image: number }).image);
+          if (url) {
+            const img = document.createElement("img");
+            img.className = "nm-gutter-image";
+            img.alt = "";
+            img.draggable = false;
+            img.src = url;
+            cell.append(img);
+          }
+        }
+      }
+    }
+    return cell;
   }
 
   private buildLine(line: Line): HTMLDivElement {
     const el = document.createElement("div");
     el.className = "nm-line";
-    const gutterFace = this.frame.uiFaces["gutter"] ?? 0;
-    for (const column of this.gutterColumns()) {
-      const cell = document.createElement("span");
-      cell.className = `nm-gutter-col f${gutterFace}`;
-      cell.dataset["column"] = column.id;
-      cell.dataset["kind"] = column.kind;
-      cell.style.width = column.width;
-      if (column.kind !== "numbers") {
-        const mark = line[0].gutter?.[column.id];
-        if (mark) {
-          cell.textContent = mark[0];
-          if (mark[1] !== 0) cell.className = `nm-gutter-col f${mark[1]}`;
-        }
-      }
-      el.append(cell);
-    }
+    for (const column of this.gutterColumns("left")) el.append(this.gutterCell(line, column));
     const content = document.createElement("div");
     content.className = "nm-content";
-    for (const run of line[1]) content.append(runSpan(run));
+    // Paragraph attributes (ENGINE 4.3).  Numbers only, in ems of the default face.
+    const attrs = line[0];
+    const em = (value: unknown) => (typeof value === "number" && value >= 0 && value < 200 ? `${value}em` : "");
+    if (attrs["align"] === "center" || attrs["align"] === "right") content.style.textAlign = attrs["align"];
+    if (em(attrs["indent"])) content.style.paddingLeft = em(attrs["indent"]);
+    if (em(attrs["spacing_before"])) content.style.paddingTop = em(attrs["spacing_before"]);
+    if (em(attrs["spacing_after"])) content.style.paddingBottom = em(attrs["spacing_after"]);
+    for (const run of line[1]) content.append(runSpan(run, ViewElement.host));
     el.append(content);
+    for (const column of this.gutterColumns("right")) el.append(this.gutterCell(line, column));
     return el;
+  }
+
+  /** Margins and the maximum width of the text column, in ems of the default face (FRONTEND 5.3). */
+  private applyPresentation(): void {
+    const info = this.model.info;
+    const em = (value: unknown) => (typeof value === "number" && value > 0 && value < 500 ? `${value}em` : "0");
+    const left = em(info.margins?.left);
+    const right = em(info.margins?.right);
+    const max = typeof info.max_width === "number" && info.max_width > 0 ? `${Math.min(2000, info.max_width)}em` : "";
+    const key = `${left}|${right}|${max}|${JSON.stringify(info.gutter)}`;
+    if (this.root.dataset["presentation"] === key) return;
+    if (this.root.dataset["presentation"] !== undefined) {
+      // Columns or widths changed: every line is laid out differently.
+      for (const el of this.elements.values()) el.remove();
+      this.elements.clear();
+      this.heights.invalidate();
+    }
+    this.root.dataset["presentation"] = key;
+    this.linesEl.style.paddingLeft = left;
+    this.linesEl.style.paddingRight = right;
+    this.root.style.setProperty("--nm-max-width", max || "none");
+    this.root.classList.toggle("nm-capped", max !== "");
   }
 
   /** Bring the DOM into line with the model.  Called once per frame at most. */
@@ -241,7 +350,9 @@ export class ViewElement {
     const h = this.heights;
     const info = model.info;
     this.root.classList.toggle("nm-nowrap", !info.wrap);
+    this.root.classList.toggle("nm-focused", this.focused);
     this.linesEl.style.tabSize = String(Math.max(1, info.tab_width));
+    this.applyPresentation();
 
     // A change of width re-wraps everything, and a change of faces can change
     // every size: either way the measured heights are stale.
@@ -411,6 +522,55 @@ export class ViewElement {
     this.preeditEl.style.transform = `translate(${caret.left - origin.left}px, ${caret.top - origin.top}px)`;
   }
 
+  // -- pixels to position (FRONTEND 6, 8.3) -------------------------------------
+
+  /**
+   * What is under a point, given in client coordinates, and the element that
+   * was hit if there is one.  A point below the last line is the end of it;
+   * one above the first is its start.
+   */
+  hit(target: Element | null, x: number, y: number): Hit | null {
+    const primary = this.model.selections[this.model.primary];
+    if (target && this.modelineEl.contains(target)) return { area: "modeline", line: primary?.[2] ?? 1, offset: 0 };
+    let lineEl = target?.closest<HTMLElement>(".nm-line") ?? null;
+    if (lineEl && !this.linesEl.contains(lineEl)) lineEl = null;
+    if (lineEl && lineEl.parentElement !== this.linesEl) {
+      // Inside a minibuffer embedded in a line of this view: that view's business.
+      return null;
+    }
+    if (!lineEl) {
+      let above: HTMLElement | null = null;
+      for (const child of this.linesEl.children) {
+        const el = child as HTMLElement;
+        const box = el.getBoundingClientRect();
+        if (y < box.top) break;
+        above = el;
+        if (y < box.bottom) break;
+      }
+      lineEl = above ?? (this.linesEl.firstElementChild as HTMLElement | null);
+    }
+    if (!lineEl) return null;
+    const line = Number(lineEl.dataset["line"]);
+    if (!Number.isInteger(line) || line < 1) return null;
+    const column = target?.closest<HTMLElement>(".nm-gutter-col");
+    if (column && lineEl.contains(column)) return { area: `gutter:${column.dataset["column"] ?? ""}`, line, offset: 0 };
+    const geometry = this.geometry;
+    const bands = geometry.bands(line);
+    const box = lineEl.getBoundingClientRect();
+    if (y >= box.bottom) return { area: "text", line, offset: geometry.lineLength(line) };
+    if (y < box.top) return { area: "text", line, offset: 0 };
+    const band = geometry.bandOf(bands, { left: x, top: y, bottom: y, width: 0 });
+    let offset = geometry.offsetAtX(line, bands, band, x);
+    // The nearer edge of the character under the point: a click on its right half goes after it.
+    const [, rowEnd] = geometry.rowRange(line, bands, band);
+    const caret = geometry.caret(line, offset);
+    const length = geometry.lineLength(line);
+    if (caret && caret.width > 0 && x > caret.left + caret.width / 2 && offset < length) {
+      if (offset < rowEnd || band === bands.length - 1) offset += 1;
+    }
+    return { area: "text", line, offset: Math.max(0, Math.min(length, offset)) };
+  }
+
   // -- for geometry requests ----------------------------------------------------
 
   static cursorAnimation = true;
@@ -545,10 +705,12 @@ export class ViewElement {
 
   private renderModeline(): void {
     const runs = this.model.modeline ?? [];
+    // A view in a panel has no modeline: its tab says what it is.
+    this.modelineEl.hidden = this.model.modeline === null;
     const key = JSON.stringify(runs);
     if (this.modelineEl.dataset["key"] === key) return;
     this.modelineEl.dataset["key"] = key;
-    this.modelineEl.replaceChildren(...runs.map(runSpan));
+    this.modelineEl.replaceChildren(...runs.map((run) => runSpan(run)));
     const face = runs[0]?.[2] ?? 0;
     this.modelineEl.className = `nm-modeline f${face}`;
   }
