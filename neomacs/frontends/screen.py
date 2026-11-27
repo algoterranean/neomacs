@@ -39,26 +39,27 @@ class Arrangement:
 
 def _shares(total: int, ratios: list[float], minimum: int) -> list[int]:
     """Divide TOTAL cells in RATIOS, each part at least MINIMUM where there is room."""
-    count = len(ratios)
     weight = sum(ratios) or 1.0
     sizes = [max(minimum, round(total * r / weight)) for r in ratios]
-    # Fix up rounding so the parts add up exactly.
-    i = 0
-    while sum(sizes) != total and i < 10 * count + total:
-        diff = total - sum(sizes)
-        index = i % count
-        if diff > 0:
-            sizes[index] += 1
-        elif sizes[index] > 1:
-            sizes[index] -= 1
-        i += 1
+    # Fix up rounding so the parts add up exactly.  When there is not room
+    # for every part at its minimum, the largest give way first, and a part
+    # may end with nothing.
+    while sum(sizes) < total:
+        sizes[sizes.index(min(sizes))] += 1
+    while sum(sizes) > total and max(sizes) > 0:
+        sizes[sizes.index(max(sizes))] -= 1
     return sizes
 
 
 def _tree(node: list[Any], rect: Rect, out: Arrangement) -> None:
     if node[0] == "win":
-        out.views[node[1]] = Rect(rect.x, rect.y, rect.w, max(1, rect.h - 1))
-        out.modelines.append((node[1], rect.x, rect.y + rect.h - 1, rect.w))
+        # With one row the text is shown and the modeline is not; with none
+        # the window is not drawn.  The text is never drawn over.
+        if rect.h >= MIN_ROWS:
+            out.views[node[1]] = Rect(rect.x, rect.y, rect.w, rect.h - 1)
+            out.modelines.append((node[1], rect.x, rect.y + rect.h - 1, rect.w))
+        elif rect.h == 1 and rect.w > 0:
+            out.views[node[1]] = Rect(rect.x, rect.y, rect.w, 1)
         return
     _, _, direction, ratios, children = node
     if direction == "v":

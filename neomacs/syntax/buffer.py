@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from neomacs.options import options
 from neomacs.stability import provisional
 from neomacs.syntax.scan import Scanner
 from neomacs.syntax.table import DEFAULT, Syntax
@@ -41,6 +42,14 @@ class BufferSyntax:
                         "the syntax table is used instead"
                     )
         return self._tree
+
+    def reconsider_tree(self) -> None:
+        """The `tree_sitter` option changed: decide again whether to have a tree."""
+        if self._tree is not None:
+            self._tree.close()
+            self._tree = None
+        self._tree_looked_for = False
+        self.buffer.invalidate(0, len(self.buffer))
 
     def close(self) -> None:
         if self._tree is not None:
@@ -308,3 +317,17 @@ def _note_once(text: str) -> None:
     editor = _current.get(None)
     if editor is not None:
         editor.note_once(text)
+
+
+def _tree_option_changed(value: Any, buffer: Any = None) -> None:
+    from neomacs.editor import _current  # pyright: ignore[reportPrivateUsage]
+
+    editor = _current.get(None)
+    targets = [buffer] if buffer is not None else list(editor.buffers) if editor else []
+    for target in targets:
+        syntax = target.locals.get("_syntax")
+        if isinstance(syntax, BufferSyntax):
+            syntax.reconsider_tree()
+
+
+options["tree_sitter"].on_change.add(_tree_option_changed)

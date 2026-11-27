@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from neomacs import keys as keys_module
@@ -44,23 +45,23 @@ def find_all(buffer: Buffer, pattern: str, *, whole_word: bool = False) -> list[
     if not pattern:
         return []
     text = buffer.text
-    if _folds(pattern):
-        folded = text.lower()
-        text = folded if len(folded) == len(text) else text  # a few characters change length
+    # Matched against the text as it is, so positions are right even where
+    # changing a character's case would change its length.
+    flags = re.IGNORECASE if _folds(pattern) else 0
     table = buffer.syntax.table
     found: list[tuple[int, int]] = []
-    at = text.find(pattern)
-    size = len(pattern)
-    while at != -1:
-        end = at + size
+    at = 0
+    compiled = re.compile(re.escape(pattern), flags)
+    while (match := compiled.search(text, at)) is not None:
+        start, end = match.span()
         if not whole_word or (
-            (at == 0 or not table.is_word(text[at - 1]))
+            (start == 0 or not table.is_word(text[start - 1]))
             and (end >= len(text) or not table.is_word(text[end]))
         ):
-            found.append((at, end))
-            at = text.find(pattern, end)
+            found.append((start, end))
+            at = end
         else:
-            at = text.find(pattern, at + 1)
+            at = start + 1
     return found
 
 
@@ -88,6 +89,7 @@ async def _search(direction: int) -> None:
     matches: list[tuple[int, int]] = []
     current: tuple[int, int] | None = None
     failed = False
+    added: list[tuple[int, int]] = []  # matches kept selected with `add`
 
     def locate(from_pos: int, step: int, *, wrap: bool) -> None:
         nonlocal current, failed
@@ -110,7 +112,9 @@ async def _search(direction: int) -> None:
     def show() -> None:
         _mark(buffer, matches, current)
         if current is not None:
-            view.selections.set([(current[0], current[1])])
+            # The matches kept with `add`, and the one the search is on now.
+            ranges = sorted({*added, (current[0], current[1])})
+            view.selections.set(ranges, ranges.index((current[0], current[1])))
             view.reveal(current[0], "nearest")
         elif not pattern:
             view.selections.set(origin, origin_primary)
@@ -142,11 +146,13 @@ async def _search(direction: int) -> None:
             if action is None and text is not None:
                 pattern += text
                 matches = find_all(buffer, pattern)
+                added.clear()
                 anchor = current[0] if current is not None else start_pos
                 locate(anchor if direction > 0 else anchor + len(pattern), direction, wrap=False)
             elif action == "delete":
                 pattern = pattern[:-1]
                 matches = find_all(buffer, pattern)
+                added.clear()
                 locate(start_pos, direction, wrap=True)
             elif action in ("next", "previous"):
                 direction = 1 if action == "next" else -1
@@ -176,12 +182,8 @@ async def _search(direction: int) -> None:
             elif action == "add":
                 # Keep this match selected and go on to the next one.
                 if current is not None:
-                    kept = [r for r in view.selections.ranges() if r != (current[0], current[1])]
+                    added.append((current[0], current[1]))
                     locate(current[1], 1, wrap=True)
-                    extra = kept + [(m[0], m[1]) for m in [current] if m is not None]
-                    _mark(buffer, matches, current)
-                    view.selections.set(sorted(set(extra)))
-                    continue
             elif action == "accept":
                 done(restore=False)
                 return

@@ -45,8 +45,9 @@ def switch_buffer(name: Annotated[str, Ask.buffer("Switch to buffer: ")]) -> Non
 
 @command(name="buffers.kill")
 def kill_buffer() -> None:
-    """Kill the current buffer and show another."""
-    buffer = ed.window.buffer
+    """Kill the buffer that has the keyboard.  A window showing it shows
+    another instead; a panel tab showing it is closed."""
+    buffer = ed.buffer
     others = [b for b in ed.buffers if b is not buffer and not b.name.startswith("*minibuffer")]
     scratch = ed.buffers.get("*scratch*")
     replacement = others[-1] if others else scratch
@@ -54,7 +55,12 @@ def kill_buffer() -> None:
         raise NeomacsError("This is the only buffer")
     for frame in list(ed.frames.values()):
         for view in list(frame.views.values()):
-            if view.buffer is buffer:
+            if view.buffer is not buffer:
+                continue
+            panel: Any = getattr(view, "panel", None)
+            if panel is not None:
+                panel.close(view)
+            else:
                 view.show(replacement)
     ed.buffers.kill(buffer)
 

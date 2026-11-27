@@ -61,6 +61,8 @@ def why_not(policy: str) -> str | None:
 
 def language(grammar: str, policy: str = "auto") -> Any:
     """The tree-sitter language for GRAMMAR, or None; `failure(grammar)` says why."""
+    if policy == "never":
+        return None  # whatever another buffer has loaded
     if grammar in _languages:
         return _languages[grammar]
     reason = why_not(policy)

@@ -507,3 +507,79 @@ def test_a_large_file_is_first_parsed_off_the_owner_thread(
     first = [(run[1], names[run[2]] if run[2] else "") for run in (view.line(1) or [{}, []])[1]]
     assert first == [("import", "keyword"), (" os  ", ""), ("# added while parsing", "comment")]
     ui.eval("ed.buffers.kill(_big)")
+
+
+# -- from review ---------------------------------------------------------------------
+
+
+def test_adding_matches_during_a_search_keeps_the_earlier_ones(ui: HeadlessUI) -> None:
+    ui.eval("_b.replace(0, len(_b), 'foo bar foo baz foo'); _w.selections.set([(0, 0)])")
+    ui.keys("C-s")
+    ui.type("foo")
+    ui.keys("M-n")
+    assert value(ui, "_w.selections.ranges()") == [(0, 3), (8, 11)]
+    ui.keys("M-n")
+    assert value(ui, "_w.selections.ranges()") == [(0, 3), (8, 11), (16, 19)]
+    ui.keys("<return>")
+    ui.type("X")
+    assert value(ui, "_b.text") == "X bar X baz X"
+    ui.keys("C-g", "C-/")
+
+
+def test_search_ignores_case_whatever_else_is_in_the_buffer(ui: HeadlessUI) -> None:
+    # Lower-casing "İ" gives two characters, which once switched folding off for the whole buffer.
+    ui.eval("_b.replace(0, len(_b), 'İ FOO and Foo'); _w.selections.set([(0, 0)])")
+    assert value(ui, "__import__('neomacs.std.search').std.search.find_all(_b, 'foo')") == [
+        (2, 5),
+        (10, 13),
+    ]
+    ui.keys("C-s")
+    ui.type("foo")
+    assert value(ui, "_w.selections.primary.text") == "FOO"
+    ui.keys("C-g")
+
+
+def test_tab_inside_a_multi_line_string_changes_nothing(ui: HeadlessUI) -> None:
+    text = 'def f():\n    """Summary.\n\nflush left on purpose\n    """\n'
+    ui.eval(f"_b.replace(0, len(_b), {text!r}); _w.selections.set([(_b.line_start(4),) * 2])")
+    ui.keys("<tab>")
+    assert value(ui, "_b.text") == text
+
+
+def test_killing_the_buffer_in_a_panel_leaves_the_document_alone(ui: HeadlessUI) -> None:
+    ui.call("repl")
+    assert value(ui, f"ed.frames[{ui.frame_id}].focus.buffer.name") == "*repl*"
+    ui.keys("C-x", "k")
+    assert value(
+        ui, "(ed.buffers.get('*repl*') is None, _b.name in [b.name for b in ed.buffers])"
+    ) == (True, True)
+    assert value(ui, f"(_w.buffer is _b, ed.frames[{ui.frame_id}].focus is _w)") == (True, True)
+    assert all(tab["title"] != "*repl*" for tab in ui.panels()["bottom"]["tabs"])
+
+
+def test_the_parser_setting_is_obeyed_per_buffer_and_when_it_changes(
+    ui: HeadlessUI, tree: bool
+) -> None:
+    if not tree:
+        pytest.skip("needs the grammar")
+    assert value(ui, "_b.syntax.tree is not None") is True
+    # Off for this buffer, though the grammar is loaded and cached for others.
+    ui.eval("_b.options.tree_sitter = 'never'")
+    assert value(ui, "(_b.syntax.tree is None, _b.locals['_highlighter'].from_tree)")[0] is True
+    assert faces_on(ui, 1)[0] == ("import", "keyword")  # the table highlighter took over
+    ui.eval("_b.options.tree_sitter = 'always'")
+    assert value(ui, "_b.syntax.tree is not None and _b.syntax.tree.ensure() is not None") is True
+
+
+def test_without_a_highlight_query_the_table_highlights(ui: HeadlessUI, tree: bool) -> None:
+    if not tree:
+        pytest.skip("needs the grammar")
+    ui.eval(
+        "from neomacs.syntax import tree as _tm\n"
+        "_saved = _tm._queries.get(('python', 'highlights')); _tm._queries[('python', 'highlights')] = None\n"
+        "_b.invalidate(0, len(_b))"
+    )
+    try:
+        assert faces_on(ui, 3)[:3] == [("def", "keyword"), (" ", ""), ("greet", "function")]
+    finally:
+        ui.eval("_tm._queries[('python', 'highlights')] = _saved; _b.invalidate(0, len(_b))")

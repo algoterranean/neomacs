@@ -12,6 +12,7 @@ import re
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
+from neomacs.syntax import tree as tree_module
 from neomacs.syntax.scan import State
 
 if TYPE_CHECKING:
@@ -41,7 +42,11 @@ class ScannerHighlighter:
     def __call__(self, buffer: Buffer, start: int, end: int) -> Iterable[Decoration]:
         """The provider interface: decorations for the line that is [START, END)."""
         tree = buffer.syntax.tree
-        if tree is not None and tree.ensure() is not None:
+        if (
+            tree is not None
+            and tree_module.query(tree.grammar, "highlights") is not None
+            and tree.ensure() is not None
+        ):
             # A parse tree knows more than the table does; a later pattern of
             # the query wins where two apply.
             self.from_tree += 1

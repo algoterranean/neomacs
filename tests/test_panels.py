@@ -307,3 +307,24 @@ def test_a_frontend_that_does_not_draw_panels_gets_one_window(engine: Path) -> N
         )
         plain.eval("ed.buffers.kill(_pb)")
         plain.client.notify("ui.detach")
+
+
+def test_a_window_with_one_row_shows_its_text_and_no_modeline() -> None:
+    layout = {
+        "main": ["split", 9, "v", [0.34, 0.33, 0.33], [["win", 1], ["win", 2], ["win", 3]]],
+        "panels": [],
+    }
+    for rows in range(1, 9):
+        placed = arrange(layout, 40, rows)
+        covered: dict[int, str] = {}
+        for view, rect in placed.views.items():
+            assert rect.h >= 1
+            for y in range(rect.y, rect.y + rect.h):
+                assert y not in covered, (rows, "text over text")
+                covered[y] = f"text {view}"
+        for view, _x, y, _w in placed.modelines:
+            assert y not in covered, (rows, f"modeline of {view} over {covered.get(y)}")
+            covered[y] = f"modeline {view}"
+        assert all(0 <= y < rows for y in covered)
+    assert set(arrange(layout, 40, 3).views) == {1, 2, 3} and arrange(layout, 40, 3).modelines == []
+    assert len(arrange(layout, 40, 6).modelines) == 3

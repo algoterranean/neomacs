@@ -31,7 +31,8 @@ class PythonMode(ProgMode):
         syntax = buffer.syntax
         scanner = syntax.scanner
         if scanner.state_at(line)[0] == "string":
-            return None  # inside a multi-line string: leave it alone
+            # Inside a multi-line string the whitespace is the string's value.
+            return syntax.indentation(line)
         previous = line - 1
         while previous >= 1 and (
             not buffer.line_text(previous).strip() or scanner.state_at(previous)[0] != "code"
