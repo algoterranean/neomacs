@@ -55,6 +55,21 @@ def attach(conn: Connection, options: dict[str, Any] | None = None) -> dict[str,
         frame = Frame(editor, conn, capabilities)
     conn.frame = frame
     conn.on_close.append(_closed)
+    places: list[Any] = options.get("places") or []
+    frame.places = [str(p) for p in places]
+    editor.last_frame = frame
+    # An interrupt must be seen while the loop is busy, so it is spotted on the
+    # reader thread before the line is queued (ENGINE 3).
+    dispatcher = editor.dispatcher
+
+    def spot_interrupt(line: bytes) -> None:
+        if b'"input.interrupt"' in line:
+            dispatcher.interrupt_from_thread()
+
+    conn.intercept = spot_interrupt
+    from neomacs.hooks import ui_attached
+
+    ui_attached.run(frame)
     return {
         "frame": frame.id,
         "token": frame.token,
@@ -94,21 +109,90 @@ def ack(conn: Connection, seq: int) -> None:
     _frame(conn).ack(seq)
 
 
+def _input(conn: Connection, kind: str, value: Any) -> None:
+    frame = _frame(conn)
+    conn.editor.last_frame = frame
+    conn.editor.dispatcher.put(frame, kind, value)
+
+
 @method("input.key")
 def key(conn: Connection, key: str) -> None:
     """One key, in the engine's key notation."""
-    conn.editor.input.put(_frame(conn), "key", key)
+    if conn.editor.latency is not None and conn.received_at:
+        _frame(conn).key_times.append(conn.received_at)
+    _input(conn, "key", key)
 
 
 @method("input.text")
 def text(conn: Connection, text: str) -> None:
     """Committed text from an input method."""
-    conn.editor.input.put(_frame(conn), "text", text)
+    _input(conn, "text", text)
+
+
+@method("input.paste")
+def paste(conn: Connection, text: str, which: str = "clipboard") -> None:
+    """A paste the frontend started itself: a menu item, a middle click."""
+    _input(conn, "paste", {"text": text, "which": which})
+
+
+@method("input.mouse")
+def mouse(
+    conn: Connection,
+    button: int,
+    action: str,
+    clicks: int,
+    mods: str,
+    view: int,
+    area: str,
+    line: int,
+    offset: int = 0,
+) -> None:
+    """A mouse event, already hit-tested by the frontend.  It becomes a key such as
+    `<mouse-1>`, `M-<drag-mouse-1>` or `<gutter-mouse-1>` (ENGINE 4.2)."""
+    name = f"mouse-{int(button)}"
+    if action == "drag":
+        name = "drag-" + name
+    elif action == "release":
+        name = "up-" + name
+    elif clicks >= 3:
+        name = "triple-" + name
+    elif clicks == 2:
+        name = "double-" + name
+    if area.startswith("gutter"):
+        name = "gutter-" + name
+    elif area == "modeline":
+        name = "modeline-" + name
+    prefix = "".join(f"{m}-" for m in "CMSs" if m in mods)
+    event = {
+        "key": f"{prefix}<{name}>",
+        "view": view,
+        "area": area,
+        "line": line,
+        "offset": offset,
+        "clicks": clicks,
+        "button": button,
+        "action": action,
+    }
+    _input(conn, "mouse", event)
+
+
+@method("input.drop")
+def drop(conn: Connection, paths: list[str], view: int, line: int = 1, offset: int = 0) -> None:
+    """Files were dropped on a view."""
+    _input(conn, "drop", {"paths": paths, "view": view, "line": line, "offset": offset})
+
+
+@method("input.focus")
+def focus(conn: Connection, gained: bool) -> None:
+    """The frontend's window gained or lost focus."""
+    if gained:
+        conn.editor.last_frame = _frame(conn)
 
 
 @method("input.interrupt")
 def interrupt(conn: Connection) -> None:
-    """Out-of-band cancel.  Nothing to cancel until commands are tasks."""
+    """Out-of-band cancel.  It is acted on from the reader thread (see `attach`);
+    by the time it is dispatched here there is nothing left to do."""
 
 
 @method("engine.idle")
@@ -123,9 +207,7 @@ async def idle(conn: Connection, timeout: float = 10.0) -> bool:
     quiet = 0
     while quiet < 3:
         await asyncio.sleep(0.001 if quiet == 0 else 0)
-        busy = editor.input.busy or any(
-            isinstance(f, Frame) and f.busy for f in editor.frames.values()
-        )
+        busy = editor.dispatcher.busy or any(f.busy for f in editor.frames.values())
         quiet = 0 if busy else quiet + 1
         if loop.time() > deadline:
             return False

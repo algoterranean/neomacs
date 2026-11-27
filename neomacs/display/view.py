@@ -70,6 +70,7 @@ def build_line(buffer: Buffer, line: int, faces: FaceTable, providers: Iterable[
         last = runs[-1] if runs else None
         if (
             last is not None
+            and len(last) == 3
             and last[2] == face_id
             and offset is not None
             and last[0] is not None
@@ -88,11 +89,15 @@ def build_line(buffer: Buffer, line: int, faces: FaceTable, providers: Iterable[
     for i, seg_start in enumerate(ordered):
         virtual(seg_start, "after_text")
         virtual(seg_start, "before_text")
+        for p_start, p_end, _, props in pieces:
+            # An inline object stands in place of the text its span covers.
+            if props.get("display") and p_start == seg_start:
+                runs.append([seg_start - start, {**props["display"], "covers": p_end - p_start}])
         if i + 1 == len(ordered):
             break
         seg_end = ordered[i + 1]
         active = [p for p in pieces if p[0] <= seg_start and p[1] >= seg_end and p[0] < p[1]]
-        if any(props.get("invisible") for _, _, _, props in active):
+        if any(props.get("invisible") or props.get("display") for _, _, _, props in active):
             continue
         active.sort(key=lambda p: p[2])
         names = tuple(props["face"] for _, _, _, props in active if props.get("face"))

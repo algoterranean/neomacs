@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from neomacs.errors import RpcError
 
@@ -66,9 +66,21 @@ def engine_eval(conn: Connection, source: str, mode: str = "auto") -> str | None
 
 
 @method("engine.call")
-def engine_call(conn: Connection, command: str, args: list[Any] | None = None) -> Any:
-    """Run a named command."""
-    raise RpcError(f"no such command: {command}")
+async def engine_call(conn: Connection, command: str, args: list[Any] | None = None) -> Any:
+    """Run a named command in this connection's frame, or the most recent frame."""
+    from neomacs import commands
+    from neomacs.window import Frame
+
+    editor = conn.editor
+    if commands.lookup(command) is None:
+        raise RpcError(f"no such command: {command}")
+    frame = conn.frame if isinstance(conn.frame, Frame) else editor.frame
+    if frame is None:
+        raise RpcError("no frame to run a command in")
+    result: Any = await editor.dispatcher.call(frame, command, args or [])
+    if isinstance(result, (str, int, float, bool, list, dict)):
+        return cast(Any, result)
+    return None
 
 
 @method("engine.exit")

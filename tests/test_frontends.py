@@ -210,8 +210,18 @@ def test_tui_in_a_pseudo_terminal(tmp_path: Path) -> None:
         os.write(fd, b"\x1b[B\x1b[F")  # down, end
         os.write(fd, b" edited in a terminal")
         read_until(fd, "second line edited in a terminal")
-        os.write(fd, b"\x1f")  # C-_ undoes the last character
+        os.write(fd, b"\x1f")  # C-_ undoes the last short run of typing: one character here
         read_until(fd, "L2 C31")
+        os.write(fd, b"\x1bx")  # M-x: a prompt, with completion
+        read_until(fd, "M-x")
+        os.write(fd, b"buffer_st")
+        read_until(fd, "buffer_start")
+        os.write(fd, b"\r")
+        read_until(fd, "L1 C0")
+        os.write(fd, b"\x15" + b"3x")  # C-u 3 x
+        read_until(fd, "xxxfirst line")
+        os.write(fd, b"\x18\x13")  # C-x C-s
+        read_until(fd, "Wrote ")
         os.write(fd, b"\x11")  # C-q quits
         tail = read_until(fd, "\x1b[?1049l")
         assert "\x1b[?25h" in tail
@@ -221,4 +231,4 @@ def test_tui_in_a_pseudo_terminal(tmp_path: Path) -> None:
             proc.kill()
             proc.wait()
         os.close(fd)
-    assert path.read_text() == "first line\nsecond line\n"  # nothing saves yet
+    assert path.read_text() == "xxxfirst line\nsecond line edited in a termina\n"

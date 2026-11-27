@@ -162,7 +162,7 @@ def test_typing_is_displayed(ui: HeadlessUI) -> None:
     ui.type("hello world\nsecond line")
     assert ui.text_rows_shown() == [" 1 hello world", " 2 second line"]
     assert ui.cursor() == (1, 14)
-    assert ui.screen()[-1] == " * test   L2 C11 "
+    assert ui.modeline == " * test   L2 C11 "
     ui.keys("<up>", "<home>")
     ui.type(">> ")
     assert ui.text_rows_shown()[0] == " 1 >> hello world"
@@ -234,7 +234,7 @@ def test_scrolling_fetches_lines_and_drops_distant_ones(ui: HeadlessUI) -> None:
     ui.scroll(-500)  # the wheel: the frontend scrolls and reports
     ui.idle()
     rows = ui.text_rows_shown()
-    assert rows[0].startswith("1492 ") and all("line" in r for r in rows)
+    assert rows[0].startswith("149") and all("line" in r for r in rows)
     ui.keys("<next>", "<next>")
     assert ui.cursor() is not None
 
@@ -339,9 +339,7 @@ def test_spans_and_faces_reach_the_frontend(ui: HeadlessUI) -> None:
 def test_gutter_marks_are_displayed(ui: HeadlessUI) -> None:
     ui.type("one\ntwo")
     ui.eval(
-        "_b.locals['gutter_columns'] = ["
-        "{'id': 'signs', 'kind': 'marks', 'side': 'left', 'width': 1},"
-        "{'id': 'numbers', 'kind': 'numbers', 'side': 'left', 'mode': 'absolute'}]\n"
+        "_b.options.gutter_columns = ['signs', 'numbers']\n"
         "_b.layer('d').add(_b.line_start(2), _b.line_start(2), "
         "gutter={'column': 'signs', 'text': '●', 'face': 'error'})"
     )

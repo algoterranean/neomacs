@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: plan written 2026-11-27. Steps 1 to 4 and Gate A done; step 5 is next. See the progress log (section 9).
+Status: plan written 2026-11-27. Steps 1 to 5 and Gates A and B done; step 6 is next. See the progress log (section 9).
 
 This is the working checklist for building Neomacs. It puts the stages of the
 five design documents into one order and says, for each step, what to read,
@@ -270,62 +270,62 @@ minibuffer, prefix, clipboard, context tests). STABILITY 3.5, 4, 10 (T2).
 
 **Registries:**
 
-- [ ] `@command` with parameter annotations; the flat registry.
-- [ ] Every registry records the registering module (ENGINE D30), from the
+- [x] `@command` with parameter annotations; the flat registry.
+- [x] Every registry records the registering module (ENGINE D30), from the
       start.
-- [ ] `Option`, the lookup chain, `on_change`, pending values for
+- [x] `Option`, the lookup chain, `on_change`, pending values for
       undeclared options.
-- [ ] `Hook`, global and per-buffer, idempotent add, coroutine functions
+- [x] `Hook`, global and per-buffer, idempotent add, coroutine functions
       awaited; the standard hooks.
-- [ ] Key notation parser; `Keymap`; the lookup order of ENGINE 7.2.
+- [x] Key notation parser; `Keymap`; the lookup order of ENGINE 7.2.
 
 **Dispatch:**
 
-- [ ] Command tasks; the lane; release and re-take of the lane around
+- [x] Command tasks; the lane; release and re-take of the lane around
       waiting for input.
-- [ ] Argument resolution, including `KeyText`.
-- [ ] Context variables: pinned in commands, looked up elsewhere, `NoFrame`,
+- [x] Argument resolution, including `KeyText`.
+- [x] Context variables: pinned in commands, looked up elsewhere, `NoFrame`,
       `ed.using` (ENGINE 7.7).
-- [ ] Cancellation: task cancel, and the 200 ms fallback interrupt from the
+- [x] Cancellation: task cancel, and the 200 ms fallback interrupt from the
       reader thread.
-- [ ] Background commands, `ed.start_task`, `ed.tasks`.
-- [ ] Prefix arguments (ENGINE 7.6) and `last_command`.
-- [ ] Undo groups keyed by real invocation ids.
+- [x] Background commands, `ed.start_task`, `ed.tasks`.
+- [x] Prefix arguments (ENGINE 7.6) and `last_command`.
+- [x] Undo groups keyed by real invocation ids.
 
 **Selections:**
 
-- [ ] `Selection`, `SelectionSet`, extending, normalisation with snapping to
+- [x] `Selection`, `SelectionSet`, extending, normalisation with snapping to
       cluster boundaries, last selection.
-- [ ] Once-per-selection dispatch.
-- [ ] Jump list.
-- [ ] Kill ring; `clipboard.set` and `clipboard.get`; yank's rules.
+- [x] Once-per-selection dispatch.
+- [x] Jump list.
+- [x] Kill ring; `clipboard.set` and `clipboard.get`; yank's rules.
 
 **Minibuffers and messages:**
 
-- [ ] `Minibuffer` as a view; the prompt area and inline hosts; single-line
+- [x] `Minibuffer` as a view; the prompt area and inline hosts; single-line
       and multi-line; `MinibufferMode`.
-- [ ] `ed.minibuffer.read`; the `Ask.*` annotations.
-- [ ] `Completer`, cancellation of a stale call, `popup_show`.
-- [ ] Named history lists.
-- [ ] `ed.message`, the `message` event, `*messages*`.
+- [x] `ed.minibuffer.read`; the `Ask.*` annotations.
+- [x] `Completer`, cancellation of a stale call, `popup_show`.
+- [x] Named history lists.
+- [x] `ed.message`, the `message` event, `*messages*`.
 
 **Syntax, first layer:**
 
-- [ ] `Syntax` table and defaults; the scanner with its line-state cache;
+- [x] `Syntax` table and defaults; the scanner with its line-state cache;
       `BufferSyntax` answering from the scanner.
-- [ ] Word motion over clusters.
+- [x] Word motion over clusters.
 
 **Remaining protocol and commands:**
 
-- [ ] `input.text`, `input.paste`, `input.mouse` with click counts and
+- [x] `input.text`, `input.paste`, `input.mouse` with click counts and
       areas, `input.drop`.
-- [ ] `ed.show` with roles, every role placed in the main area.
-- [ ] Menu registry and the `menu` event.
-- [ ] `new_frame` and `ui.open_frame`.
-- [ ] Standard commands: movement, selecting, adding and removing cursors,
+- [x] `ed.show` with roles, every role placed in the main area.
+- [x] Menu registry and the `menu` event.
+- [x] `new_frame` and `ui.open_frame`.
+- [x] Standard commands: movement, selecting, adding and removing cursors,
       editing, kill and yank, undo and redo, files, buffers, run a command by
       name, `keyboard_quit`.
-- [ ] T2: `@deprecated`, one warning per calling module, command and option
+- [x] T2: `@deprecated`, one warning per calling module, command and option
       aliases with value migration.
 
 **Done when:** a usable minimal editor in the terminal. A deliberately slow
@@ -335,9 +335,9 @@ in one step.
 
 ### Gate B: latency
 
-- [ ] The benchmark of ENGINE 14 exists and runs in CI: `input.key` received
+- [x] The benchmark of ENGINE 14 exists and runs in CI: `input.key` received
       to `flush` sent, for self-insert in a 10,000-line file.
-- [ ] 99th percentile under 5 ms on the reference machine.
+- [x] 99th percentile under 5 ms on the reference machine.
 
 If it fails: profile first. If the cost is in the text store or the view
 builder, this is the point to consider the native replacement that ENGINE 16
@@ -684,4 +684,6 @@ Add a row when a step or gate is finished, or when the design changed.
 | 2026-11-27 | Step 4 | this commit | Done: Electron 45.5.0, TypeScript, no framework. Differences from the design, now in FRONTEND.md: lines are relayed over Electron IPC, not a `MessagePort`; the page is served from a private `neomacs-app://` scheme; a face `size` that is a number is a multiple and a string like `"12pt"` is absolute. Verified by `npm run smoke`, which runs the real app off screen against a real engine: every check passes. **Not verified:** the app with a visible window, by a person. Run `cd frontend && npm start -- FILE` to see it. There is no cursor or keyboard input yet; those are step 6. The frontend's CI job is written but has not run. |
 | 2026-11-27 | Gate A, first check | `db13bd7` | Recorded as passed. **That was premature.** The scroll test counted lines missing from the model, not blank space on screen, and its round trips between steps gave the engine extra time; the edit test changed only lines far above the viewport, whose heights were estimates anyway. |
 | 2026-11-27 | Gate A, re-verified | this commit | The user asked for verification, and a stricter test found three faults, all fixed. (1) Renderer: a redraw arriving between a scroll and its scroll event put the old scroll position back. Every render now first adopts the scroller's position if it has moved (FRONTEND 5.4, item 6). (2) Engine: a line inserted directly above the first visible line, alongside nearby edits, moved the screen by a line, because the engine reported one bounding range and counted the line after a whole-line insertion as changed. It now reports whole-line edits exactly and sends separate ranges bottom-up (ENGINE 4.3, 8.3). **This is a protocol change in meaning, not in shape:** `lines` events are unchanged, but a batch may carry several per view and frontends rely on their being exact. (3) Both frontend models: a viewport at the very top of the buffer now stays at the top. Results, the same in three consecutive runs of `npm run smoke`: scrolling inside the page, one step per frame, at 1,190, 3,570, 7,140 and 14,290 px per second left no blank pixel and no missing line in any of 120 frames each; at 88,600 px per second every frame was partly blank, filling in when scrolling stopped. Scrolling back over lines whose heights were only estimates moved the text by exactly the scrolled distance, worst error 0.48 px. Growing and shrinking measured lines just above the viewport and inserting a line directly above it left the first visible line within 0.44 px; typing that re-wrapped a line in view left the top unmoved. **Limits of this verification:** it runs off screen at 60 frames per second with software rendering and scrolls by setting the scroll offset; it has not been checked with a real window, a trackpad or a person. |
+| 2026-11-27 | Step 5 | this commit | Done: 74 new tests, 184 in all. Verified in the terminal frontend under a pseudo-terminal: open a file, type, undo, `M-x` with completion, `C-u 3 x`, `C-x C-s`. Differences from the design, now in ENGINE.md: (1) the fallback interrupt goes through a SIGINT handler that raises only if the foreground command is what is running, so it cannot land in the event loop; (2) a command resuming after a prompt takes the lane ahead of keys typed after the answer, which the first implementation got wrong (`<return>` then `M-p` applied `M-p` to the old prompt); (3) input typed ahead of a cancel is discarded by a cancel counter, since a queue drain missed the event the dispatcher had already taken; (4) both ends of a selection advance past text inserted at them; (5) views remember their selections per buffer; (6) the gutter is line numbers only by default; (7) undo groups record the primary selection as well as the ranges; (8) `Buffer` is always truthy, after an empty buffer being falsy caused two bugs. Additions the design did not name: `KeyName` annotation, `insert_text`, `paste` and `drop` commands, `<up-mouse-N>` and `<modeline-mouse-N>` keys, message kind `log`, `Minibuffer.submit_selects`, `typing_undo_limit` and `key_hint_delay` options. Modes exist only as the minimum the command system needs (a keymap, a syntax table, defaults); the rest is step 9. The Electron frontend accepts the new events but does not draw prompts, messages or popups yet (step 6). |
+| 2026-11-27 | Gate B | this commit | Passed. `python -m neomacs.tools.bench --keys 2000 --check` on an Apple M3 Max, free-threaded 3.15.2, GIL off, four runs after the fixes below: engine time from `input.key` arriving to the batch being handed to the writer, 99th percentile between 0.6 and 2.0 ms in every scenario (plain typing, with line breaks, three cursors, a highlighted code line, top of file, a 3,000-character line), median 0.4 to 0.55 ms, against a 5 ms limit. The worst single sample in each scenario was usually 1 to 5 ms, with isolated spikes of 8, 9, 12, 15 and 17 ms across the runs, roughly one key in ten thousand; their cause was not investigated. As the client sees it, including the socket and the test client's own parsing and layout: median 0.9 to 2.9 ms. Two faults were found on the way. (1) The first long run showed latency growing by about 1 ms per 1,000 characters on the line being typed on, 99th percentile up to 4 ms: the modeline's column count walked the line cluster by cluster. It is now a binary search, and the 3,000-character case costs the same as any other. A 400-key run had hidden this. (2) The highlighting scenario was first typing on a line of plain letters with a broken keyword pattern, so it measured nothing; the benchmark now types on a code line and reports the runs per line as evidence (3.9 on average, 4 on the typed line). **Limits:** the highlighting is a simple regular-expression provider standing in for step 9's; the measurement stops at the writer queue and does not include the socket write or any frontend; vertical motion, which needs a geometry round trip, is not measured yet; CI has not run it. To be re-run with real highlighting at the end of step 9. |
 | | | | |

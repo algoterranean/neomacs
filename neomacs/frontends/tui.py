@@ -204,15 +204,57 @@ class Tui:
             base = faces.get(0, {})
             layout = session.layout(view)
             width = session.cols
+            text_rows = session.text_rows
             out: list[str] = ["\x1b[?25l\x1b[H"]
             for y, row in enumerate(layout.visible()):
                 out.append(f"\x1b[{y + 1};1H" + self._row_text(row, faces, width))
             runs = view.modeline or []
             modeline = "".join(str(run[1]) for run in runs)[:width].ljust(width)
             face = faces.get(runs[0][2], {}) if runs else {}
-            out.append(f"\x1b[{session.rows};1H" + sgr(face, base) + modeline + "\x1b[0m")
+            out.append(f"\x1b[{text_rows + 1};1H" + sgr(face, base) + modeline + "\x1b[0m")
+
+            # Under the modeline: the prompt, or the latest message.
+            prompt = session.model.prompt
+            label = session.prompt_label()
+            bottom: list[str] = []
+            if prompt is not None:
+                rendered = session.layout(prompt[0]).render()
+                bottom = [
+                    (label if i == 0 else " " * len(label)) + r for i, r in enumerate(rendered)
+                ]
+            else:
+                bottom = [session.bottom_text()]
+            for i in range(session.prompt_rows):
+                text = bottom[i] if i < len(bottom) else ""
+                out.append(
+                    f"\x1b[{text_rows + 2 + i};1H" + sgr({}, base) + text[:width].ljust(width)
+                )
+
+            # Completion candidates, drawn over the last text rows.
+            popup = session.model.popup
+            if popup is not None and popup["items"]:
+                items = popup["items"][: max(1, min(8, text_rows - 1))]
+                first_row = text_rows - len(items) + 1
+                for i, item in enumerate(items):
+                    line = f" {item[0]}  {item[1]}"[:width].ljust(width)
+                    style = "\x1b[7m" if i == popup["selected"] else ""
+                    out.append(
+                        f"\x1b[{first_row + i};1H" + sgr({}, base) + style + line + "\x1b[0m"
+                    )
+
             cursor = None
-            if view.selections:
+            focused = session.focused
+            if (
+                prompt is not None
+                and focused is not None
+                and focused is prompt[0]
+                and focused.selections
+            ):
+                sel = focused.selections[focused.primary]
+                cell = session.layout(focused).cursor_cell(sel[2], sel[3])
+                if cell is not None:
+                    cursor = (text_rows + 1 + cell[0], len(label) + cell[1])
+            elif view.selections:
                 sel = view.selections[view.primary]
                 cursor = layout.cursor_cell(sel[2], sel[3])
             if cursor is not None:
@@ -256,6 +298,8 @@ class Tui:
                         if key == QUIT_KEY:
                             return
                         client.notify("input.key", key)
+                        if key == "C-g":
+                            client.notify("input.interrupt")
         finally:
             signal.signal(signal.SIGWINCH, previous)
 
@@ -269,8 +313,7 @@ def run(socket_path: Path | str, file: str | None = None) -> None:
         rows, cols = terminal.size()
         session = Session(client, rows, cols, auto_ack=False)
         if file is not None:
-            path = str(Path(file).expanduser().resolve())
-            client.eval(f"ed.frames[{session.frame_id}].window.show(ed.buffers.visit({path!r}))")
+            client.call("engine.call", "files.find", [str(Path(file).expanduser().resolve())])
         Tui(session, terminal).run()
     with contextlib.suppress(OSError):
         client.notify("ui.detach")

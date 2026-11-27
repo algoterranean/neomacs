@@ -115,7 +115,18 @@ class MonoView:
         col = 0
         start = 0
         position = 0  # buffer offset reached so far
-        for offset, text, face in line[1]:
+        for run in line[1]:
+            if len(run) == 2:  # an inline object: one placeholder cell
+                offset, text, face = run[0], "\u25af", 0
+                covers = int(run[1].get("covers", 0))
+                if wrap and cells and col + 1 > text_width:
+                    rows.append(Row(number, len(rows), cells, start, position, False))
+                    cells, col, start = [], 0, position
+                cells.append(Cell(offset, covers, text, 1, face))
+                col += 1
+                position = offset + covers
+                continue
+            offset, text, face = run
             at = offset
             for g in _iter_graphemes(text):
                 cluster = text[g.start : g.end]

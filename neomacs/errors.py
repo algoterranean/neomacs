@@ -28,3 +28,7 @@ class NoFrame(NeomacsError):
 
 class ReadOnly(NeomacsError):
     """An attempt to change a read-only buffer."""
+
+
+class Quit(NeomacsError):
+    """The user cancelled: a prompt was dismissed, or a command was interrupted."""

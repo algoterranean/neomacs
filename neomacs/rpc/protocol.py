@@ -45,6 +45,7 @@ class Connection:
         self.name = transport.name
         self.closed = False
         self.frame: Any = None  # set by ui.attach
+        self.received_at = 0.0  # when the line being handled arrived (latency benchmark)
         self.on_close: list[Callable[[Connection], None]] = []
         self._next_id = 1
         self._pending: dict[int, asyncio.Future[Any]] = {}
@@ -65,8 +66,11 @@ class Connection:
     def _line_from_thread(self, line: bytes) -> None:
         if self.intercept is not None:
             self.intercept(line)
+        # Stamped here, on the reader thread, so that a latency measurement
+        # includes the hand-over to the loop.
+        arrived = time.perf_counter() if self.editor.latency is not None else 0.0
         try:
-            self._loop.call_soon_threadsafe(self._on_line, line, context=self._context)
+            self._loop.call_soon_threadsafe(self._on_line, line, arrived, context=self._context)
         except RuntimeError:  # loop closed
             pass
 
@@ -121,7 +125,8 @@ class Connection:
         for callback in list(self.on_close):
             self.editor.guard(f"close of {self.name}", callback, self)
 
-    def _on_line(self, line: bytes) -> None:
+    def _on_line(self, line: bytes, arrived: float = 0.0) -> None:
+        self.received_at = arrived
         text = line.decode("utf-8", errors="replace")
         _log("<", self.name, text)
         try:

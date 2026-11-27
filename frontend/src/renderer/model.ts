@@ -1,7 +1,9 @@
 // What the frontend holds: the result of applying `redraw` events (ENGINE 4.3).
 // This mirrors neomacs/frontends/model.py, which is the reference.
 
+// A text run, or an inline object standing for buffer text (an image, a minibuffer).
 export type Run = [offset: number | null, text: string, face: number];
+export type ObjectRun = [offset: number | null, object: Record<string, unknown>];
 export type LineAttrs = { gutter?: Record<string, [string, number]>; [key: string]: unknown };
 export type Line = [attrs: LineAttrs, runs: Run[]];
 export type Selection = [anchorLine: number, anchorOffset: number, headLine: number, headOffset: number];
@@ -122,6 +124,12 @@ export class FrameModel {
   focus: number | null = null;
   title = "";
   resets = 0;
+  // Chrome the engine describes (FRONTEND 5.6).  Drawing it is stage F2 and F3.
+  minibuffers = new Map<number, { host: Record<string, unknown>; options: Record<string, unknown> }>();
+  popup: { items: [string, string][]; selected: number; view: number; line: number; offset: number } | null = null;
+  message: { text: string; kind: string } | null = null;
+  keys = "";
+  menu: unknown[] = [];
 
   view(id: number): ViewModel {
     let view = this.views.get(id);
@@ -151,6 +159,9 @@ export class FrameModel {
           this.layout = null;
           this.views.clear();
           this.focus = null;
+          this.minibuffers.clear();
+          this.popup = null;
+          this.keys = "";
           this.resets += 1;
           break;
         case "face_define":
@@ -186,6 +197,28 @@ export class FrameModel {
         }
         case "modeline":
           this.view(a[0] as number).modeline = a[1] as Run[];
+          break;
+        case "minibuffer_show":
+          this.minibuffers.set(a[0] as number, { host: a[1] as Record<string, unknown>, options: a[2] as Record<string, unknown> });
+          break;
+        case "minibuffer_hide":
+          this.minibuffers.delete(a[0] as number);
+          this.views.delete(a[0] as number);
+          break;
+        case "popup_show":
+          this.popup = { items: a[0] as [string, string][], selected: a[1] as number, view: a[2] as number, line: a[3] as number, offset: a[4] as number };
+          break;
+        case "popup_hide":
+          this.popup = null;
+          break;
+        case "message": {
+          const text = (a[0] as Run[]).map((run) => run[1]).join("");
+          if (a[1] === "keys") this.keys = text;
+          else this.message = { text, kind: a[1] as string };
+          break;
+        }
+        case "menu":
+          this.menu = a[0] as unknown[];
           break;
         case "reveal":
           this.view(a[0] as number).pendingReveal = [a[1] as number, a[2] as number, a[3] as string];

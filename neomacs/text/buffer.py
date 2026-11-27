@@ -91,6 +91,13 @@ class Buffer:
         self.locals: dict[str, Any] = {}
         # Decoration providers: callables that compute faces on demand (ENGINE 5.4).
         self.providers: list[Any] = []
+        self.mode: Any = None  # the major mode instance, once modes exist
+        self.minor_modes: list[Any] = []
+        self.keymap: Any = None  # the buffer's local keymap, if it has one
+        self.option_values: dict[str, Any] = {}
+        self.project_values: dict[str, Any] = {}
+        # Applied to all inserted text; a single-line minibuffer uses it to keep newlines out.
+        self.text_filter: Callable[[str], str] | None = None
         self.undo = UndoLog(self)
         # How the text is written back to its file.
         self.encoding = "utf-8"
@@ -106,6 +113,9 @@ class Buffer:
 
     def __len__(self) -> int:
         return len(self.store)
+
+    def __bool__(self) -> bool:
+        return True  # an empty buffer is still a buffer
 
     @overload
     def __getitem__(self, index: int) -> str: ...
@@ -133,6 +143,30 @@ class Buffer:
     @provisional("0.1")
     def modified(self) -> bool:
         return self.tick != self.saved_tick
+
+    @provisional("0.1")
+    def changed_since(self, tick: int) -> bool:
+        """True if the text has changed since `tick` was read from `buf.tick`."""
+        return self.tick != tick
+
+    @property
+    @provisional("0.1")
+    def options(self) -> Any:
+        """This buffer's view of the options: `buf.options.tab_width`."""
+        from neomacs.options import OptionView
+
+        return OptionView(self)
+
+    @property
+    @provisional("0.1")
+    def syntax(self) -> Any:
+        """What is a word, a string, a comment or a bracket here (ENGINE 5.9)."""
+        from neomacs.syntax.buffer import BufferSyntax
+
+        found = self.locals.get("_syntax")
+        if not isinstance(found, BufferSyntax):
+            found = self.locals["_syntax"] = BufferSyntax(self)
+        return found
 
     @provisional("0.1")
     def clamp(self, pos: int) -> int:
@@ -202,6 +236,8 @@ class Buffer:
             raise IndexError(f"range {start}..{end} out of bounds 0..{size}")
         if "\r" in text:
             text = text.replace("\r\n", "\n").replace("\r", "\n")
+        if self.text_filter is not None and text:
+            text = self.text_filter(text)
         if start == end and not text:
             return
         if self.read_only:
@@ -351,6 +387,14 @@ class Buffer:
         offset = pos - start
         i = bisect_left(bounds, offset)
         return i < len(bounds) and bounds[i] == offset
+
+    @provisional("0.1")
+    def column(self, pos: int) -> int:
+        """How many grapheme clusters lie between the start of POS's line and POS."""
+        start, _, bounds = self._clusters_of_line(pos)
+        if bounds is None:
+            return pos - start
+        return bisect_left(bounds, pos - start)
 
     @provisional("0.1")
     def clusters(self, start: int, end: int) -> Iterator[tuple[int, int]]:

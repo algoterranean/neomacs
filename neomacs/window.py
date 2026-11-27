@@ -3,19 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import secrets
+import time
 from typing import TYPE_CHECKING, Any
 
 from neomacs.display.faces import UI_FACES
 from neomacs.display.view import build_line
 from neomacs.errors import FrontendGone, NoFrame, RpcError
+from neomacs.selection import JumpList, SelectionSet
 from neomacs.stability import provisional
 from neomacs.text.buffer import Buffer, Change
-from neomacs.text.marker import Cursor, Marker
+from neomacs.text.marker import Cursor
 
 if TYPE_CHECKING:
+    from neomacs.commands import PrefixArg
     from neomacs.editor import Editor
+    from neomacs.keymap import Keymap
+    from neomacs.minibuffer import Minibuffer
     from neomacs.rpc.protocol import Connection
 
 _view_ids = itertools.count(1)
@@ -73,14 +79,13 @@ class View:
     def __init__(self, frame: Frame, buffer: Buffer) -> None:
         self.id = next(_view_ids)
         self.frame = frame
-        self.wrap = True
         self.shape = "block"
         # (first visible line, last visible line, lines per page), as last reported.
         self.viewport: tuple[int, int, int] | None = None
         self.goal_x: float | None = None
         self.buffer: Buffer = buffer
-        self.cursor: Cursor = buffer.cursor(0)
-        self.anchor: Marker = buffer.marker(0)
+        self.selections = SelectionSet(buffer)
+        self.jumps = JumpList()
         self._held: tuple[int, int] | None = None  # lines the frontend holds, inclusive
         # Changed line ranges not yet sent: (first line now, lines before, lines now),
         # sorted and disjoint.
@@ -101,11 +106,15 @@ class View:
         if buffer is self.buffer:
             return
         self.buffer.remove_listener(self._on_change)
-        self.cursor.detach()
-        self.anchor.detach()
+        # Remember where this view was in the old buffer, and come back to
+        # where it last was in the new one.
+        self.buffer.locals.setdefault("_view_positions", {})[self.id] = self.selections.ranges()
+        self.selections.detach()
         self.buffer = buffer
-        self.cursor = buffer.cursor(0)
-        self.anchor = buffer.marker(0)
+        self.selections = SelectionSet(buffer)
+        remembered = buffer.locals.get("_view_positions", {}).get(self.id)
+        if remembered:
+            self.selections.set([(buffer.clamp(a), buffer.clamp(h)) for a, h in remembered])
         buffer.add_listener(self._on_change)
         # The frontend will be at the top of the new buffer.  It reports its
         # viewport only when that changes, so assume the page it had.
@@ -116,7 +125,8 @@ class View:
         self._dirty = []
         self._drop_held = self._held is not None
         self._held = None
-        self._reveal = (1, 0, "top")
+        line, offset = buffer.line_offset(self.cursor.pos)
+        self._reveal = (line, offset, "center") if line > 1 else (1, 0, "top")
         self.frame.schedule_update()
 
     @provisional("0.1")
@@ -126,15 +136,24 @@ class View:
         self._reveal = (line, offset, align)
         self.frame.schedule_update()
 
+    @property
     @provisional("0.1")
-    def collapse(self) -> None:
-        """Make the selection empty, at the cursor."""
-        self.anchor.pos = self.cursor.pos
+    def cursor(self) -> Cursor:
+        """The primary selection's head."""
+        return self.selections.primary.head
+
+    @provisional("0.1")
+    def embed(self, minibuffer: Minibuffer, pos: int) -> None:
+        """Show MINIBUFFER inline in this view's buffer at POS; it moves with the text."""
+        span = self.buffer.layer("minibuffers").add(
+            pos, pos, display={"minibuffer": minibuffer.view.id}
+        )
+        minibuffer.host = ("inline", self, span)
+        self.frame.minibuffers[minibuffer.view.id] = minibuffer
 
     def close(self) -> None:
         self.buffer.remove_listener(self._on_change)
-        self.cursor.detach()
-        self.anchor.detach()
+        self.selections.detach()
         self.frame.views.pop(self.id, None)
 
     def _on_change(self, change: Change) -> None:
@@ -145,24 +164,31 @@ class View:
 
     @provisional("0.1")
     async def move_visual(self, count: int, unit: str = "visual_line") -> None:
-        """Move the cursor COUNT visual rows or pages, as the frontend lays them out."""
+        """Move every cursor COUNT visual rows or pages, as the frontend lays them out.
+
+        All the selections go to the frontend in one request (ENGINE 4.4).
+        """
         buf = self.buffer
-        line, offset = buf.line_offset(self.cursor.pos)
+        selections = list(self.selections)
+        positions = [[*buf.line_offset(s.head.pos), s.goal_x] for s in selections]
+        tick = buf.tick
         try:
-            reply = await self.frame.request(
-                "layout.move", self.id, [[line, offset, self.goal_x]], unit, count
-            )
-            new_line, new_offset, goal = reply[0]
-            new_line = max(1, min(buf.line_count, int(new_line)))
-            pos = buf.position(new_line, int(new_offset))
+            reply = await self.frame.request("layout.move", self.id, positions, unit, count)
+            if buf.changed_since(tick) or len(reply) != len(selections):
+                raise LookupError("the buffer changed while the frontend was answering")
+            targets = [
+                (buf.position(max(1, min(buf.line_count, int(line))), int(offset)), goal)
+                for line, offset, goal in reply
+            ]
         except RpcError, FrontendGone, NoFrame, TimeoutError, LookupError, TypeError, ValueError:
             # No usable answer: fall back to logical lines.
             page = self.viewport[2] if self.viewport else 20
-            self.cursor.forward_line(count * (page if unit == "page" else 1))
-            self.goal_x = None
+            for s in selections:
+                s.forward_line(count * (page if unit == "page" else 1))
             return
-        self.cursor.pos = pos if buf.is_boundary(pos) else buf.prev_boundary(pos)
-        self.goal_x = goal
+        for s, (pos, goal) in zip(selections, targets, strict=True):
+            s.move_to(pos if buf.is_boundary(pos) else buf.prev_boundary(pos))
+            s.goal_x = goal
 
     @provisional("0.1")
     async def visual_line_edge(self, which: str) -> int:
@@ -178,21 +204,30 @@ class View:
     # -- what the frontend is told ------------------------------------------
 
     def info(self) -> dict[str, Any]:
-        options = self.buffer.locals
+        options = self.buffer.options
+        gutter: list[dict[str, Any]] = []
+        for column in options.gutter_columns:
+            if column == "numbers":
+                if options.line_numbers != "off":
+                    gutter.append({"id": "numbers", "kind": "numbers", "side": "left",
+                                   "mode": options.line_numbers})  # fmt: skip
+            else:
+                gutter.append({"id": column, "kind": "marks", "side": "left", "width": 1})
         return {
             "name": self.buffer.name,
             "line_count": self.buffer.line_count,
-            "wrap": self.wrap,
-            "gutter": options.get("gutter_columns", [{"id": "numbers", "kind": "numbers",
-                                                      "side": "left", "mode": "absolute"}]),
-            "margins": options.get("margins", {"left": 0, "right": 0}),
-            "max_width": options.get("max_width"),
-            "tab_width": options.get("tab_width", 8),
-        }  # fmt: skip
+            "wrap": bool(options.wrap),
+            "gutter": gutter,
+            "margins": self.buffer.locals.get("margins", {"left": 0, "right": 0}),
+            "max_width": self.buffer.locals.get("max_width"),
+            "tab_width": int(options.tab_width),
+        }
 
-    def selections(self) -> list[list[int]]:
+    def selection_ranges(self) -> list[list[int]]:
         buf = self.buffer
-        return [[*buf.line_offset(self.anchor.pos), *buf.line_offset(self.cursor.pos)]]
+        return [
+            [*buf.line_offset(s.anchor.pos), *buf.line_offset(s.head.pos)] for s in self.selections
+        ]
 
     def modeline(self) -> list[list[Any]] | None:
         return None
@@ -215,7 +250,8 @@ class View:
         for number in range(first, last + 1):
             line = build_line(self.buffer, number, faces, providers)
             for run in line[1]:
-                self.frame.use_face(run[2])
+                if len(run) == 3:
+                    self.frame.use_face(run[2])
             for mark in line[0].get("gutter", {}).values():
                 self.frame.use_face(mark[1])
             built.append(line)
@@ -243,9 +279,9 @@ class View:
 
         self._fill(events, count)
 
-        selections = [self.selections(), self.shape]
+        selections = [self.selection_ranges(), self.selections.primary_index, self.shape]
         if selections != self._sent_selections:
-            events.append(["selections", self.id, 0, selections[0], self.shape])
+            events.append(["selections", self.id, selections[1], selections[0], self.shape])
             self._sent_selections = selections
         modeline = self.modeline()
         if modeline != self._sent_modeline:
@@ -363,6 +399,28 @@ class Frame:
         self._sent_focus: int | None = None
         self._stall_timer: asyncio.TimerHandle | None = None
         self._expiry_timer: asyncio.TimerHandle | None = None
+        # Input state (ENGINE 7.2, 7.6).
+        self.prefix: PrefixArg | None = None
+        self.last_command: tuple[str, tuple[Any, ...]] | None = None
+        self.transient: Keymap | None = None
+        self.pending_keys: list[str] = []
+        self.key_waiters: list[asyncio.Future[str]] = []
+        self.typing_run: tuple[tuple[int, int], int, int] = ((0, 0), 0, 0)
+        self.last_event: Any = None
+        self.key_times: list[float] = []  # arrival times of keys not yet shown (benchmark)
+        # Minibuffers (ENGINE 7.5): the prompt stack, and every one by view id.
+        self.prompts: list[Minibuffer] = []
+        self.minibuffers: dict[int, Minibuffer] = {}
+        self.places: list[str] = []
+        self.last_clipboard: str | None = None
+        self._sent_minibuffers: dict[int, Any] = {}
+        self._messages: list[tuple[str, str]] = []
+        self._keys_text: str | None = None
+        self._sent_keys: str | None = None
+        self._keys_timer: asyncio.TimerHandle | None = None
+        self._popup_dirty = False
+        self._popup_shown = False
+        self._sent_menu: Any = None
         scratch = editor.buffers.get("*scratch*")
         if scratch is None:  # an empty buffer is falsy, so test for None
             scratch = editor.buffers.new("*scratch*")
@@ -379,6 +437,146 @@ class Frame:
     def busy(self) -> bool:
         """True while an update is on its way out or awaiting acknowledgement."""
         return self.attached and not self.stalled and (self._scheduled or bool(self._in_flight))
+
+    # -- focus, minibuffers, messages -----------------------------------------
+
+    @provisional("0.1")
+    def focus_view(self, view: View) -> None:
+        """Give VIEW the keyboard."""
+        if view.id not in self.views or view is self.focus:
+            return
+        self.focus = view
+        if isinstance(view, Window):
+            self.window = view
+        from neomacs.hooks import window_changed
+
+        window_changed.run(self)
+        self._popup_dirty = True
+        self.schedule_update()
+
+    @provisional("0.1")
+    def prompt(self, minibuffer: Minibuffer) -> None:
+        """Show MINIBUFFER in the prompt area and focus it.  Prompts stack."""
+        minibuffer.host = ("prompt",)
+        minibuffer._previous_focus = self.focus  # pyright: ignore[reportPrivateUsage]
+        self.prompts.append(minibuffer)
+        self.minibuffers[minibuffer.view.id] = minibuffer
+        self.focus_view(minibuffer.view)
+
+    @provisional("0.1")
+    def place(self, minibuffer: Minibuffer, name: str) -> None:
+        """Show MINIBUFFER in the named part of the UI, or the prompt area if
+        the frontend has no such place."""
+        if name not in self.places:
+            self.prompt(minibuffer)
+            return
+        minibuffer.host = ("place", name)
+        self.minibuffers[minibuffer.view.id] = minibuffer
+        self.schedule_update()
+
+    def remove_minibuffer(self, minibuffer: Minibuffer) -> None:
+        self.minibuffers.pop(minibuffer.view.id, None)
+        if minibuffer in self.prompts:
+            self.prompts.remove(minibuffer)
+        if minibuffer.host[:1] == ("inline",):
+            with contextlib.suppress(Exception):
+                minibuffer.host[2].remove()
+        previous = minibuffer._previous_focus  # pyright: ignore[reportPrivateUsage]
+        was_focused = self.focus is minibuffer.view
+        minibuffer.view.close()
+        if was_focused:
+            target = previous if previous is not None and previous.id in self.views else self.window
+            self.focus = target
+            if isinstance(target, Window):
+                self.window = target
+        self._popup_dirty = True
+        self.schedule_update()
+
+    @provisional("0.1")
+    def show_message(self, text: str, kind: str = "info") -> None:
+        """Send a transient message to this frame's frontend."""
+        self._messages.append((text, kind))
+        del self._messages[:-20]
+        self.schedule_update()
+
+    def show_keys(self, text: str, *, delay: bool = False) -> None:
+        """Show a pending key sequence or prefix argument."""
+        if self._keys_timer is not None:
+            self._keys_timer.cancel()
+            self._keys_timer = None
+        loop = self.editor.loop
+        if delay and loop is not None and self._keys_text is None:
+            wait = float(self.editor.options.key_hint_delay)
+            self._keys_timer = loop.call_later(wait, self._set_keys, text)
+        else:
+            self._set_keys(text)
+
+    def _set_keys(self, text: str | None) -> None:
+        self._keys_timer = None
+        self._keys_text = text
+        self.schedule_update()
+
+    def clear_keys(self) -> None:
+        if self._keys_timer is not None:
+            self._keys_timer.cancel()
+            self._keys_timer = None
+        if self._keys_text is not None:
+            self._set_keys(None)
+
+    def popup_changed(self) -> None:
+        self._popup_dirty = True
+        self.schedule_update()
+
+    def clipboard_set(self, text: str) -> None:
+        """Put TEXT on the frontend's system clipboard (ENGINE 4.5)."""
+        self.last_clipboard = text
+        if self.attached and self.conn is not None:
+            self.conn.notify("clipboard.set", "clipboard", {"text": text})
+
+    def _sync_chrome(self, body: list[Any]) -> None:
+        """Minibuffers shown outside the text, the popup, messages and the menu."""
+        shown: dict[int, Any] = {}
+        top = self.prompts[-1] if self.prompts else None
+        for view_id, minibuffer in self.minibuffers.items():
+            if minibuffer.host[:1] == ("prompt",):
+                if minibuffer is not top:
+                    continue  # only the newest prompt is displayed
+                shown[view_id] = [{"kind": "prompt"}, minibuffer.options()]
+            elif minibuffer.host[:1] == ("place",):
+                shown[view_id] = [
+                    {"kind": "place", "name": minibuffer.host[1]},
+                    minibuffer.options(),
+                ]
+        for view_id in list(self._sent_minibuffers):
+            if view_id not in shown:
+                body.append(["minibuffer_hide", view_id])
+                del self._sent_minibuffers[view_id]
+        for view_id, described in shown.items():
+            if self._sent_minibuffers.get(view_id) != described:
+                body.append(["minibuffer_show", view_id, *described])
+                self._sent_minibuffers[view_id] = described
+        if self._popup_dirty:
+            self._popup_dirty = False
+            owner = self.minibuffers.get(self.focus.id)
+            if owner is not None and owner.candidates:
+                line, offset = owner.buffer.line_offset(0)
+                items = [[c.text, c.annotation] for c in owner.candidates]
+                body.append(["popup_show", items, owner.selected, owner.view.id, line, offset])
+                self._popup_shown = True
+            elif self._popup_shown:
+                body.append(["popup_hide"])
+                self._popup_shown = False
+        for text, kind in self._messages:
+            body.append(["message", [[None, text, 0]], kind])
+        self._messages = []
+        if self._keys_text != self._sent_keys:
+            body.append(["message", [[None, self._keys_text or "", 0]], "keys"])
+            self._sent_keys = self._keys_text
+        menu = self.editor.menu
+        stamp = (menu.generation, self.focus.buffer.mode.__class__)
+        if stamp != self._sent_menu:
+            self._sent_menu = stamp
+            body.append(["menu", menu.tree(self.editor.dispatcher.active_keymaps(self))])
 
     # -- updates ------------------------------------------------------------
 
@@ -406,6 +604,11 @@ class Frame:
         events.append(["flush", self._seq])
         self._in_flight.add(self._seq)
         conn.notify("redraw", events)
+        latency = self.editor.latency
+        if latency is not None and self.key_times and not self.editor.dispatcher.busy:
+            now = time.perf_counter()
+            latency.extend(now - received for received in self.key_times)
+            self.key_times.clear()
         loop = self.editor.loop
         assert loop is not None
         if self._stall_timer is None:
@@ -426,6 +629,11 @@ class Frame:
             self._faces_sent.clear()
             self._sent_layout = self._sent_title = self._sent_focus = None
             self._faces_generation = -1
+            self._sent_minibuffers = {}
+            self._sent_keys = None
+            self._sent_menu = None
+            self._popup_dirty = True
+            self._popup_shown = False
             for view in self.views.values():
                 view.reset_sync()
         ui_faces: dict[str, int] | None = None
@@ -443,6 +651,7 @@ class Frame:
         if self.title != self._sent_title:
             body.append(["title", self.title])
             self._sent_title = self.title
+        self._sync_chrome(body)
         for view in list(self.views.values()):
             view.sync(body)
         if self.focus.id != self._sent_focus:

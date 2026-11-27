@@ -34,6 +34,12 @@ test("the recorded session replays to the recorded state", () => {
   assert.deepEqual(model.layout, recording.final.layout);
   assert.equal(model.focus, recording.final.focus);
   assert.equal(model.title, recording.final.title);
+  const final = recording.final as unknown as { message: [string, string] | null; keys: string; menu: unknown[]; popup: unknown };
+  assert.deepEqual(model.message ? [model.message.text, model.message.kind] : null, final.message);
+  assert.equal(model.keys, final.keys);
+  assert.deepEqual(model.menu, final.menu);
+  assert.equal(model.popup, final.popup);
+  assert.equal(model.minibuffers.size, 0);
   for (const [id, expected] of Object.entries(recording.final.views)) {
     const view = model.views.get(Number(id));
     assert.ok(view);

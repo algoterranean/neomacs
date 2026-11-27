@@ -49,7 +49,7 @@ class HeadlessUI(Session):
         return value
 
     def open(self, path: Path | str) -> None:
-        self.eval(f"ed.frames[{self.frame_id}].window.show(ed.buffers.visit({str(path)!r}))")
+        self.call("files.find", str(path))
 
     # -- looking ------------------------------------------------------------
 
@@ -63,25 +63,75 @@ class HeadlessUI(Session):
     def mono(self) -> MonoView:
         return self.layout(self.view)
 
+    def bottom_rows(self) -> list[str]:
+        """The rows under the modeline: the prompt with what has been typed, or a message."""
+        with self.lock:
+            prompt = self.model.prompt
+            if prompt is None:
+                return [self.bottom_text()]
+            rows = self.layout(prompt[0]).render()
+            label = self.prompt_label()
+            return [(label if i == 0 else " " * len(label)) + row for i, row in enumerate(rows)]
+
     def screen(self) -> list[str]:
-        """The text rows as displayed, then the modeline."""
+        """The text rows as displayed, the modeline, then the prompt or message rows."""
         with self.lock:
             rows = self.mono.render()
             modeline = "".join(run[1] for run in (self.view.modeline or []))
-            return [*rows, modeline]
+            return [*rows, modeline, *self.bottom_rows()]
 
     def text_rows_shown(self) -> list[str]:
         """The text rows without trailing empty ones."""
-        rows = self.screen()[:-1]
+        with self.lock:
+            rows = self.mono.render()
         while rows and not rows[-1]:
             rows.pop()
         return rows
 
+    @property
+    def modeline(self) -> str:
+        return "".join(run[1] for run in (self.view.modeline or []))
+
+    @property
+    def message(self) -> str:
+        """The latest message from the engine."""
+        return self.model.message[0] if self.model.message else ""
+
+    @property
+    def prompt(self) -> str | None:
+        """The prompt's label and input, or None when nothing is being asked."""
+        with self.lock:
+            return self.bottom_rows()[0] if self.model.prompt is not None else None
+
+    def candidates(self) -> list[str]:
+        """The completion candidates on show."""
+        popup = self.model.popup
+        return [item[0] for item in popup["items"]] if popup else []
+
+    def cursors(self) -> list[tuple[int, int]]:
+        """(line, offset) of every cursor in the main view, in buffer order."""
+        return [(s[2], s[3]) for s in self.view.selections]
+
     def cursor(self) -> tuple[int, int] | None:
-        """(row, column) of the primary cursor on screen."""
+        """(row, column) of the main view's primary cursor on screen."""
         with self.lock:
             sel = self.view.selections[self.view.primary]
             return self.mono.cursor_cell(sel[2], sel[3])
+
+    def call(self, command: str, *args: Any) -> Any:
+        """Run a command by name and wait for the display to settle."""
+        value = self.client.call("engine.call", command, list(args))
+        self.idle()
+        return value
+
+    def mouse(
+        self, line: int, offset: int, *, button: int = 1, action: str = "press",
+        clicks: int = 1, mods: str = "", area: str = "text",
+    ) -> None:  # fmt: skip
+        self.client.notify(
+            "input.mouse", button, action, clicks, mods, self.view.id, area, line, offset
+        )
+        self.idle()
 
     def close(self) -> None:
         self.client.close()

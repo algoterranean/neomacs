@@ -8,6 +8,14 @@ export type Viewport = [first: number, last: number, pageLines: number];
 
 function runSpan(run: Run): HTMLSpanElement {
   const span = document.createElement("span");
+  if (typeof run[1] !== "string") {
+    // An inline object.  Drawing images and embedded minibuffers is stage F3;
+    // until then it is a placeholder.
+    span.className = "nm-object";
+    if (run[0] !== null) span.dataset["o"] = String(run[0]);
+    span.textContent = "\u25af";
+    return span;
+  }
   if (run[2] !== 0) span.className = `f${run[2]}`;
   if (run[0] !== null) span.dataset["o"] = String(run[0]);
   span.textContent = run[1]; // text, never markup

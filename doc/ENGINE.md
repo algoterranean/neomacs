@@ -1,6 +1,7 @@
 # Engine core design
 
-Status: draft 20, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 21, 2026-11-27. Stages 0 to 3 are implemented; see
+IMPLEMENTATION.md for what exists. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
 This describes the backend ("engine") of Neomacs, a new, Python-native
@@ -110,8 +111,18 @@ levels:
    the `C-g` key is dispatched normally to `keyboard_quit`.
 2. If the loop has not picked up the request within 200 ms, a command is
    computing without awaiting. The reader thread then calls
-   `_thread.interrupt_main()`, which raises `KeyboardInterrupt` in whatever
-   is running. The task runner treats it as a cancel.
+   `_thread.interrupt_main()`. That runs the engine's SIGINT handler on the
+   main thread, and the handler decides: if the code running at that instant
+   is the foreground command, it raises `CancelledError` there, which the
+   command runner treats as a cancel; otherwise it does nothing. Deciding on
+   the main thread, at the moment of delivery, means an interrupt can never
+   land in the event loop's own code. A real Ctrl-C, with no interrupt
+   pending, stops the engine.
+
+Input typed ahead of a cancel is discarded: every queued event carries the
+number of cancels so far, and one from before the latest cancel is dropped
+when its turn comes. A `C-g` key arriving within 0.3 s of a cancel belongs
+to it and is dropped too.
 
 `C-g` does not cancel background tasks; they are listed and cancelled
 individually (section 7.1).
@@ -314,8 +325,9 @@ information. `win_info.gutter` is an ordered list of columns:
 On the engine side, marks come from spans that carry a `gutter` property
 (column, text, face, priority) and from decoration providers. If several
 compete for one column on one line, the highest priority wins. Which columns
-a window has is the buffer-local option `gutter_columns`; `line_numbers` is
-`off`, `absolute` or `relative`.
+a window has is the buffer-local option `gutter_columns`, a list of column
+ids that is `["numbers"]` by default; `line_numbers` is `off`, `absolute` or
+`relative`.
 
 **Margins.** `win_info.margins` is `{"left": n, "right": n}`: blank space
 between the window edge and the gutter or text. `win_info.max_width`, if
@@ -648,6 +660,11 @@ class SelectionSet:  # win.selections
   bookkeeping of their own.
 - **Last selection.** When a non-empty set collapses, its ranges are kept so
   `restore_last()` can bring them back.
+- **Text inserted at a cursor by something else.** Both ends of a selection
+  move past text inserted exactly at them, so an empty selection stays empty
+  and ends up after the new text.
+- **Per buffer.** A view remembers its selections in each buffer it has
+  shown, and comes back to them when it shows that buffer again.
 - **Layout-dependent motion.** Moving by visual row or by page is an
   awaitable method on the window, `await ed.window.move_visual(1)`, which
   sends every selection to the frontend in one `layout.move` request (4.4).
@@ -921,7 +938,9 @@ async def grep(pattern: Annotated[str, Ask.string("Grep for: ")]) -> None:
 - **Waiting for the user releases the lane.** `await ed.minibuffer.read(...)`
   and `await ed.read_key()` give up the lane, so the keys that answer the
   prompt can run their own commands. When the answer arrives the waiting
-  command queues to take the lane back. Nested prompts stack naturally.
+  command takes the lane back ahead of any key typed after the answer, so
+  `<return>` followed quickly by more keys still applies them in the order
+  typed. Nested prompts stack naturally.
 - **Background commands.** With `background=True` a command never holds the
   lane. It appears in `ed.tasks` with a name and optional progress, is shown
   in the modeline, and is cancelled individually. Any command can also detach
@@ -1772,10 +1791,16 @@ above.
   `from` import; redefine a class with live instances; redefine a coroutine
   command while an invocation of it is suspended; change a closure's free
   variables and check the fallback warning.
-- **Latency benchmark**, run in CI from stage 3: time from `input.key`
-  received to `flush` sent for self-insert in a 10,000-line highlighted
-  file. Target: 99th percentile under 5 ms on a development laptop. A second
-  figure for vertical motion, which includes a geometry round trip.
+- **Latency benchmark**, `python -m neomacs.tools.bench`, run in CI from
+  stage 3: time from an `input.key` line arriving on the reader thread to
+  the `redraw` batch showing its effect being handed to the writer, for
+  self-insert in a 10,000-line file. Scenarios: plain typing, typing with
+  line breaks, three cursors, a line with highlighting, the top of the file,
+  and a 3,000-character line. It also times each key as the client sees it,
+  as a cross-check, and checks that the highlighting scenario is in fact
+  highlighted. Target: 99th percentile under 5 ms on a development laptop.
+  A figure for vertical motion, which includes a geometry round trip, is
+  still to be added.
 - **Protocol conformance:** the terminal frontend and the headless client are
   both driven by the same recorded sessions.
 - **Frame tests:** two headless clients attached at once; edits in one

@@ -94,8 +94,7 @@ class Cursor(Marker):
     @provisional("0.1")
     def column(self) -> int:
         """Grapheme clusters from the start of the line."""
-        start = self.buffer.line_start(self.line)
-        return sum(1 for _ in self.buffer.clusters(start, self._pos))
+        return self.buffer.column(self._pos)
 
     # -- movement -------------------------------------------------------------
 

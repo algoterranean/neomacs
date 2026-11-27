@@ -37,6 +37,13 @@ def script(ui: HeadlessUI) -> None:
     ui.eval("_b.delete(_b.line_start(100), _b.line_start(200))")
     ui.eval("ed.faces.define('keyword', fg='#ff8800', weight='bold')")
     ui.eval("ed.faces.define('keyword', fg='#c586c0')")
+    ui.keys("M-<", "C-M-n", "C-M-n")
+    ui.type("three cursors ")
+    ui.keys("C-g", "C-u", "4", "C-f")
+    ui.keys("M-x")
+    ui.type("goto")
+    ui.keys("C-g")
+    ui.keys("C-x", "C-q")
 
 
 def summarise(ui: HeadlessUI) -> dict[str, Any]:
@@ -58,6 +65,11 @@ def summarise(ui: HeadlessUI) -> dict[str, Any]:
             "layout": ui.model.layout,
             "focus": ui.model.focus,
             "title": ui.model.title,
+            "message": list(ui.model.message) if ui.model.message else None,
+            "keys": ui.model.keys,
+            "menu": ui.model.menu,
+            "minibuffers": {str(k): list(v) for k, v in ui.model.minibuffers.items()},
+            "popup": ui.model.popup,
             "views": views,
         }
 

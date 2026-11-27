@@ -2,6 +2,132 @@
  "format": 1,
  "names": [
   {
+   "name": "neomacs.clipboard.KillRing",
+   "kind": "class",
+   "signature": "() -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.clipboard.KillRing.current",
+   "kind": "method",
+   "signature": "(self, frame: 'Frame | None') -> 'list[str] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.clipboard.KillRing.distribute",
+   "kind": "method",
+   "signature": "(self, entry: 'list[str]', count: 'int') -> 'list[str]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.clipboard.KillRing.push",
+   "kind": "method",
+   "signature": "(self, pieces: 'list[str]', frame: 'Frame | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.clipboard.KillRing.top",
+   "kind": "property",
+   "signature": "(self) -> 'list[str] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.commands.Ask",
+   "kind": "class",
+   "signature": "(kind: 'str', prompt: 'str', history: 'str | None' = None, choices: 'tuple[str, ...]' = (), initial: 'str' = '') -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.commands.Command",
+   "kind": "class",
+   "signature": "(name: 'str', fn: 'Callable[..., Any]', doc: 'str' = '', params: 'list[Param]' = <factory>, background: 'bool' = False, prefix: 'bool' = False, amalgamate: 'bool' = False, owner: 'str' = '') -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.commands.Prefix",
+   "kind": "class",
+   "signature": "(default: 'int' = 1) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.commands.PrefixArg",
+   "kind": "class",
+   "signature": "(value: 'int', explicit: 'bool', universal: 'int', negative: 'bool' = False) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.commands.alias",
+   "kind": "function",
+   "signature": "(old: 'str', new: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.commands.command",
+   "kind": "function",
+   "signature": "(fn: 'Callable[..., Any] | None' = None, /, *, name: 'str | None' = None, background: 'bool' = False, prefix: 'bool' = False, amalgamate: 'bool' = False) -> 'Any'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.commands.lookup",
+   "kind": "function",
+   "signature": "(name: 'str') -> 'Command | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.completion.Candidate",
+   "kind": "class",
+   "signature": "(text: 'str', annotation: 'str' = '') -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.completion.Completer",
+   "kind": "class",
+   "signature": "(*args, **kwargs)",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.completion.FunctionCompleter",
+   "kind": "class",
+   "signature": "(fn: 'Callable[[str], Iterable[Candidate | str] | Awaitable[Iterable[Candidate | str]]]') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.completion.choices",
+   "kind": "function",
+   "signature": "(items: 'Iterable[str]', style: 'str' = 'substring') -> 'FunctionCompleter'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.completion.matches",
+   "kind": "function",
+   "signature": "(candidate: 'str', text: 'str', style: 'str' = 'substring') -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.completion.rank",
+   "kind": "function",
+   "signature": "(items: 'Iterable[Candidate]', text: 'str', style: 'str' = 'substring') -> 'list[Candidate]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.display.faces.FaceTable",
    "kind": "class",
    "signature": "() -> 'None'",
@@ -30,9 +156,93 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.editor.Editor",
+   "kind": "class",
+   "signature": "() -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.buffer",
+   "kind": "property",
+   "signature": "(self) -> 'Buffer'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.call",
+   "kind": "method",
+   "signature": "(self, name: 'str', *args: 'Any') -> 'Any'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.frame",
+   "kind": "property",
+   "signature": "(self) -> 'Frame | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.message",
+   "kind": "method",
+   "signature": "(self, text: 'str', kind: 'str' = 'info', *, frame: 'Frame | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.read_key",
+   "kind": "method",
+   "signature": "(self) -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.show",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer', role: 'str' = 'document', *, focus: 'bool' = False) -> 'View'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.start_task",
+   "kind": "method",
+   "signature": "(self, coro: 'Coroutine[Any, Any, Any]', *, name: 'str | None' = None, frame: 'Frame | None' = None) -> 'TaskInfo'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.using",
+   "kind": "method",
+   "signature": "(self, view: 'View') -> 'Generator[View]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.view",
+   "kind": "property",
+   "signature": "(self) -> 'View'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.Editor.window",
+   "kind": "property",
+   "signature": "(self) -> 'Window'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.editor.TaskInfo",
+   "kind": "class",
+   "signature": "(name: 'str', task: 'asyncio.Task[Any]', progress: 'str' = '') -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.hooks.Hook",
    "kind": "class",
-   "signature": "(name: 'str', doc: 'str' = '') -> 'None'",
+   "signature": "(name: 'str', doc: 'str' = '', *, register: 'bool' = True) -> 'None'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -40,6 +250,13 @@
    "name": "neomacs.hooks.Hook.add",
    "kind": "method",
    "signature": "(self, fn: 'F', *, buffer: 'Any' = None) -> 'F'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.hooks.Hook.arun",
+   "kind": "method",
+   "signature": "(self, *args: 'Any', buffer: 'Any' = None) -> 'None'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -65,9 +282,618 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.keymap.Keymap",
+   "kind": "class",
+   "signature": "(name: 'str' = '') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keymap.Keymap.bind",
+   "kind": "method",
+   "signature": "(self, sequence: 'str', command: 'str | Keymap') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keymap.Keymap.bindings",
+   "kind": "method",
+   "signature": "(self, prefix: 'tuple[str, ...]' = ()) -> 'Iterator[tuple[tuple[str, ...], str]]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keymap.Keymap.lookup",
+   "kind": "method",
+   "signature": "(self, keys: 'tuple[str, ...] | list[str]') -> 'str | Keymap | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keymap.Keymap.unbind",
+   "kind": "method",
+   "signature": "(self, sequence: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keymap.Keymap.where_is",
+   "kind": "method",
+   "signature": "(self, command: 'str') -> 'tuple[str, ...] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keys.describe",
+   "kind": "function",
+   "signature": "(keys: 'tuple[str, ...] | list[str]') -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keys.is_printable",
+   "kind": "function",
+   "signature": "(key: 'str') -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keys.normalize",
+   "kind": "function",
+   "signature": "(key: 'str') -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keys.parse",
+   "kind": "function",
+   "signature": "(sequence: 'str') -> 'tuple[str, ...]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keys.split",
+   "kind": "function",
+   "signature": "(key: 'str') -> 'tuple[str, str]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.keys.text_of",
+   "kind": "function",
+   "signature": "(key: 'str') -> 'str | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.menu.Menu",
+   "kind": "class",
+   "signature": "() -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.menu.Menu.add",
+   "kind": "method",
+   "signature": "(self, path: 'str', command: 'str', *, after: 'str | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.menu.Menu.remove",
+   "kind": "method",
+   "signature": "(self, path: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.minibuffer.Minibuffer",
+   "kind": "class",
+   "signature": "(frame: 'Frame', label: 'str' = '', *, multiline: 'bool' = False, min_lines: 'int' = 1, max_lines: 'int' = 10, placeholder: 'str' = '', masked: 'bool' = False, completer: 'Completer | None' = None, history: 'str | None' = None, initial: 'str' = '', submit_selects: 'bool' = False) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.minibuffer.Minibuffer.cancel",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.minibuffer.Minibuffer.close",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.minibuffer.Minibuffer.result",
+   "kind": "method",
+   "signature": "(self) -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.minibuffer.Minibuffer.submit",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.minibuffer.Minibuffer.text",
+   "kind": "property",
+   "signature": "(self) -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.minibuffer.MinibufferAPI",
+   "kind": "class",
+   "signature": "(editor: 'Editor') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.minibuffer.MinibufferAPI.read",
+   "kind": "method",
+   "signature": "(self, label: 'str', *, completer: 'Completer | None' = None, history: 'str | None' = None, initial: 'str' = '', multiline: 'bool' = False, masked: 'bool' = False, submit_selects: 'bool' = False) -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.modes.FundamentalMode",
+   "kind": "class",
+   "signature": "()",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.modes.Mode",
+   "kind": "class",
+   "signature": "()",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.options.Option",
+   "kind": "class",
+   "signature": "(name: 'str', type: 'type | tuple[type, ...]', default: 'Any', doc: 'str' = '', *, validate: 'Callable[[Any], bool] | None' = None, project: 'bool' = False) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.options.Option.check",
+   "kind": "method",
+   "signature": "(self, value: 'Any') -> 'Any'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.options.OptionView",
+   "kind": "class",
+   "signature": "(buffer: 'Buffer | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.options.OptionView.get",
+   "kind": "method",
+   "signature": "(self, name: 'str', default: 'Any' = None) -> 'Any'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.options.OptionView.origin",
+   "kind": "method",
+   "signature": "(self, name: 'str') -> 'tuple[str, Any]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.options.OptionView.unset",
+   "kind": "method",
+   "signature": "(self, name: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.options.alias",
+   "kind": "function",
+   "signature": "(old: 'str', new: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ownership.Ownership",
+   "kind": "class",
+   "signature": "() -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ownership.Ownership.forget",
+   "kind": "method",
+   "signature": "(self, kind: 'str', key: 'Any') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ownership.Ownership.owned",
+   "kind": "method",
+   "signature": "(self, owner: 'str') -> 'list[tuple[str, Any]]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ownership.Ownership.owner_of",
+   "kind": "method",
+   "signature": "(self, kind: 'str', key: 'Any') -> 'str | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ownership.Ownership.record",
+   "kind": "method",
+   "signature": "(self, owner: 'str', kind: 'str', key: 'Any', remove: 'Remover') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ownership.Ownership.release",
+   "kind": "method",
+   "signature": "(self, owner: 'str', *, keep: 'set[tuple[str, Any]] | None' = None) -> 'list[tuple[str, Any]]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.JumpList",
+   "kind": "class",
+   "signature": "() -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.JumpList.back",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer', pos: 'int') -> 'Marker | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.JumpList.forward",
+   "kind": "method",
+   "signature": "(self) -> 'Marker | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.JumpList.push",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer', pos: 'int') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection",
+   "kind": "class",
+   "signature": "(owner: 'SelectionSet', head: 'int', anchor: 'int | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.backward_char",
+   "kind": "method",
+   "signature": "(self, n: 'int' = 1) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.backward_word",
+   "kind": "method",
+   "signature": "(self, n: 'int' = 1) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.collapse",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.delete",
+   "kind": "method",
+   "signature": "(self) -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.empty",
+   "kind": "property",
+   "signature": "(self) -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.end",
+   "kind": "property",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.end_of_line",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.forward_char",
+   "kind": "method",
+   "signature": "(self, n: 'int' = 1) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.forward_line",
+   "kind": "method",
+   "signature": "(self, n: 'int' = 1) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.forward_word",
+   "kind": "method",
+   "signature": "(self, n: 'int' = 1) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.insert",
+   "kind": "method",
+   "signature": "(self, text: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.move_to",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.pos",
+   "kind": "property",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.replace",
+   "kind": "method",
+   "signature": "(self, text: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.select",
+   "kind": "method",
+   "signature": "(self, anchor: 'int', head: 'int') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.start",
+   "kind": "property",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.start_of_line",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.Selection.text",
+   "kind": "property",
+   "signature": "(self) -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.SelectionSet",
+   "kind": "class",
+   "signature": "(buffer: 'Buffer', pos: 'int' = 0) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.SelectionSet.add",
+   "kind": "method",
+   "signature": "(self, head: 'int', anchor: 'int | None' = None) -> 'Selection'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.SelectionSet.collapse",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.SelectionSet.keep_primary",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.SelectionSet.normalize",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.SelectionSet.primary",
+   "kind": "property",
+   "signature": "(self) -> 'Selection'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.SelectionSet.ranges",
+   "kind": "method",
+   "signature": "(self) -> 'list[tuple[int, int]]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.SelectionSet.remove",
+   "kind": "method",
+   "signature": "(self, selection: 'Selection') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.SelectionSet.restore_last",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.selection.SelectionSet.set",
+   "kind": "method",
+   "signature": "(self, ranges: 'list[tuple[int, int]]', primary: 'int' = 0) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax",
+   "kind": "class",
+   "signature": "(buffer: 'Buffer') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.enclosing",
+   "kind": "method",
+   "signature": "(self, start: 'int', end: 'int') -> 'tuple[int, int] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.expression_at",
+   "kind": "method",
+   "signature": "(self, pos: 'int', direction: 'int' = 1) -> 'tuple[int, int] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.indent_for",
+   "kind": "method",
+   "signature": "(self, line: 'int') -> 'int | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.indentation",
+   "kind": "method",
+   "signature": "(self, line: 'int') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.kind_at",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.matching_bracket",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'int | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.next_word_end",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.prev_word_start",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.table",
+   "kind": "property",
+   "signature": "(self) -> 'Syntax'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.unit_at",
+   "kind": "method",
+   "signature": "(self, pos: 'int', name: 'str') -> 'tuple[int, int] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.buffer.BufferSyntax.word_at",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'tuple[int, int] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.table.Syntax",
+   "kind": "class",
+   "signature": "(word_chars: 'str' = '_', symbol_chars: 'str' = '', brackets: 'tuple[tuple[str, str], ...]' = (('(', ')'), ('[', ']'), ('{', '}')), quotes: 'tuple[str, ...]' = ('\"', \"'\"), escape: 'str | None' = '\\\\', line_comment: 'str | None' = None, block_comment: 'tuple[str, str] | None' = None, comment_padding: 'str' = ' ', auto_pairs: 'tuple[tuple[str, str], ...] | None' = None) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.table.Syntax.is_symbol",
+   "kind": "method",
+   "signature": "(self, ch: 'str') -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.syntax.table.Syntax.is_word",
+   "kind": "method",
+   "signature": "(self, ch: 'str') -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.text.buffer.Buffer",
    "kind": "class",
    "signature": "(name: 'str', text: 'str' = '', *, file: 'Path | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.changed_since",
+   "kind": "method",
+   "signature": "(self, tick: 'int') -> 'bool'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -82,6 +908,13 @@
    "name": "neomacs.text.buffer.Buffer.clusters",
    "kind": "method",
    "signature": "(self, start: 'int', end: 'int') -> 'Iterator[tuple[int, int]]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.column",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'int'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -191,6 +1024,13 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.text.buffer.Buffer.options",
+   "kind": "property",
+   "signature": "(self) -> 'Any'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.text.buffer.Buffer.position",
    "kind": "method",
    "signature": "(self, line: 'int', offset: 'int' = 0) -> 'int'",
@@ -222,6 +1062,13 @@
    "name": "neomacs.text.buffer.Buffer.search",
    "kind": "method",
    "signature": "(self, pattern: 'str | re.Pattern[str]', start: 'int' = 0, end: 'int | None' = None, *, backward: 'bool' = False) -> 're.Match[str] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.syntax",
+   "kind": "property",
+   "signature": "(self) -> 'Any'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -541,9 +1388,30 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.window.Frame.focus_view",
+   "kind": "method",
+   "signature": "(self, view: 'View') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.window.Frame.full_sync",
    "kind": "method",
    "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Frame.place",
+   "kind": "method",
+   "signature": "(self, minibuffer: 'Minibuffer', name: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Frame.prompt",
+   "kind": "method",
+   "signature": "(self, minibuffer: 'Minibuffer') -> 'None'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -562,6 +1430,13 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.window.Frame.show_message",
+   "kind": "method",
+   "signature": "(self, text: 'str', kind: 'str' = 'info') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.window.View",
    "kind": "class",
    "signature": "(frame: 'Frame', buffer: 'Buffer') -> 'None'",
@@ -569,9 +1444,16 @@
    "since": "0.1"
   },
   {
-   "name": "neomacs.window.View.collapse",
+   "name": "neomacs.window.View.cursor",
+   "kind": "property",
+   "signature": "(self) -> 'Cursor'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.View.embed",
    "kind": "method",
-   "signature": "(self) -> 'None'",
+   "signature": "(self, minibuffer: 'Minibuffer', pos: 'int') -> 'None'",
    "tier": "provisional",
    "since": "0.1"
   },

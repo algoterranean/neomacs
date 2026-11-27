@@ -37,6 +37,10 @@ jobs:
         run: uv run --python .venv python -m pytest
       - name: API manifest is up to date
         run: uv run --python .venv python -m neomacs.tools.manifest --check
+      - name: Latency benchmark (Gate B)
+        # Shared runners are slow and noisy, so the limit here is three times
+        # the 5 ms target; the target itself is checked on a development machine.
+        run: uv run --python .venv python -m neomacs.tools.bench --keys 500 --check --limit-ms 15
 
   frontend:
     name: frontend

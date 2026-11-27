@@ -1,9 +1,12 @@
-"""A frontend's connection: applies `redraw`, lays out, reports viewports, answers geometry.
+"""A frontend's connection: applies `redraw`, lays out, reports viewports, answers requests.
 
 Shared by the terminal frontend and the headless test client.  Everything
 that arrives from the engine is handled on the client's reader thread, in
 order, under `lock`; a geometry request is therefore always answered against
 the redraw that preceded it.
+
+The screen, top to bottom: the window's text, its modeline, and one or more
+rows for the prompt or the latest message.
 """
 
 from __future__ import annotations
@@ -37,6 +40,8 @@ class Session:
         self.layouts: dict[int, MonoView] = {}
         self.unacked: list[int] = []
         self.batches = 0
+        self.clipboard = ""  # stands in for the system clipboard
+        self.open_frame_requests = 0
         self.on_redraw: Callable[[], None] | None = None
         self._reported: dict[int, tuple[int, int, int]] = {}
         client.on_notification = self._notified
@@ -46,6 +51,7 @@ class Session:
                 "layout.line_edge": self._line_edge,
                 "layout.viewport": self._viewport,
                 "layout.rect": self._rect,
+                "clipboard.get": self._clipboard_get,
             }
         )
         options: dict[str, Any] = {"protocol": PROTOCOL, "capabilities": []}
@@ -56,33 +62,55 @@ class Session:
 
     # -- size ---------------------------------------------------------------
 
+    def prompt_label(self) -> str:
+        prompt = self.model.prompt
+        if prompt is None:
+            return ""
+        return "".join(str(run[1]) for run in prompt[1].get("label", []))
+
+    @property
+    def prompt_rows(self) -> int:
+        """Rows at the bottom for the prompt or a message: one, or more for a multi-line prompt."""
+        prompt = self.model.prompt
+        if prompt is None or not prompt[1].get("multiline"):
+            return 1
+        view, options = prompt
+        low, high = int(options.get("min_lines", 1)), int(options.get("max_lines", 10))
+        return max(1, min(max(low, view.line_count), high, self.rows - 3))
+
     @property
     def text_rows(self) -> int:
-        """Rows for the window's text: everything but the modeline."""
-        return max(1, self.rows - 1)
+        """Rows for the window's text: everything but the modeline and the prompt rows."""
+        return max(1, self.rows - 1 - self.prompt_rows)
+
+    def _size(self, view: ViewModel) -> tuple[int, int]:
+        prompt = self.model.prompt
+        if prompt is not None and prompt[0] is view:
+            return max(1, self.cols - len(self.prompt_label())), self.prompt_rows
+        if view.id in self.model.minibuffers or view is not self.model.main_view:
+            return max(1, self.cols // 2), 1
+        return self.cols, self.text_rows
 
     def resize(self, rows: int, cols: int) -> None:
         with self.lock:
             self.rows, self.cols = rows, cols
-            for layout in self.layouts.values():
-                layout.resize(cols, self.text_rows)
-            self._report_viewports()
+            self._relayout()
 
     # -- from the engine ----------------------------------------------------
 
     def _notified(self, method: str, params: list[Any]) -> None:
+        if method == "clipboard.set":
+            self.clipboard = str(params[1].get("text", ""))
+            return
+        if method == "ui.open_frame":
+            self.open_frame_requests += 1
+            return
         if method != "redraw":
             return
         with self.lock:
             flushed = self.model.apply(params[0])
             self.batches += 1
-            for view_id in list(self.layouts):
-                if view_id not in self.model.views:
-                    del self.layouts[view_id]
-                    self._reported.pop(view_id, None)
-            for view in self.model.views.values():
-                self.layout(view).apply_pending_reveal()
-            self._report_viewports()
+            self._relayout()
             if self.auto_ack:
                 for seq in flushed:
                     self.client.notify("view.ack", seq)
@@ -91,10 +119,23 @@ class Session:
         if self.on_redraw is not None:
             self.on_redraw()
 
+    def _relayout(self) -> None:
+        for view_id in list(self.layouts):
+            if view_id not in self.model.views:
+                del self.layouts[view_id]
+                self._reported.pop(view_id, None)
+        for view in self.model.views.values():
+            layout = self.layout(view)
+            size = self._size(view)
+            if (layout.width, layout.height) != size:
+                layout.resize(*size)
+            layout.apply_pending_reveal()
+        self._report_viewports()
+
     def layout(self, view: ViewModel) -> MonoView:
         layout = self.layouts.get(view.id)
         if layout is None or layout.model is not view:
-            layout = self.layouts[view.id] = MonoView(view, self.cols, self.text_rows)
+            layout = self.layouts[view.id] = MonoView(view, *self._size(view))
         return layout
 
     def _report_viewports(self) -> None:
@@ -119,7 +160,18 @@ class Session:
                 self.layout(view).scroll_rows(rows)
                 self._report_viewports()
 
-    # -- geometry requests --------------------------------------------------
+    @property
+    def focused(self) -> ViewModel | None:
+        focus = self.model.focus
+        return self.model.views.get(focus) if focus is not None else self.model.main_view
+
+    def bottom_text(self) -> str:
+        """What the message row shows when there is no prompt."""
+        text = self.model.message[0] if self.model.message else ""
+        keys = self.model.keys
+        return keys if keys else text
+
+    # -- requests from the engine -------------------------------------------
 
     def _mono(self, view_id: int) -> MonoView:
         return self.layout(self.model.view(view_id))
@@ -142,3 +194,6 @@ class Session:
     def _rect(self, view: int, line: int, offset: int) -> Any:
         with self.lock:
             return self._mono(view).rect(line, offset)
+
+    def _clipboard_get(self, which: str, formats: list[str]) -> Any:
+        return {"text": self.clipboard}

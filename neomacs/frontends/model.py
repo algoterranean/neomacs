@@ -93,12 +93,27 @@ class FrameModel:
         self.focus: int | None = None
         self.title = ""
         self.resets = 0
+        # Minibuffers shown outside the text: view id -> (host, options).
+        self.minibuffers: dict[int, tuple[dict[str, Any], dict[str, Any]]] = {}
+        self.popup: dict[str, Any] | None = None
+        self.message: tuple[str, str] | None = None  # (text, kind) of the latest message
+        self.keys = ""  # a pending key sequence or prefix argument
+        self.menu: list[Any] = []
+        self.messages: list[tuple[str, str]] = []
 
     def view(self, view_id: int) -> ViewModel:
         view = self.views.get(view_id)
         if view is None:
             view = self.views[view_id] = ViewModel(view_id)
         return view
+
+    @property
+    def prompt(self) -> tuple[ViewModel, dict[str, Any]] | None:
+        """The minibuffer shown in the prompt area, with its options."""
+        for view_id, (host, options) in self.minibuffers.items():
+            if host.get("kind") == "prompt":
+                return self.view(view_id), options
+        return None
 
     @property
     def main_view(self) -> ViewModel | None:
@@ -120,6 +135,9 @@ class FrameModel:
                 self.layout = None
                 self.views.clear()
                 self.focus = None
+                self.minibuffers.clear()
+                self.popup = None
+                self.keys = ""
                 self.resets += 1
             elif name == "face_define":
                 self.faces[args[0]] = args[1]
@@ -144,6 +162,25 @@ class FrameModel:
                 self.view(args[0]).modeline = args[1]
             elif name == "reveal":
                 self.view(args[0]).pending_reveal = (args[1], args[2], args[3])
+            elif name == "minibuffer_show":
+                self.minibuffers[args[0]] = (args[1], args[2])
+            elif name == "minibuffer_hide":
+                self.minibuffers.pop(args[0], None)
+                self.views.pop(args[0], None)
+            elif name == "popup_show":
+                self.popup = {"items": args[0], "selected": args[1], "view": args[2],
+                              "line": args[3], "offset": args[4]}  # fmt: skip
+            elif name == "popup_hide":
+                self.popup = None
+            elif name == "message":
+                text = "".join(str(run[1]) for run in args[0])
+                if args[1] == "keys":
+                    self.keys = text
+                else:
+                    self.message = (text, args[1])
+                    self.messages.append((text, args[1]))
+            elif name == "menu":
+                self.menu = args[0]
             else:
                 raise ProtocolError(f"unknown redraw event: {name}")
         return flushed
