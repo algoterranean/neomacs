@@ -36,7 +36,10 @@ for _key, _name in [
     ("<down>", "search.next"),
     ("<up>", "search.previous"),
     ("C-w", "search.word"),
-    ("M-n", "search.add"),
+    # Not M-n, the key for this outside a search: here it and M-p go through
+    # the patterns searched for before.
+    ("M-m", "search.add"),
+    ("s-d", "search.add"),
     ("M-a", "search.all"),
 ]:
     search_map.bind(_key, _name)
@@ -99,6 +102,34 @@ class Search:
         self.current: tuple[int, int] | None = None
         self.added: list[tuple[int, int]] = []  # matches kept selected with `add`
         self.failed = False
+        self.tick = self.buffer.tick  # the text the matches were found in
+        self.resume = self.start  # where to go on from when not on a match
+
+    def refresh(self) -> None:
+        """Find the matches again if the searched text has changed since they
+        were found: the box may be left for the text and come back to.  Called
+        before anything uses the matches, and before the text is displayed."""
+        buffer = self.buffer
+        if not buffer.changed_since(self.tick):
+            return
+        self.tick = buffer.tick
+        view = self.view
+        if view.id not in view.frame.views or view.buffer is not buffer:
+            return
+        self.matches = find_all(buffer, self.pattern)
+        found = set(self.matches)
+        # The selections moved with the text.  One still on a match is still
+        # the match the search is on, or one kept with `add`.
+        primary = view.selections.primary
+        here = (primary.start, primary.end)
+        self.current = here if here in found else None
+        self.added = [r for s in view.selections if (r := (s.start, s.end)) in found and r != here]
+        self.resume = view.cursor.pos
+        self.failed = bool(self.pattern) and not self.matches
+        size = len(buffer)
+        self.origin = [(min(a, size), min(h, size)) for a, h in self.origin]
+        self.start = min(self.start, size)
+        self.mark()
 
     def locate(self, from_pos: int, step: int, *, wrap: bool) -> None:
         matches = self.matches
@@ -118,6 +149,7 @@ class Search:
         if text == self.pattern:
             return
         grew = text.startswith(self.pattern) and self.pattern != ""
+        self.refresh()
         self.pattern = text
         self.matches = find_all(self.buffer, text)
         self.added.clear()  # they matched the pattern as it was
@@ -129,6 +161,7 @@ class Search:
         self.show()
 
     def step(self, direction: int) -> None:
+        self.refresh()
         self.direction = direction
         if not self.pattern:
             history: list[str] = keep("search.history", list[str])
@@ -138,12 +171,11 @@ class Search:
         if self.current is not None:
             self.locate(self.current[1] if direction > 0 else self.current[0], direction, wrap=True)
         else:
-            self.locate(self.start, direction, wrap=True)
+            self.locate(self.resume, direction, wrap=True)
         self.show()
 
     def show(self) -> None:
         view, current = self.view, self.current
-        _mark(self.buffer, self.matches, current)
         if current is not None:
             # The matches kept with `add`, and the one the search is on now.
             ranges = sorted({*self.added, current})
@@ -151,7 +183,12 @@ class Search:
             view.reveal(current[0], "nearest")
         elif not self.pattern:
             view.selections.set(self.origin, self.origin_primary)
-        # The box's label says how the search is going.
+        self.mark()
+
+    def mark(self) -> None:
+        """Give the matches their faces, and say in the box's label how the search is going."""
+        current = self.current
+        _mark(self.buffer, self.matches, current)
         if self.failed:
             label = "No match: "
         elif current is not None:
@@ -163,6 +200,7 @@ class Search:
             self.box.frame.schedule_update()
 
     def finish(self, *, restore: bool) -> None:
+        self.refresh()
         self.buffer.layer(LAYER).clear()
         view = self.view
         if view.id not in view.frame.views or view.buffer is not self.buffer:
@@ -198,6 +236,7 @@ async def _search(direction: int) -> None:
     search = Search(view, box, direction)
     box.buffer.locals["search"] = search
     box.on_change.add(search.changed)
+    view.buffer.display_preparers.append(search.refresh)
     frame.place(box, PLACE)
     frame.focus_view(box.view)
     answer = box.answer()
@@ -207,6 +246,8 @@ async def _search(direction: int) -> None:
         accepted = True
     finally:
         box.close()
+        if search.refresh in view.buffer.display_preparers:
+            view.buffer.display_preparers.remove(search.refresh)
         search.finish(restore=not accepted)
         if answer.done() and not answer.cancelled():
             answer.exception()  # seen: nothing is left to warn about
@@ -241,6 +282,7 @@ def search_previous() -> None:
 def search_word() -> None:
     """Add the rest of the word after the match to the pattern."""
     search = _session()
+    search.refresh()
     at = search.current[1] if search.current is not None else search.view.cursor.pos
     end = search.buffer.syntax.next_word_end(at)
     more = search.buffer[at:end]
@@ -251,6 +293,7 @@ def search_word() -> None:
 def search_add() -> None:
     """Keep this match selected and go on to the next one."""
     search = _session()
+    search.refresh()
     if search.current is None:
         raise NeomacsError("No match to keep")
     search.added.append(search.current)
@@ -262,6 +305,7 @@ def search_add() -> None:
 def search_all() -> None:
     """End the search with a selection on every match."""
     search = _session()
+    search.refresh()
     matches, current = list(search.matches), search.current
     if not matches:
         raise NeomacsError("No matches")

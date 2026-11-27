@@ -556,9 +556,9 @@ def test_adding_matches_during_a_search_keeps_the_earlier_ones(ui: HeadlessUI) -
     ui.eval("_b.replace(0, len(_b), 'foo bar foo baz foo'); _w.selections.set([(0, 0)])")
     ui.keys("C-s")
     ui.type("foo")
-    ui.keys("M-n")
+    ui.keys("M-m")
     assert value(ui, "_w.selections.ranges()") == [(0, 3), (8, 11)]
-    ui.keys("M-n")
+    ui.keys("M-m")
     assert value(ui, "_w.selections.ranges()") == [(0, 3), (8, 11), (16, 19)]
     ui.keys("<return>")
     ui.type("X")
@@ -631,7 +631,7 @@ def test_extending_the_pattern_by_a_word_forgets_matches_kept_for_the_old_one(
     ui.eval("_b.replace(0, len(_b), 'foo bar foo baz'); _w.selections.set([(0, 0)])")
     ui.keys("C-s")
     ui.type("foo")
-    ui.keys("M-n")
+    ui.keys("M-m")
     assert value(ui, "_w.selections.ranges()") == [(0, 3), (8, 11)]
     ui.keys("C-w")  # the pattern is now "foo baz": the first "foo" no longer matches it
     assert value(ui, "[s.text for s in _w.selections]") == ["foo baz"]
@@ -639,3 +639,51 @@ def test_extending_the_pattern_by_a_word_forgets_matches_kept_for_the_old_one(
     ui.type("X")
     assert value(ui, "_b.text") == "foo bar X"
     ui.keys("C-g", "C-/")
+
+
+def test_a_search_follows_edits_made_to_the_text_while_it_is_open(ui: HeadlessUI) -> None:
+    # The box can be left for the text and come back to (a click, in Electron).
+    ui.eval("_b.replace(0, len(_b), 'foo bar foo baz foo'); _w.selections.set([(0, 0)])")
+    ui.keys("C-s")
+    ui.type("foo")
+    assert ui.prompt == "Search [1/3]: foo"
+    ui.eval("_b.insert(4, 'wider ')")  # before the second and third matches
+    ui.idle()
+    faced = "sorted((s.start, s.end) for s in _b.layer('search'))"
+    assert value(ui, faced) == [(0, 3), (14, 17), (22, 25)]  # shown where they are now
+    ui.keys("C-s")
+    assert value(ui, "(_w.selections.ranges(), _w.selections.primary.text)") == ([(14, 17)], "foo")
+    ui.keys("M-m")  # kept, and on to the third
+    ui.eval("_b.replace(0, 3, 'no')")  # the first is a match no longer
+    ui.idle()
+    assert ui.prompt == "Search [2/2]: foo"
+    assert value(ui, "[s.text for s in _w.selections]") == ["foo", "foo"]
+    ui.keys("M-a")  # ends the search, with a selection on each
+    ui.type("X")
+    assert value(ui, "_b.text") == "no wider bar X baz X"
+    ui.keys("C-g", "C-/")
+
+
+def test_a_search_that_is_given_up_after_the_text_shrank_goes_back_inside_it(
+    ui: HeadlessUI,
+) -> None:
+    ui.eval("_b.replace(0, len(_b), 'short text, then a long tail'); _w.selections.set([(28, 28)])")
+    ui.keys("C-r")
+    ui.type("short")
+    ui.eval("_b.delete(10, len(_b))")
+    ui.keys("C-g")
+    assert value(ui, "(_b.text, _w.selections.ranges())") == ("short text", [(10, 10)])
+
+
+def test_the_search_box_goes_back_and_forward_through_its_history(ui: HeadlessUI) -> None:
+    ui.eval("_b.replace(0, len(_b), 'one two three'); _w.selections.set([(0, 0)])")
+    for pattern in ("one", "two"):
+        ui.keys("C-s")
+        ui.type(pattern)
+        ui.keys("<return>")
+    ui.keys("C-s", "M-p", "M-p")
+    assert ui.prompt.endswith(": one") and value(ui, "_w.selections.primary.text") == "one"
+    ui.keys("M-n")  # forward again, not a selection kept
+    assert ui.prompt.endswith(": two")
+    assert value(ui, "[s.text for s in _w.selections]") == ["two"]
+    ui.keys("C-g")
