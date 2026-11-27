@@ -84,7 +84,8 @@ _BINDINGS = {
     # windows and panels
     "C-x 2": "split_window_below", "C-x 3": "split_window_right",
     "C-x 0": "delete_window", "C-x 1": "delete_other_windows", "C-x o": "other_view",
-    "<f6>": "other_view", "C-x p p": "panel.toggle", "C-x p o": "panel.focus",
+    "<f6>": "other_view", "C-<return>": "other_view",
+    "C-x p p": "panel.toggle", "C-x p o": "panel.focus",
     "C-x p n": "panel.next_tab", "C-x p k": "panel.close_tab", "C-x p d": "panel.dock",
     "C-x p f": "panel.float", "C-h e": "show_messages",
     # cursors

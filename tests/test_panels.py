@@ -90,6 +90,15 @@ def test_splitting_and_moving_between_windows(ui: HeadlessUI) -> None:
     assert ui.message == "This is the only window"
     ui.keys("C-x", "o")
     assert ui.message == "There is nowhere else to go"
+    # C-<return> is the same command.
+    ui.eval("ed.message('')")
+    ui.keys("C-x", "2")
+    before = ui.model.focus
+    ui.keys("C-<return>")
+    assert ui.model.focus != before
+    ui.keys("C-<return>")
+    assert ui.model.focus == before
+    ui.keys("C-x", "1")
 
 
 def test_a_docked_panel_with_tabs(ui: HeadlessUI) -> None:
