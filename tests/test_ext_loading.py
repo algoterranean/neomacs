@@ -607,6 +607,33 @@ def test_adding_and_removing_in_the_running_editor(tmp_path: Path) -> None:
 
 
 @needs_uv
+def test_sync_turns_an_extension_off_before_its_files_are_taken_away(tmp_path: Path) -> None:
+    wheels = tmp_path / "wheels"
+    # Its clean-up needs a file of its own that it has not imported yet.
+    source = (
+        "import builtins\n"
+        "def deactivate():\n"
+        "    from . import late\n"
+        "    builtins._cleaned_up = late.WORD\n"
+    )
+    extension(wheels, "tidy", source=source, extra={"late.py": "WORD = 'done properly'\n"})
+    extension(wheels, "stays")
+    install(tmp_path, "neomacs-tidy", "neomacs-stays")
+    with running_engine(env=dirs(tmp_path)) as path, HeadlessUI(path, rows=12, cols=100) as ui:
+        manifest = tmp_path / "config" / "extensions.toml"
+        manifest.write_text(manifest.read_text().replace('neomacs-tidy = "*"\n', ""))
+        ui.client.notify("engine.call", "extensions.sync", [])
+        wait_for(lambda: ui.prompt is not None and ui.prompt.startswith("Install these?"))
+        ui.type("yes")
+        ui.keys("<return>")
+        wait_for(lambda: ui.message.startswith("The environment matches extensions.toml"))
+        assert ui.message == "The environment matches extensions.toml; removed tidy"
+        assert value(ui.client, "__import__('builtins')._cleaned_up") == "done properly"
+        assert value(ui.client, "[m for m in ed.messages if 'deactivating' in m]") == []
+        assert value(ui.client, "sorted(e.name for e in ed.extensions)") == ["stays"]
+
+
+@needs_uv
 def test_installing_shows_in_the_task_list_and_leaves_the_editor_usable(tmp_path: Path) -> None:
     wheels = tmp_path / "wheels"
     extension(wheels, "a")

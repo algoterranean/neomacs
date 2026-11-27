@@ -81,6 +81,16 @@ async def _confirm(plan: Plan, what: str) -> bool:
     return True
 
 
+def _disable_removed(plan: Plan) -> None:
+    """Turn off the extensions a plan is about to take away, while their code
+    is still there to be asked to clean up after itself."""
+    gone = {manifest_module.normalize(d.name) for d in plan.removed}
+    for extension in list(ed.extensions):
+        if manifest_module.normalize(extension.distribution) in gone:
+            if extension.state != "disabled":
+                ed.extensions.disable(extension.name)
+
+
 def _replaced(plan: Plan) -> set[str]:
     """The distributions a plan puts other files in place of."""
     return {new.name for _, new in plan.changed}
@@ -156,12 +166,7 @@ async def remove_extension() -> None:
         plan = await env.plan(env.with_change(remove=name))
         if not await _confirm(plan, f"Removing {name}"):
             return None
-        # Deactivated while its code is still there to be asked.
-        gone = {manifest_module.normalize(d.name) for d in plan.removed}
-        for extension in list(ed.extensions):
-            if manifest_module.normalize(extension.distribution) in gone:
-                if extension.state != "disabled":
-                    ed.extensions.disable(extension.name)
+        _disable_removed(plan)
         await env.apply(plan, remove=name)
         return f"Removed {name}", _replaced(plan)
 
@@ -181,6 +186,7 @@ def upgrade_extensions(
             return "Nothing newer", set()
         if not await _confirm(plan, "Upgrading " + (only or "everything")):
             return None
+        _disable_removed(plan)  # a newer version may have dropped a dependency
         await env.apply(plan)
         return "Upgraded", _replaced(plan)
 
@@ -198,6 +204,7 @@ def sync_extensions() -> None:
             plan = await env.plan()
             if not await _confirm(plan, "Installing what extensions.toml asks for"):
                 return None
+            _disable_removed(plan)
             await env.apply(plan)
             return "The environment matches extensions.toml", _replaced(plan)
         await env.sync()

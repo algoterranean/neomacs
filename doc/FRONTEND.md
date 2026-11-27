@@ -424,7 +424,11 @@ time into a highlighted buffer, moves by visual line forty times, and
 scrolls, then fails if the 90th percentile of any phase is over its budget.
 CI runs it under a virtual display on every push, with the budgets
 multiplied by `NEOMACS_BUDGET_SCALE` (4 there), since a shared runner
-without a graphics card is not the reference machine. On an Apple M3 Max,
+without a graphics card is not the reference machine. For the same reason
+Gate C's check of the engine's 5 ms for a vertical motion, which is held to
+the 99th percentile on a developer's machine, is held to the median there:
+the runner stalls for tens of milliseconds now and then, whatever is
+running. On an Apple M3 Max,
 off screen: apply 0.1 ms, layout 2.7 ms, total 2.9 ms, `layout.move`
 0.5 ms, scroll frame 2.1 ms.
 
