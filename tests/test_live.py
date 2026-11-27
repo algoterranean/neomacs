@@ -475,8 +475,8 @@ def test_describe_command_key_option_and_apropos(ui: HeadlessUI) -> None:
     assert value(ui, "_w.buffer.text").startswith("C-x C-f runs the command files.find\n")
     ui.keys("q")
     assert value(ui, "_w.buffer.name") == "*scratch*"
-    ui.keys("C-h", "k", "<f9>")
-    assert ui.message == "<f9> is undefined"
+    ui.keys("C-h", "k", "<f12>")
+    assert ui.message == "<f12> is undefined"
 
     ui.eval("Option('test_width', int, 4, 'How wide a test is.')")
     ui.keys("C-h", "v")

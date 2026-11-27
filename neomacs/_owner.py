@@ -21,6 +21,12 @@ def claim() -> None:
     _owner = threading.get_ident()
 
 
+def give(ident: int) -> None:
+    """Make the thread with identifier IDENT the owner (the debugger's hand-over)."""
+    global _owner
+    _owner = ident
+
+
 def release() -> None:
     global _owner
     _owner = None

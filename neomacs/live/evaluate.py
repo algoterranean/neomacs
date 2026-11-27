@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import ast
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from types import FunctionType
+from types import CodeType, FunctionType
 from typing import Any, Final
 
 from neomacs.live import patch, source
@@ -25,6 +26,16 @@ class _NoValue:
 NO_VALUE: Final = _NoValue()
 
 _FLAGS = ast.PyCF_ALLOW_TOP_LEVEL_AWAIT
+
+# Called with each code object the pipeline compiles, before it runs, and the
+# file name it was compiled under.  The debugger applies breakpoints here.
+on_compile: list[Callable[[CodeType, str], None]] = []
+
+
+def _compiled(code: CodeType, filename: str) -> CodeType:
+    for listener in list(on_compile):
+        listener(code, filename)
+    return code
 
 
 @dataclass
@@ -55,6 +66,7 @@ async def evaluate(
     mode: str = "auto",
     whole_module: bool = False,
     source_text: str | None = None,
+    local_names: Any = None,
 ) -> Evaluation:
     """Execute TEXT in NAMESPACE.
 
@@ -63,6 +75,10 @@ async def evaluate(
     whole of that file or buffer.  With MODE "auto", if the last top-level
     statement is an expression its value is returned.  With WHOLE_MODULE,
     registrations the module made before and does not make now are removed.
+
+    With LOCAL_NAMES, a mapping, the text runs as if inside a function whose
+    variables those are: the debugger passes a stack frame's.  Nothing is
+    patched then; definitions become variables of that frame.
     """
     tree = ast.parse(text, filename, "exec")
     if first_line > 1:
@@ -81,11 +97,11 @@ async def evaluate(
     result = Evaluation()
     with ownership.tracking(module) as made:
         if tree.body:
-            code = compile(tree, filename, "exec", flags=_FLAGS)
-            pending = eval(code, namespace)
+            code = _compiled(compile(tree, filename, "exec", flags=_FLAGS), filename)
+            pending = eval(code, namespace, local_names)
             if code.co_flags & inspect.CO_COROUTINE:
                 await pending
-        for name in names:
+        for name in names if local_names is None else []:
             old, new = before[name], namespace.get(name)
             keep, reason = patch.redefine(module, name, old, new)
             if keep is not new:
@@ -93,8 +109,8 @@ async def evaluate(
             if reason is not None and isinstance(old, (FunctionType, type)):
                 result.rebound.append((name, reason))
         if last is not None:
-            code = compile(last, filename, "eval", flags=_FLAGS)
-            value = eval(code, namespace)
+            code = _compiled(compile(last, filename, "eval", flags=_FLAGS), filename)
+            value = eval(code, namespace, local_names)
             if code.co_flags & inspect.CO_COROUTINE:
                 value = await value
             result.value = value

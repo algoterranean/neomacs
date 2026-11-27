@@ -72,6 +72,7 @@ _BINDINGS = {
     "C-x 5 2": "new_frame",
     "C-x C-c": "engine.exit",
     # evaluation
+    "C-c C-t": "show_traceback", "C-c C-i": "debug.inspect",
     "C-x C-e": "eval_last_expression", "C-M-x": "eval_definition", "M-:": "eval_expression",
     "C-c C-b": "eval_buffer", "C-c C-r": "eval_selection",
     # help
@@ -103,6 +104,8 @@ MENU = [
     ("Tools/Evaluate Buffer", "eval_buffer"),
     ("Tools/Evaluate Definition", "eval_definition"),
     ("Tools/Python REPL", "repl"),
+    ("Tools/Toggle Breakpoint", "debug.toggle_breakpoint"),
+    ("Tools/Inspect Last Error", "debug.inspect"),
     ("Help/Describe Key…", "describe_key"),
     ("Help/Describe Command…", "describe_command"),
     ("Help/Search Commands…", "apropos"),

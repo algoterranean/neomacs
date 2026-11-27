@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 23, 2026-11-27. Stages 0 to 4 are implemented; see
+Status: draft 24, 2026-11-27. Stages 0 to 5 are implemented; see
 IMPLEMENTATION.md for what exists. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
@@ -1637,6 +1637,92 @@ of raising instead, for a named exception type.
   should not edit it.
 - If the debugger itself is broken, the fallback is an external debugger
   attached to the engine process, which is outside this design.
+
+### 10.7 As built
+
+Confirmed on CPython 3.15.2, free-threaded: a `sys.monitoring` line callback
+may block while another thread runs a second event loop; an exception raised
+in a callback propagates into the monitored frame; assignment through
+`frame.f_locals` changes the paused frame's variables.
+
+How the hand-over works, where the sections above left it open:
+
+- **One inbox.** Reader threads no longer schedule lines on a loop. They
+  append to one queue on the editor and wake whichever loop is serving, and
+  that loop drains it. A lock orders appends against the switch, so no line
+  is stranded on the loop that has just stopped. Each line runs in a copy of
+  its connection's context, because the context itself may be in use by the
+  code that is paused.
+- **`ed.loop` and `ed.dispatcher`** are the serving loop and its dispatcher:
+  the debugger's while paused. Frames, timers, prompts and tasks therefore
+  land on the debug loop during a pause without knowing about it.
+- **Only one loop runs at a time.** Between pauses the debug loop is not
+  running at all, so nothing left on it can touch the editor. When a pause
+  ends, prompts still open on it are dismissed, it is given a second to
+  finish, and anything still running is cancelled. Background work started
+  while paused is therefore cancelled on resume.
+- **Replies** are delivered to the loop whose future is waiting, which may be
+  the frozen one; it sees the reply when it runs again. A prompt opened
+  before the pause can be answered during it.
+- **Typed-ahead input.** Keys typed to the debugger after the key that ended
+  the pause are carried to the next pause if the command stops again at
+  once, which is what stepping quickly needs, and otherwise to the main
+  loop. Keys typed to the main loop before the pause stay there and run
+  after the paused command, as they would have without the breakpoint.
+- **`engine.idle`** counts "paused" as idle, and is answered by whichever
+  loop owns the editor when that becomes true.
+- **Stopping the engine while paused** aborts the paused command so the main
+  loop can exit. SIGTERM is handled the same way.
+- **A view keeps its selections per buffer alive** when it shows another
+  buffer, and `SelectionSet.set` moves existing selection objects. Without
+  this, showing the source at a pause detached the selections the paused
+  command was holding.
+
+Stepping:
+
+- `next` and `out` listen only on the code object of the frame being
+  stepped; `step` listens everywhere until that frame suspends at an `await`,
+  then narrows to it. When the frame returns, stepping continues in its
+  caller, unless the caller is the event loop, where it ends.
+- Stepping never stops inside `asyncio` or the debugger. It does stop in the
+  rest of the engine: stepping past the end of a command lands in
+  `dispatch.py`.
+- A line with no breakpoint is switched off with `DISABLE` after its first
+  event, so a function with a breakpoint costs nothing on its other lines.
+
+Breakpoints:
+
+- The line a breakpoint stops at is worked out from the buffer's text: the
+  start of the statement the line is in, or of the next statement. It is
+  applied to every live function compiled from that file or buffer, found by
+  walking the heap, and to code as it is compiled by the evaluation pipeline.
+- A function that is no longer in the buffer but is still alive keeps its
+  old line numbers, and can be stopped at a line that now holds other text.
+- The gutter gets a `signs` column in a buffer when it first gets a
+  breakpoint. Clicking in the gutter toggles one.
+
+Interface:
+
+- Without panels (Stage 6) the window shows the source and `debug.show`
+  shows the `*debug*` buffer in its place.
+- The stepping keys work in every buffer while paused, not only in the
+  source: `<f5>` continue, `<f10>` next, `<f11>` step, `S-<f11>` out,
+  `C-c u`/`C-c d` up and down, `C-c s` the stack, `C-c a` abort. `<f9>`
+  toggles a breakpoint at any time.
+- A pause takes the focus for the source, including from an open prompt.
+- `debug_on_raise` takes type names separated by spaces, and matches
+  subclasses. It stops for exceptions that are about to be caught too.
+
+Not done, or known to be wrong:
+
+- A debugger command that computes without awaiting cannot be interrupted:
+  the fallback interrupt is aimed at the main thread, which is the paused one.
+- Breakpoints do not persist between sessions and exist only for buffers
+  that are open.
+- A breakpoint in display code, or in code run while a line is being
+  handled, pauses with that work half done; nothing guards against the
+  debug loop re-entering it.
+- Frame timers started during a pause do not fire after it.
 
 ## 11. Asynchronous work
 

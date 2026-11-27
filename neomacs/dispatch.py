@@ -47,21 +47,41 @@ class Dispatcher:
         self._interrupt_seq = 0
         self._interrupt_handled = 0
         self.want_interrupt = False
+        self.worker: asyncio.Task[None] | None = None
+        # Set while the debugger is handing the editor to the other loop:
+        # input is set aside for that loop instead of being started here.
+        self.parked = False
+        self._set_aside: list[tuple[int, Frame, str, Any, asyncio.Future[Any] | None]] = []
 
     def start(self) -> None:
         loop = self.editor.loop
         assert loop is not None
         self.lane = asyncio.Lock()
         self._queue = asyncio.Queue()
-        self.editor.keep_task(loop.create_task(self._worker()))
+        self.worker = loop.create_task(self._worker())
+        self.editor.keep_task(self.worker)
 
     def put(self, frame: Frame, kind: str, value: Any) -> None:
         if self._queue is not None:
             self._queue.put_nowait((self._epoch, frame, kind, value, None))
 
+    def take_pending(self) -> list[Any]:
+        """Remove and return the input that has not been started (the debugger's hand-over)."""
+        items: list[Any] = list(self._set_aside)
+        self._set_aside = []
+        while self._queue is not None and not self._queue.empty():
+            items.append(self._queue.get_nowait())
+        return items
+
+    def give(self, items: list[Any]) -> None:
+        """Queue input that another dispatcher set aside."""
+        if self._queue is not None:
+            for _, frame, kind, value, future in items:
+                self._queue.put_nowait((self._epoch, frame, kind, value, future))
+
     @property
     def busy(self) -> bool:
-        queued = self._queue is not None and not self._queue.empty()
+        queued = self._queue is not None and not self._queue.empty() and not self.parked
         return queued or self._taking or self._holder is not None
 
     # -- the lane -----------------------------------------------------------
@@ -91,6 +111,9 @@ class Dispatcher:
         assert self._queue is not None
         while True:
             epoch, frame, kind, value, future = await self._queue.get()
+            if self.parked:
+                self._set_aside.append((epoch, frame, kind, value, future))
+                continue
             self._taking = True
             try:
                 await self.lane.acquire()
@@ -101,7 +124,11 @@ class Dispatcher:
                     await self.lane.acquire()
                 started = False
                 try:
-                    if epoch != self._epoch:
+                    if self.parked:
+                        # The command ahead of this input ended the pause: the
+                        # input belongs to whichever loop serves next.
+                        self._set_aside.append((epoch, frame, kind, value, future))
+                    elif epoch != self._epoch:
                         # Typed ahead of a command that was then cancelled.
                         if future is not None and not future.done():
                             future.set_exception(Quit("cancelled"))
@@ -191,6 +218,9 @@ class Dispatcher:
         for mode in reversed(buffer.minor_modes):
             if isinstance(mode, Mode):
                 maps.extend(type(mode).keymaps())
+        debug_keys = self.editor.debugger.keymap
+        if debug_keys is not None and self.editor.debugger.status:
+            maps.append(debug_keys)  # stepping keys, in every buffer while paused
         if isinstance(buffer.keymap, Keymap):
             maps.append(buffer.keymap)
         if isinstance(buffer.mode, Mode):
@@ -287,6 +317,10 @@ class Dispatcher:
         view = frame.focus
         buffer = view.buffer
         prefix = frame.prefix
+        if not command.prefix:
+            # Taken by this command.  Left in place it would also apply to the
+            # keys that answer a prompt the command opens.
+            frame.prefix = None
         last = frame.last_command
         # Typing is undone a run of characters at a time, not one by one.
         invocation = undo.new_invocation()
@@ -344,7 +378,7 @@ class Dispatcher:
         except NeomacsError as exc:
             editor.message(str(exc), kind="error", frame=frame)
         except Exception as exc:
-            editor.report_exception(f"in {command.name}", exc, frame=frame)
+            editor.report_exception(f"in {command.name}", exc, frame=frame, keep=True)
         finally:
             for token, var in zip(
                 tokens,

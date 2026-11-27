@@ -8,6 +8,7 @@ lines over.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import inspect
 import json
@@ -49,11 +50,9 @@ class Connection:
         self.on_close: list[Callable[[Connection], None]] = []
         self._next_id = 1
         self._pending: dict[int, asyncio.Future[Any]] = {}
+        self.current_id: Any = None  # the id of the request being handled
         # Called on the reader thread, before the line is queued for the loop.
         self.intercept: Callable[[bytes], None] | None = None
-        loop = editor.loop
-        assert loop is not None
-        self._loop = loop
         self._context = contextvars.copy_context()
         transport.on_line = self._line_from_thread
         transport.on_close = self._close_from_thread
@@ -69,18 +68,27 @@ class Connection:
         # Stamped here, on the reader thread, so that a latency measurement
         # includes the hand-over to the loop.
         arrived = time.perf_counter() if self.editor.latency is not None else 0.0
-        try:
-            self._loop.call_soon_threadsafe(self._on_line, line, arrived, context=self._context)
-        except RuntimeError:  # loop closed
-            pass
+        self.editor.post_line(self, line, arrived)
 
     def _close_from_thread(self) -> None:
-        try:
-            self._loop.call_soon_threadsafe(self._on_closed, context=self._context)
-        except RuntimeError:
-            pass
+        self.editor.post_line(self, None)
 
-    # -- loop thread ------------------------------------------------------
+    # -- owner thread -----------------------------------------------------
+
+    def deliver(self, line: bytes | None, arrived: float) -> None:
+        """Handle one line, or the end of input, on the thread that owns the editor.
+
+        Each runs in a copy of the connection's context: the context itself
+        may be in use by code that the debugger has paused.
+        """
+        context = self._context.copy()
+        try:
+            if line is None:
+                context.run(self._on_closed)
+            else:
+                context.run(self._on_line, line, arrived)
+        except Exception as exc:
+            self.editor.report_exception(f"handling a message from {self.name}", exc)
 
     def _send(self, message: dict[str, Any]) -> None:
         if self.closed:
@@ -98,7 +106,7 @@ class Connection:
             raise FrontendGone(f"{self.name} has disconnected")
         msgid = self._next_id
         self._next_id += 1
-        future: asyncio.Future[Any] = self._loop.create_future()
+        future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         self._pending[msgid] = future
         self._send({"jsonrpc": "2.0", "id": msgid, "method": method, "params": list(params)})
         try:
@@ -107,6 +115,11 @@ class Connection:
             return await asyncio.wait_for(future, timeout)
         finally:
             self._pending.pop(msgid, None)
+
+    def answer(self, msgid: Any, result: Any) -> None:
+        """Reply to a request by id, outside its handler."""
+        if msgid is not None:
+            self._send({"jsonrpc": "2.0", "id": msgid, "result": result})
 
     def close(self, drain: float = 0.0) -> None:
         self.transport.close(drain)
@@ -119,8 +132,7 @@ class Connection:
         self.transport.close(drain=0.5)
         self.closed = True
         for future in self._pending.values():
-            if not future.done():
-                future.set_exception(FrontendGone(f"{self.name} has disconnected"))
+            _settle(future, error=FrontendGone(f"{self.name} has disconnected"))
         self._pending.clear()
         for callback in list(self.on_close):
             self.editor.guard(f"close of {self.name}", callback, self)
@@ -149,11 +161,14 @@ class Connection:
             return
         if msg.get("error") is not None:
             err = msg["error"]
-            future.set_exception(
-                RpcError(str(err.get("message", "error")), err.get("code", -32000), err.get("data"))
+            _settle(
+                future,
+                error=RpcError(
+                    str(err.get("message", "error")), err.get("code", -32000), err.get("data")
+                ),
             )
         else:
-            future.set_result(msg.get("result"))
+            _settle(future, result=msg.get("result"))
 
     def _on_call(self, msg: dict[str, Any]) -> None:
         method = msg["method"]
@@ -175,6 +190,7 @@ class Connection:
             else:
                 self.editor.message(f"invalid params for {method}: {exc}")
             return
+        self.current_id = msgid
         try:
             result = handler(self, *params)
         except Exception as exc:
@@ -184,9 +200,10 @@ class Connection:
             # Whatever the call did (move a cursor, change a face) may need showing.
             self.editor.update_frames()
         if inspect.isawaitable(result):
-            task = self._loop.create_task(self._finish(method, msgid, is_request, result))
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(self._finish(method, msgid, is_request, result))
             self.editor.keep_task(task)
-        elif is_request:
+        elif is_request and result is not api.NO_REPLY:
             self._send({"jsonrpc": "2.0", "id": msgid, "result": result})
 
     async def _finish(self, method: str, msgid: Any, is_request: bool, awaitable: Any) -> None:
@@ -197,7 +214,7 @@ class Connection:
             return
         finally:
             self.editor.update_frames()
-        if is_request:
+        if is_request and result is not api.NO_REPLY:
             self._send({"jsonrpc": "2.0", "id": msgid, "result": result})
 
     def _failed(self, method: str, msgid: Any, is_request: bool, exc: Exception) -> None:
@@ -205,6 +222,33 @@ class Connection:
             self.editor.report_exception(f"handling {method}", exc)
         if is_request:
             self._send(_exception_reply(msgid, exc))
+
+
+def _settle(
+    future: asyncio.Future[Any], *, result: Any = None, error: BaseException | None = None
+) -> None:
+    """Complete FUTURE, which may belong to the loop that is not running now:
+    the main loop's while the debugger has it paused, or the debug loop's
+    after it has parked.  That loop picks the result up when it next runs."""
+
+    def apply() -> None:
+        if future.done():
+            return
+        if error is not None:
+            future.set_exception(error)
+        else:
+            future.set_result(result)
+
+    loop = future.get_loop()
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if loop is running:
+        apply()
+    else:
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(apply)
 
 
 def _error_reply(msgid: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:

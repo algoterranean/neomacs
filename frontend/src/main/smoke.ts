@@ -67,7 +67,17 @@ export async function runSmoke(
   const js = <T>(code: string) => state.window.webContents.executeJavaScript(code, true) as Promise<T>;
   const snap = () => js<Snapshot>("window.neomacsDebug.snapshot()");
   const frames = (n: number) => js<void>(`window.neomacsDebug.frames(${n})`);
+  // Keys pressed through Chromium take a while to reach the page.  `settle`
+  // first waits until the page has sent as many as were pressed.
+  let keysPressed = -1; // -1 until keys are first pressed
   const settle = async () => {
+    if (keysPressed >= 0) {
+      for (let i = 0; i < 300; i++) {
+        const sent = await js<number>("window.neomacsDebug.snapshot().input.keys");
+        if (sent >= keysPressed) break;
+        await frames(1);
+      }
+    }
     for (let i = 0; i < 3; i++) {
       await control.call("engine.idle", 10);
       await frames(3);
@@ -250,7 +260,9 @@ export async function runSmoke(
     const contents = state.window.webContents;
     contents.focus();
     await js<void>("document.getElementById('root').focus()");
+    keysPressed = await js<number>("window.neomacsDebug.snapshot().input.keys");
     const press = (keyCode: string, modifiers: ("shift" | "control" | "alt" | "meta")[] = []) => {
+      keysPressed += 1;
       contents.sendInputEvent({ type: "keyDown", keyCode, modifiers });
       contents.sendInputEvent({ type: "keyUp", keyCode, modifiers });
     };
@@ -352,6 +364,57 @@ export async function runSmoke(
       { sourceIn, restored, warnings: await pyText("ed.eval_warnings") },
     );
 
+    // Step 8: a breakpoint in a command; the window keeps working while it is paused.
+    await control.eval(
+      `_sc.replace(0, len(_sc), "@command\\ndef dbg_demo() -> None:\\n    first = 1\\n    second = first + 1\\n    ed.message(f'demo {second}')\\n")\n` +
+        `${win}.show(_sc)`,
+    );
+    await settle();
+    press("c", ["control"]);
+    press("b", ["control"]);
+    await settle();
+    await control.eval(
+      `from neomacs.debug import breakpoints as _bp\n_bp.toggle(ed.debugger, _sc, 3)\nglobal_map.bind('<f7>', 'dbg_demo')`,
+    );
+    await settle();
+    const markShown = (await js<string>("document.body.innerText")).includes("●");
+    await control.eval(`${win}.show(_k)`);
+    await settle();
+    press("F7");
+    await settle();
+    const pausedAt = await pyText(`(ed.debugger.status, ed.debugger.stack[0][1], ${win}.buffer.name)`);
+    const pausedPage = await js<string>("document.body.innerText");
+    check(
+      "debug.pauses_and_shows_it",
+      pausedAt === "('paused', 3, '*scratch*')" && pausedPage.includes("[paused]") && markShown && pausedPage.includes("▶"),
+      { pausedAt, modeline: pausedPage.includes("[paused]"), breakpointMark: markShown, lineMark: pausedPage.includes("▶") },
+    );
+    press("F10");
+    await settle();
+    const steppedTo = await pyText("(ed.debugger.status, ed.debugger.stack[0][1])");
+    // Other commands run while it is paused: a prompt, and an assignment to a local.
+    press(":", ["alt"]);
+    await settle();
+    const promptWhilePaused = (await ui()).chrome.prompt;
+    type("first = 10");
+    press("Return");
+    await settle();
+    press("F10");
+    await settle();
+    const secondIs = await pyText("ed.debugger.stack[0][0].f_locals.get('second')");
+    press("F5");
+    await settle();
+    u = await ui();
+    const resumedPage = await js<string>("document.body.innerText");
+    check(
+      "debug.step_change_a_local_continue",
+      steppedTo === "('paused', 4)" && promptWhilePaused === "Eval: " && secondIs === "11" && u.chrome.message === "demo 11" &&
+        !resumedPage.includes("[paused]") && (await pyText(`(ed.debugger.status, ${win}.buffer.name)`)) === "('', 'keys')",
+      { steppedTo, promptWhilePaused, secondIs, message: u.chrome.message, stillShown: resumedPage.includes("[paused]") },
+    );
+    await control.eval(`_bp.toggle(ed.debugger, _sc, 3); global_map.unbind('<f7>'); ${win}.selections.set([(5, 5)])`);
+    await settle();
+
     // Several cursors.
     await control.eval(`_k.replace(0, len(_k), 'aaa\\nbbb\\nccc'); ${win}.selections.set([(0, 0)])`);
     await settle();
@@ -375,7 +438,7 @@ export async function runSmoke(
     press("x", ["alt"]);
     await settle();
     u = await ui();
-    check("f2.prompt_opens", u.chrome.prompt === "M-x " && (u.chrome.popup?.length ?? 0) > 10 && u.focus !== u.mainView, [u.chrome.prompt, u.chrome.popup?.length]);
+    check("f2.prompt_opens", u.chrome.prompt === "M-x " && (u.chrome.popup?.length ?? 0) > 10 && u.focus !== u.mainView, { chrome: u.chrome, focus: u.focus, mainView: u.mainView, engine: await pyText("[(m.label, m.closed) for m in ed.frames[" + frame + "].prompts]") });
     type("goto");
     await settle();
     u = await ui();

@@ -214,9 +214,15 @@ class SelectionSet:
         """Replace every selection with RANGES, given as (anchor, head) pairs."""
         if not ranges:
             return
-        for old in self._items:
-            old.detach()
-        self._items = [Selection(self, head, anchor) for anchor, head in ranges]
+        # Existing selection objects are kept and moved, so that code holding
+        # one (a command the debugger has paused, say) still has a live one.
+        items = self._items[: len(ranges)]
+        for extra in self._items[len(ranges) :]:
+            extra.detach()
+        for selection, (anchor, head) in zip(items, ranges, strict=False):
+            selection.select(anchor, head)
+        items.extend(Selection(self, head, anchor) for anchor, head in ranges[len(items) :])
+        self._items = items
         self._primary = self._items[max(0, min(primary, len(self._items) - 1))]
 
     @provisional("0.1")

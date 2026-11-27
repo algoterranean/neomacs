@@ -19,6 +19,15 @@ CAPABILITIES: list[str] = []
 _methods: dict[str, Callable[..., Any]] = {}
 
 
+class _NoReply:
+    def __repr__(self) -> str:
+        return "NO_REPLY"
+
+
+# Returned by a handler whose request has been answered by other means.
+NO_REPLY = _NoReply()
+
+
 def method[F: Callable[..., Any]](name: str) -> Callable[[F], F]:
     """Register a handler.  It is called as ``handler(connection, *params)``."""
 

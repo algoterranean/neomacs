@@ -73,15 +73,15 @@ async def eval_last_expression() -> None:
 async def eval_expression(
     text: Annotated[str, Ask.string("Eval: ", history="eval")],
 ) -> None:
-    """Evaluate Python typed in the minibuffer, in the scratch module."""
+    """Evaluate Python typed in the minibuffer: in the scratch module, or while
+    the debugger is paused, in the selected stack frame."""
     try:
-        result = await evaluate(text, ed.scratch.__dict__, filename="<neomacs:eval>")
+        result = await live.eval_text(text)
     except Quit:
         raise
     except Exception as exc:
         live.report_error(exc)
         return
-    live.announce(ed.scratch.__name__, result)
     live.show_value(result)
 
 

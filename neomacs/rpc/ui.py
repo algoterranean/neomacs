@@ -60,11 +60,11 @@ def attach(conn: Connection, options: dict[str, Any] | None = None) -> dict[str,
     editor.last_frame = frame
     # An interrupt must be seen while the loop is busy, so it is spotted on the
     # reader thread before the line is queued (ENGINE 3).
-    dispatcher = editor.dispatcher
 
     def spot_interrupt(line: bytes) -> None:
         if b'"input.interrupt"' in line:
-            dispatcher.interrupt_from_thread()
+            # Whichever loop is serving: the debugger's while it has a command paused.
+            editor.dispatcher.interrupt_from_thread()
 
     conn.intercept = spot_interrupt
     from neomacs.hooks import ui_attached
@@ -195,20 +195,76 @@ def interrupt(conn: Connection) -> None:
     by the time it is dispatched here there is nothing left to do."""
 
 
-@method("engine.idle")
-async def idle(conn: Connection, timeout: float = 10.0) -> bool:
-    """Return once input has been handled and every responsive frame is up to date.
+class IdleRequest:
+    """An `engine.idle` request that has not been answered.  The loop that
+    took it may be frozen by the debugger before it can answer; the loop that
+    takes over answers it instead."""
 
-    For tests and scripts.  Returns False if that did not happen within TIMEOUT.
-    """
-    editor = conn.editor
+    def __init__(self, conn: Connection, msgid: Any, timeout: float) -> None:
+        self.conn = conn
+        self.msgid = msgid
+        self.timeout = timeout
+        self.answered = False
+
+
+async def _settled(editor: Any, request: IdleRequest) -> bool | None:
+    """Wait until the editor is idle.  None means this loop is being parked
+    by the debugger and the other one must answer."""
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
+    deadline = loop.time() + request.timeout
     quiet = 0
-    while quiet < 3:
+    debugger = editor.debugger
+    while quiet < 3 and not request.answered:
         await asyncio.sleep(0.001 if quiet == 0 else 0)
-        busy = editor.dispatcher.busy or any(f.busy for f in editor.frames.values())
+        if debugger.resuming and loop is not editor.main_loop:
+            return None
+        busy = (
+            debugger.resuming
+            or editor.dispatcher.busy
+            or any(f.busy for f in editor.frames.values())
+        )
         quiet = 0 if busy else quiet + 1
         if loop.time() > deadline:
             return False
     return True
+
+
+async def _answer_idle(editor: Any, request: IdleRequest) -> None:
+    ok = await _settled(editor, request)
+    if ok is not None and not request.answered:
+        request.answered = True
+        if request in editor.idle_requests:
+            editor.idle_requests.remove(request)
+        request.conn.answer(request.msgid, ok)
+
+
+def adopt_idle_requests(editor: Any) -> None:
+    """Answer, from the loop that has just taken over, the requests the other loop left."""
+    loop = asyncio.get_running_loop()
+    for request in list(editor.idle_requests):
+        editor.keep_task(loop.create_task(_answer_idle(editor, request)))
+
+
+@method("engine.idle")
+def idle(conn: Connection, timeout: float = 10.0) -> Any:
+    """Return once input has been handled and every responsive frame is up to date.
+
+    For tests and scripts.  Returns False if that did not happen within TIMEOUT.
+    While the debugger has a command paused, "handled" means paused.
+    """
+    # Registered at once, not when the coroutine first runs: the loop may be
+    # frozen by the debugger before it gets that far.
+    request = IdleRequest(conn, conn.current_id, timeout)
+    conn.editor.idle_requests.append(request)
+    return _idle(conn.editor, request)
+
+
+async def _idle(editor: Any, request: IdleRequest) -> Any:
+    from neomacs.rpc.api import NO_REPLY
+
+    ok = await _settled(editor, request)
+    if ok is None or request.answered:
+        return NO_REPLY  # the loop that takes over, or took over, answers
+    request.answered = True
+    editor.idle_requests.remove(request)
+    return ok

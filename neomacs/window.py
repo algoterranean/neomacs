@@ -106,15 +106,14 @@ class View:
         if buffer is self.buffer:
             return
         self.buffer.remove_listener(self._on_change)
-        # Remember where this view was in the old buffer, and come back to
-        # where it last was in the new one.
-        self.buffer.locals.setdefault("_view_positions", {})[self.id] = self.selections.ranges()
-        self.selections.detach()
+        # Keep this view's selections in the old buffer, and take up again the
+        # ones it had in the new one.  They stay live meanwhile: they follow
+        # edits, and code holding one (a command the debugger has paused, say)
+        # can go on using it.
+        self.buffer.locals.setdefault("_view_selections", {})[self.id] = self.selections
         self.buffer = buffer
-        self.selections = SelectionSet(buffer)
-        remembered = buffer.locals.get("_view_positions", {}).get(self.id)
-        if remembered:
-            self.selections.set([(buffer.clamp(a), buffer.clamp(h)) for a, h in remembered])
+        remembered = buffer.locals.get("_view_selections", {}).pop(self.id, None)
+        self.selections = remembered if remembered is not None else SelectionSet(buffer)
         buffer.add_listener(self._on_change)
         # The frontend will be at the top of the new buffer.  It reports its
         # viewport only when that changes, so assume the page it had.
@@ -371,6 +370,9 @@ class Window(View):
         line, _ = buf.line_offset(self.cursor.pos)
         state = "*" if buf.modified else "-"
         text = f" {state} {buf.name}   L{line} C{self.cursor.column} "
+        status = self.frame.editor.debugger.status
+        if status:
+            text += f"  [{status}] "
         return [[None, text, self.frame.editor.faces.id_for("modeline")]]
 
 
@@ -590,6 +592,12 @@ class Frame:
             return
         self._scheduled = True
         loop.call_soon(self._update)
+
+    def reschedule(self) -> None:
+        """Schedule an update on the loop that now owns the editor, whatever
+        was scheduled on the other one."""
+        self._scheduled = False
+        self.schedule_update()
 
     def _update(self, force: bool = False) -> None:
         self._scheduled = False

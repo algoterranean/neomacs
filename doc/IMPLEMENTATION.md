@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: plan written 2026-11-27. Steps 1 to 7 and Gates A to D done; step 8 is next. See the progress log (section 9).
+Status: plan written 2026-11-27. Steps 1 to 8 and Gates A to D done; step 9 is next. See the progress log (section 9).
 
 This is the working checklist for building Neomacs. It puts the stages of the
 five design documents into one order and says, for each step, what to read,
@@ -424,17 +424,17 @@ propagates into the monitored frame, and that assignment through
 
 **Build:**
 
-- [ ] The debug loop on its own thread; the single hand-over point for
+- [x] The debug loop on its own thread; the single hand-over point for
       ownership of editor state; reply routing to the loop that asked.
-- [ ] Input routed to the debug loop while paused, including `C-g`.
-- [ ] Breakpoints as spans in a `debug` layer, with gutter marks; resolution
+- [x] Input routed to the debug loop while paused, including `C-g`.
+- [x] Breakpoints as spans in a `debug` layer, with gutter marks; resolution
       to code objects; re-application after re-evaluation.
-- [ ] `sys.breakpointhook`.
-- [ ] Step, next, out, continue, including across `await`; abort.
-- [ ] The `*debug*` buffer; stack navigation; evaluation in the selected
+- [x] `sys.breakpointhook`.
+- [x] Step, next, out, continue, including across `await`; abort.
+- [x] The `*debug*` buffer; stack navigation; evaluation in the selected
       frame.
-- [ ] Post-mortem inspection from `*traceback*`; `debug_on_raise`.
-- [ ] The paused state shown in every frame's modeline.
+- [x] Post-mortem inspection from `*traceback*`; `debug_on_raise`.
+- [x] The paused state shown in every frame's modeline.
 
 **Done when:** set a breakpoint in a built-in command, press its key, step
 through it while scrolling other buffers, change a local, continue.
@@ -621,8 +621,8 @@ request that removes a provisional name without a version bump fails CI.
 
 | Fact | Where it is assumed | Verify at |
 |---|---|---|
-| `sys.monitoring` callbacks may block, may raise into the monitored frame, and work under free threading | ENGINE 10.3 | Start of step 8 |
-| Assignment through `frame.f_locals` changes the paused frame's locals | ENGINE 10.4 | Start of step 8 |
+| `sys.monitoring` callbacks may block, may raise into the monitored frame, and work under free threading | ENGINE 10.3 | Confirmed 2026-11-27 on CPython 3.15.2 free-threaded (ENGINE 10.7) |
+| Assignment through `frame.f_locals` changes the paused frame's locals | ENGINE 10.4 | Confirmed 2026-11-27 on CPython 3.15.2 free-threaded (ENGINE 10.7) |
 | `tree-sitter` loads on the free-threaded build without re-enabling the GIL | ENGINE 15 | Start of step 9 |
 | `EditContext` behaves as needed in the pinned Electron's Chromium | FRONTEND F3 | Step 6 |
 | Standalone free-threaded 3.15 builds exist for every target | DISTRIBUTION 3.2 | Start of step 13 |
@@ -690,4 +690,5 @@ Add a row when a step or gate is finished, or when the design changed.
 | 2026-11-27 | Gate C | this commit | Passed, three consecutive runs of `npm run smoke`. (1) Agreement with the reference layout, monospaced face, 80 lines of ASCII of which 20 wrap: 4,629 answers compared, none different (4,008 `layout.move` over eight distances, a 155-step walk carrying the goal, 334 `layout.line_edge`, 125 `layout.rect`, the viewport, four page moves). The first run of this check failed with 2,691 differences, which is what showed that a view's character width and page size went stale after a face change; that it failed then is also the evidence that it can. (2) Goal column in proportional text with rows of 16 and 27 pixels: over 24 rows down through six lines the cursor stayed within 15.5 px of the goal, the limit being one character's width (24 px allowed), and 25 rows up returned it to the exact starting offset. (3) A vertical motion, timed in the engine from the key arriving to the redraw leaving and including the round trip to Electron: 99th percentile 1.8 to 2.5 ms against the 5 ms budget; the round trip alone 0.9 to 1.6 ms. With ten cursors in one request: 2.7 to 5.1 ms at the 99th percentile over 60 keys, reported and not part of the gate. Found on the way: the Python reference frontend answered questions about lines it did not hold with a guess; it now fetches them first, as FRONTEND 7 requires, and the comparison tool is itself tested against it, including that a layout one column narrower is caught. **Limits:** off-screen rendering at 60 frames per second; wrapped lines with spaces are excluded from (1) because the browser wraps at words and the reference at the column; rectangles are compared in whole cells, since a row of text sits a pixel or two inside its line box. |
 | 2026-11-27 | Step 7 | this commit | Done. The pipeline, in-place patching, `keep`/`forget`, the six evaluation commands, the REPL, the `*traceback*` buffer with a link per frame, `describe_command`, `describe_key`, `describe_option`, `find_source`, `apropos`. The "done when" is tested through the reference frontend and again in Electron with real keys: a built-in command redefined and a key bound from the scratch buffer both act on the next keystroke, and `find_source` goes to the scratch buffer for the new definition and to the file for an untouched one. 28 new tests (213 in all); 52 Electron smoke checks. Differences from the design are listed in ENGINE 9.7. **Not done:** the traceback buffer is not shown automatically, because without panels it would replace the buffer being edited; startup still imports the standard modules with Python's import, and `load_file` (the pipeline's entry for files) is tested but has no caller yet; "develop inside the editor" has not started, since nobody has used the editor by hand. |
 | 2026-11-27 | Gate D | this commit | Passed. `python -m neomacs.tools.reevaluate` makes every engine evaluate all 11 modules (the ten under `std/`, and `modes.py`; there is no `modes/` directory yet) twice through the buffer pipeline before it serves, then runs the whole suite against such engines: 213 pass, and the Electron smoke test passes the same way. No fallback warnings at all, so none to explain. Evidence that the evaluation really happens: a re-evaluated engine reports 22 evaluations, the module still holds its original function object while the registry holds a newer one, and both run the same code object, compiled from the buffer. A separate test runs the real `eval_buffer` command on every module twice and then edits with several cursors, kill and yank, undo and a prompt. **The gate failed twice before passing, both real faults:** a subclass defined in the same module as its base fell back to rebinding (the new base was not recognised as the kept one), and re-evaluating `neomacs.std` emptied the menu (registrations made by a function at startup were treated as made by loading). **Limits:** the startup path calls the function behind `eval_buffer`, not the command; the command itself is covered by the separate test. Only these 11 modules are covered: the core (`dispatch`, `window`, `minibuffer`, `editor`) is not re-evaluated and is not expected to survive it. The standard modules hold four classes, so class patching is exercised lightly here and mostly by unit tests. |
+| 2026-11-27 | Step 8 | this commit | Done. The three facts were confirmed first (ENGINE 10.7). The "done when" is a test through the reference frontend: a breakpoint set with the real key in `forward_char`, its key pressed, then while paused switching buffers, moving by visual line (a geometry request answered to the debug loop), editing and undoing, assigning to a local, and continuing, after which the cursor has moved by the new amount. The Electron smoke test does a shorter version with real keys. 21 debugger tests, run three times in a row after the last change without a failure; 234 Python tests in all; 54 Electron checks, three runs; Gate D and the latency benchmark still pass. Covered: step, next, out, across `await`, into and out of an awaited coroutine; breakpoints following edits and re-evaluation, on module-level code, on a line without code, with a condition; `breakpoint()`; abort; quit and `input.interrupt` while paused; a prompt open across a pause; two frames; post-mortem inspection; `debug_on_raise`; ownership changing hands with the owner check on; exit and SIGTERM while paused. **Faults found on the way, outside the debugger:** a prefix argument was applied again to the keys that answered a prompt the command opened; showing another buffer in a view destroyed the selections of the first; the Electron smoke test did not wait for the keys it pressed to reach the page and passed by timing. **Not done:** see the last list in ENGINE 10.7. The `*debug*` buffer replaces the source in the window until panels exist. Nobody has used the debugger by hand. |
 | | | | |

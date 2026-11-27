@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import contextvars
 import os
@@ -24,6 +25,7 @@ from neomacs.rpc.transport import Listener, socket_transport, stdio_transport
 from neomacs.stability import provisional
 
 if TYPE_CHECKING:
+    from neomacs.dispatch import Dispatcher
     from neomacs.text.buffer import Buffer
     from neomacs.window import Frame, View, Window
 
@@ -49,7 +51,18 @@ class TaskInfo:
 @provisional("0.1")
 class Editor:
     def __init__(self) -> None:
-        self.loop: asyncio.AbstractEventLoop | None = None
+        # The loop that serves the editor, and the one doing so at this moment:
+        # the debugger's while the main thread is paused (ENGINE 10.1).
+        self.main_loop: asyncio.AbstractEventLoop | None = None
+        self._active_loop: asyncio.AbstractEventLoop | None = None
+        self.main_thread: int | None = None
+        # Lines from every connection, in arrival order, for whichever loop
+        # owns the editor to handle.  `_route_lock` orders appends against
+        # the debugger's hand-over.
+        self._inbox: collections.deque[tuple[Connection, bytes | None, float]] = collections.deque()
+        self._route_lock = threading.Lock()
+        self.idle_requests: list[Any] = []
+        self.last_error: BaseException | None = None
         self.connections: set[Connection] = set()
         self.messages: list[str] = []
         self.listen_path: Path | None = None
@@ -89,7 +102,11 @@ class Editor:
         self.faces = FaceTable()
         self.faces.on_change.append(self.update_frames)
         self.frame_detach_timeout = 600.0
-        self.dispatcher = Dispatcher(self)
+        self.main_dispatcher = Dispatcher(self)
+        self._active_dispatcher = self.main_dispatcher
+        from neomacs.debug.pause import Debugger
+
+        self.debugger = Debugger(self)
         self.minibuffer = MinibufferAPI(self)
         self.kill_ring = KillRing()
         self.menu = Menu()
@@ -105,6 +122,58 @@ class Editor:
         self.tasks: list[TaskInfo] = []
         # How many module evaluations `neomacs.tools.reevaluate` has done here.
         self.reevaluated = 0
+
+    # -- which loop is serving ------------------------------------------------
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop | None:
+        """The event loop that owns the editor now."""
+        return self._active_loop
+
+    @loop.setter
+    def loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
+        self.main_loop = self._active_loop = loop
+
+    @property
+    def dispatcher(self) -> Dispatcher:
+        """The dispatcher of the loop that owns the editor now."""
+        return self._active_dispatcher
+
+    def activate(self, loop: asyncio.AbstractEventLoop, dispatcher: Dispatcher) -> None:
+        """Route input and scheduling to LOOP from now on (the debugger's hand-over)."""
+        with self._route_lock:
+            self._active_loop = loop
+            self._active_dispatcher = dispatcher
+
+    def after_handover(self) -> None:
+        """Called on the thread that has just become the owner."""
+        loop = self._active_loop
+        assert loop is not None
+        for frame in list(self.frames.values()):
+            frame.reschedule()
+        loop.call_soon(self._drain)
+        from neomacs.rpc import ui
+
+        ui.adopt_idle_requests(self)
+
+    def post_line(self, conn: Connection, line: bytes | None, arrived: float = 0.0) -> None:
+        """Called on a reader thread: a line from CONN, or None for end of input."""
+        with self._route_lock:
+            self._inbox.append((conn, line, arrived))
+            loop = self._active_loop
+        if loop is not None:
+            with contextlib.suppress(RuntimeError):  # the loop has closed
+                loop.call_soon_threadsafe(self._drain)
+
+    def _drain(self) -> None:
+        if threading.get_ident() != _owner.owner():
+            return  # woken on a loop that is not the owner now; the owner will drain
+        while self._inbox:
+            try:
+                conn, line, arrived = self._inbox.popleft()
+            except IndexError:
+                return
+            conn.deliver(line, arrived)
 
     # -- context (ENGINE 7.7) -------------------------------------------------
 
@@ -190,10 +259,18 @@ class Editor:
             self.message(text, kind="log")
 
     def report_exception(
-        self, where: str, exc: BaseException, *, frame: Frame | None = None
+        self, where: str, exc: BaseException, *, frame: Frame | None = None, keep: bool = False
     ) -> None:
+        """Tell the user about EXC.  With KEEP it also becomes the error that
+        `show_traceback` and `debug.inspect` look at."""
         self.message(f"Error {where}: {type(exc).__name__}: {exc}", kind="error", frame=frame)
         self.message("".join(traceback.format_exception(exc)), kind="log")
+        if not keep:
+            return
+        with contextlib.suppress(Exception):
+            from neomacs.live import run
+
+            run.record_error(exc)  # for show_traceback and debug.inspect
 
     def guard(self, where: str, fn: Callable[..., Any], *args: Any) -> Any:
         """Call FN, reporting any exception instead of propagating it (ENGINE 3)."""
@@ -294,8 +371,12 @@ class Editor:
 
     def call_from_thread(self, fn: Callable[..., Any], *args: Any) -> None:
         """Schedule FN on the loop, in the editor's context, from any thread."""
-        assert self.loop is not None
-        self.loop.call_soon_threadsafe(fn, *args, context=self._context)
+        assert self._context is not None
+        with self._route_lock:
+            loop = self._active_loop
+        assert loop is not None
+        # A copy: the context itself may be in use by code the debugger has paused.
+        loop.call_soon_threadsafe(fn, *args, context=self._context.copy())
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -328,10 +409,12 @@ class Editor:
         ready: Callable[[], None] | None = None,
     ) -> None:
         self.loop = asyncio.get_running_loop()
+        self.main_thread = threading.get_ident()
         self._stop = asyncio.Event()
         self._context = contextvars.copy_context()
         _owner.claim()
-        self.dispatcher.start()
+        self.main_dispatcher.start()
+        self.debugger.install()
         sys.modules.setdefault(self.scratch.__name__, self.scratch)
         self._fill_scratch()
         with contextlib.suppress(NotImplementedError, ValueError):
@@ -364,6 +447,7 @@ class Editor:
                 conn.close(drain=1.0)
             for task in list(self._tasks):
                 task.cancel()
+            self.debugger.uninstall()
             _owner.release()
 
     def _fill_scratch(self) -> None:
@@ -393,6 +477,9 @@ class Editor:
     def stop(self) -> None:
         if self._stop is not None:
             self._stop.set()
+        if self.debugger.paused:
+            # The main loop cannot see the request until the paused command is let go.
+            self.debugger.resume_from_anywhere("abort")
 
     def _accept_from_thread(self, sock: socket.socket) -> None:
         self.call_from_thread(self._accept, sock)
@@ -440,4 +527,5 @@ ed: Any = _EdProxy()
 
 # Importing these registers RPC methods, standard commands and default key bindings.
 from neomacs import std as _std  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
+from neomacs.debug import ui as _debug_ui  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
 from neomacs.rpc import ui as _ui  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]

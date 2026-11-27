@@ -725,9 +725,11 @@ def test_mouse(ui: HeadlessUI) -> None:
     assert ui.view.selections == [[1, 6, 1, 10]]  # the word
     ui.mouse(2, 3, clicks=3)
     assert ui.view.selections == [[2, 0, 2, 19]]  # the line
-    before = ui.message
-    ui.mouse(1, 0, area="gutter:numbers")  # <gutter-mouse-1> has no binding yet
-    assert ui.message == before
+    ui.mouse(2, 0, area="gutter:numbers")  # a click in the gutter toggles a breakpoint
+    assert ui.message.startswith("Breakpoint at line 2")
+    assert ui.view.selections == [[2, 0, 2, 19]]  # and does not move the cursor
+    ui.mouse(2, 0, area="gutter:numbers")
+    assert ui.message == "Breakpoint removed from line 2"
 
 
 def test_dropped_files_are_visited(ui: HeadlessUI, tmp_path: Path) -> None:

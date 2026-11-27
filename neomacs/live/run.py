@@ -48,11 +48,20 @@ async def eval_range(
     buffer belongs to (ENGINE 9.2), and warn about anything left stale."""
     ed = current()
     module = source.module_for(buffer, ed.scratch)
+    frame = ed.debugger.frame
     line = buffer.line_of(start)
     text = buffer[start:end]
     lead = buffer[buffer.line_start(line) : start]
     if lead and lead.isspace():
         text = textwrap.dedent(lead + text)  # an indented block, such as one method
+    if frame is not None and not whole:
+        # Paused, or looking at an error: evaluate where the selected stack
+        # frame is, so its variables can be read and assigned (ENGINE 10.4).
+        result = await evaluate(
+            text, frame.f_globals, filename="<neomacs:eval>", mode=mode, local_names=frame.f_locals
+        )
+        refresh_debugger()
+        return result
     result = await evaluate(
         text,
         module.__dict__,
@@ -64,6 +73,31 @@ async def eval_range(
     )
     announce(module.__name__, result)
     return result
+
+
+async def eval_text(text: str, filename: str = "<neomacs:eval>") -> Evaluation:
+    """Evaluate TEXT that came from no buffer: in the selected stack frame
+    when the debugger has one, otherwise in the scratch module."""
+    ed = current()
+    frame = ed.debugger.frame
+    if frame is not None:
+        result = await evaluate(
+            text, frame.f_globals, filename=filename, local_names=frame.f_locals
+        )
+        refresh_debugger()
+        return result
+    result = await evaluate(text, ed.scratch.__dict__, filename=filename)
+    announce(ed.scratch.__name__, result)
+    return result
+
+
+def refresh_debugger() -> None:
+    """The variables on show may have changed."""
+    ed = current()
+    if ed.buffers.get("*debug*") is not None:
+        from neomacs.debug import ui
+
+        ed.guard("updating the debugger's buffer", ui.write_stack, ed.debugger)
 
 
 async def load_file(path: Path | str) -> Evaluation:
@@ -171,12 +205,20 @@ def finish_special(buffer: Buffer) -> None:
     buffer.read_only = True
 
 
-def report_error(exc: BaseException) -> None:
-    """Record EXC in the `*traceback*` buffer and tell the user."""
+def record_error(exc: BaseException) -> Buffer:
+    """Write EXC to the `*traceback*` buffer and keep it for `debug.inspect`."""
     ed = current()
+    ed.last_error = exc
     buffer = special_buffer("*traceback*", TracebackMode)
     _write(buffer, exc, set())
     finish_special(buffer)
+    return buffer
+
+
+def report_error(exc: BaseException) -> None:
+    """Record EXC in the `*traceback*` buffer and tell the user."""
+    ed = current()
+    buffer = record_error(exc)
     summary = "".join(traceback.format_exception_only(exc)).strip().split("\n")[-1]
     ed.message(buffer.text, kind="log")
     ed.message(f"{summary}  (show_traceback for the rest)", kind="error")

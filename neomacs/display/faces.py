@@ -29,6 +29,8 @@ DEFAULT_THEME: dict[str, Attrs] = {
     "italic": {"slant": "italic"},
     "underline": {"underline": True},
     "error": {"fg": "#f44747"},
+    "breakpoint": {"fg": "#f44747"},
+    "debug-line": {"bg": "#3a3d16"},
     "warning": {"fg": "#cca700"},
 }
 

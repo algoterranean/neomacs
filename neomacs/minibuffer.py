@@ -159,6 +159,7 @@ class Minibuffer:
         for waiter in waiters:
             if not waiter.done():
                 waiter.set_result(text)
+        self._close_if_reader_is_frozen(waiters)
 
     @provisional("0.1")
     def cancel(self) -> None:
@@ -166,6 +167,20 @@ class Minibuffer:
         for waiter in waiters:
             if not waiter.done():
                 waiter.set_exception(Quit("cancelled"))
+        self._close_if_reader_is_frozen(waiters)
+
+    def _close_if_reader_is_frozen(self, waiters: list[asyncio.Future[str]]) -> None:
+        """Normally whoever asked closes the prompt when it has its answer.  If
+        that code is on the loop the debugger has frozen, it cannot yet; take
+        the prompt off the screen now."""
+        if self.closed or not waiters:
+            return
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if any(waiter.get_loop() is not running for waiter in waiters):
+            self.close()
 
     def answer(self) -> asyncio.Future[str]:
         """A future for the next submitted text; it fails with Quit on cancel."""
