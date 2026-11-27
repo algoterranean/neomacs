@@ -1,6 +1,6 @@
 # Extensions and packaging design
 
-Status: draft 3, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 4, 2026-11-27. Nothing is implemented. The decisions in
 section 2 are confirmed; section 13 lists what is still open.
 
 This describes how `neomacs` is extended: what an extension is, how it is
@@ -313,11 +313,12 @@ possible later design and is not part of this one.
 ## 11. Implementation stages
 
 **X0: init file and local code** (with engine stage 7). `init.py`,
-single-file extensions, `--safe`. *Runnable:* configuration that survives a
+single-file extensions, `--safe`, project settings (section 8.1). *Runnable:* configuration that survives a
 restart.
 
-**X1: ownership.** The ownership record, disable, reload with removal of
-stale registrations. *Runnable:* disable and re-enable a single-file
+**X1: ownership.** Disable, and reload with removal of stale registrations.
+The ownership record itself is built with the registries in engine stage 3,
+because live evaluation in stage 4 already needs it. *Runnable:* disable and re-enable a single-file
 extension with no trace left in between.
 
 **X2: packages.** Entry points, `extensions.toml`, the lock file, the

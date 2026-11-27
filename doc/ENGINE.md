@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 16, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 17, 2026-11-27. Nothing is implemented. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
 This describes the backend ("engine") of Neomacs, a new, Python-native
@@ -1551,14 +1551,22 @@ neomacs/
     evalcmds.py
   modes/fundamental.py  modes/text.py  modes/python.py
   modes/queries/python/  highlights.scm  textobjects.scm  indents.scm
-tools/monolayout.py      monospace layout of lines of runs; answers layout.*
-tools/tui.py             reference terminal frontend, built on monolayout
+  frontends/monolayout.py  monospace layout of lines of runs; answers layout.*
+  frontends/tui.py         reference terminal frontend, built on monolayout
+  testing/               headless client and fixtures (`neomacs.testing`)
 tests/
+frontend/                the Electron application (FRONTEND.md)
+packaging/               build and signing scripts (DISTRIBUTION.md)
 ```
 
 Dependencies: none for the protocol (standard library `json`); `wcwidth` for
 the terminal frontend; `tree-sitter`, optionally, from stage 6; `hypothesis`
 and `pytest` for tests. Typed throughout and checked in strict mode.
+
+The terminal frontend and its layout module are inside the package because
+the wheel ships them (DISTRIBUTION.md 3.1). Development uses `uv` for
+environments and locking, `pyright` in strict mode, and `ruff` for linting
+and formatting.
 
 Every required dependency with a C extension must ship a free-threaded build
 (D13). Importing one that does not makes CPython turn the GIL back on for
@@ -1581,22 +1589,24 @@ evaluate `1 + 1`, and observe that an exception comes back as an error
 without killing the engine.
 
 **Stage 1: text core.** `TextStore`, `Buffer`, markers, `Cursor`, the
-grapheme boundary functions, undo, change hooks, file read and write. *Runnable:* over `engine.eval`, open a
+grapheme boundary functions, span layers, undo, change hooks, file read and
+write. *Runnable:* over `engine.eval`, open a
 file, edit it, undo, save. Property tests compare the store, markers and
 undo against a naive `str` model under random edits.
 
 **Stage 2: display and the terminal frontend.** One window, the view builder,
 faces, `ui.attach`, `redraw` with `lines`, `selections`, `modeline`, `reveal` and
-`flush`, viewport reports, the gutter, margins and tab stops, acknowledgement pacing, `reset`, `ui.resync` and reattaching to a frame. `tools/monolayout.py` lays out lines of runs in
+`flush`, viewport reports, the gutter, margins and tab stops, acknowledgement pacing, `reset`, `ui.resync` and reattaching to a frame. `frontends/monolayout.py` lays out lines of runs in
 character cells (wrapping, wide characters, scrolling) and answers the
-`layout.*` requests; `tools/tui.py` draws its result. Hard-wired self-insert
+`layout.*` requests; `frontends/tui.py` draws its result. Hard-wired self-insert
 and cursor movement. *Runnable:* view and type into a file in a terminal.
 The headless test client uses the same layout module, so tests can assert on
 what would be displayed.
 
 **Stage 3: the command system.** `@command`, command tasks and the lane,
 argument resolution, keymaps and the key resolver, the dispatcher, options,
-hooks, minibuffers (in the prompt area and inline) with completion and
+hooks, the ownership record on every registry (D30), minibuffers (in the
+prompt area and inline) with completion and
 history, messages, prefix arguments, cancellation and interrupt, the
 background task list, `*messages*`, syntax tables and the scanner, the kill ring and clipboard messages,
 selection sets with per-selection
@@ -1624,7 +1634,7 @@ command, press its key, step through it while scrolling other buffers, change
 a local, continue.
 
 **Stage 6: modes and annotations.** Major and minor modes with their syntax
-tables, span layers, decoration providers, scanner-based highlighting for
+tables, decoration providers, scanner-based highlighting for
 every mode, the tree-sitter layer and Python queries where the binding
 loads, the expression, selection-expanding, comment and indentation
 commands, incremental search with `add_next_match` and `select_all_matches`, window splits, and panels: docked
@@ -1633,8 +1643,9 @@ attributes on lines, and resources with inline images. *Runnable:* highlighted P
 structural selection and search, a cursor on every match of a word, and the
 same session with tree-sitter uninstalled.
 
-**Stage 7: processes and startup.** Timers, processes, the user init file, loading packages from a user directory,
-crash-recovery journal for unsaved buffers. *Runnable:* a shell command's
+**Stage 7: processes and startup.** Timers, processes, the user init file,
+single-file extensions from the user's directory, project settings (D31),
+and the crash-recovery journal for unsaved buffers. *Runnable:* a shell command's
 output streamed into a buffer; configuration that survives restart.
 
 ### 13.1 Parallel tracks

@@ -1,6 +1,6 @@
 # Distribution design
 
-Status: draft 3, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 4, 2026-11-27. Nothing is implemented. The decisions in
 section 2 are confirmed. Items marked **to verify** are facts this design relies on
 that have not been checked.
 
@@ -214,7 +214,8 @@ engine lifecycle work deferred in ENGINE.md.
 
 ## 10. Build pipeline
 
-One CI workflow, triggered by a version tag, with a job per target:
+One CI workflow, triggered by a version tag, with a job per target. Its
+scripts live in `packaging/` at the top of the repository.
 
 1. Build the wheel from the tag.
 2. Run the engine's test suite on the target's Python, free-threaded.

@@ -1,6 +1,6 @@
 # Electron frontend design
 
-Status: draft 4, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 5, 2026-11-27. Nothing is implemented. The decisions in
 section 2 are confirmed.
 
 This describes the Electron frontend of `neomacs`. It is the client side of the
@@ -393,7 +393,8 @@ The frontend is a track parallel to the engine's stages, not a stage after
 them (ENGINE.md 13.1): a frontend stage can start as soon as its engine
 stage is done.
 
-**F0: shell and connection** (engine stage 0). Main process, engine
+**F0: shell and connection** (engine stage 0). The project lives in
+`frontend/` at the top of the repository. Main process, engine
 discovery, relay, preload, sandbox and policy; the renderer shows a log of
 messages. *Runnable:* the app starts, connects and prints `api_info`.
 
