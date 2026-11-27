@@ -1,4 +1,9 @@
-"""Where Neomacs keeps things on disk (DISTRIBUTION 5)."""
+"""Where Neomacs keeps things on disk (DISTRIBUTION 5).
+
+This is the one module that knows.  Each directory can be put somewhere else
+with an environment variable (`NEOMACS_CONFIG_DIR`, `NEOMACS_DATA_DIR`,
+`NEOMACS_CACHE_DIR`), which is how tests keep away from the user's own files.
+"""
 
 from __future__ import annotations
 
@@ -17,12 +22,20 @@ def _env_dir(var: str) -> Path | None:
 
 
 def config_dir() -> Path:
+    """Configuration: `init.py` and single-file extensions.  Meant to be edited."""
+    override = _env_dir("NEOMACS_CONFIG_DIR")
+    if override is not None:
+        return override
     if sys.platform == "win32":
         return Path(os.environ.get("APPDATA", Path.home())) / "neomacs"
     return (_env_dir("XDG_CONFIG_HOME") or Path.home() / ".config") / "neomacs"
 
 
 def data_dir() -> Path:
+    """Data the editor writes and wants kept: the recovery journal."""
+    override = _env_dir("NEOMACS_DATA_DIR")
+    if override is not None:
+        return override
     if sys.platform == "win32":
         return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "neomacs"
     if sys.platform == "darwin":
@@ -31,11 +44,30 @@ def data_dir() -> Path:
 
 
 def cache_dir() -> Path:
+    """Data that can be made again."""
+    override = _env_dir("NEOMACS_CACHE_DIR")
+    if override is not None:
+        return override
     if sys.platform == "win32":
         return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "neomacs" / "cache"
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Caches" / "neomacs"
     return (_env_dir("XDG_CACHE_HOME") or Path.home() / ".cache") / "neomacs"
+
+
+def init_file() -> Path:
+    """The user's init file (EXTENSIONS 3.3)."""
+    return config_dir() / "init.py"
+
+
+def extensions_dir() -> Path:
+    """Where single-file extensions are (EXTENSIONS 3.2)."""
+    return config_dir() / "extensions"
+
+
+def journal_dir() -> Path:
+    """Where unsaved text is kept in case the engine dies (ENGINE 11.1)."""
+    return data_dir() / "journal"
 
 
 def _private_dir(path: Path) -> Path | None:

@@ -33,10 +33,11 @@ export interface Engine {
 }
 
 /** Start the engine as a child and resolve once it is listening. */
-export function startEngine(python: string, cwd: string): Promise<Engine> {
+export function startEngine(python: string, cwd: string, env: Record<string, string> = {}): Promise<Engine> {
   const sock = socketPath();
   const child = spawn(python, ["-m", "neomacs", "--listen", sock, "--exit-with-parent"], {
     cwd,
+    env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   return new Promise((resolve, reject) => {

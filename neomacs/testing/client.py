@@ -195,6 +195,14 @@ def running_engine(
     path = tmp / "e.sock"
     full_env = dict(os.environ)
     full_env.setdefault("NEOMACS_CHECK_OWNER", "1")
+    # The engine's own directories, so that it neither loads the configuration
+    # of whoever runs the tests nor writes among their files.
+    for var, name in (
+        ("NEOMACS_CONFIG_DIR", "config"),
+        ("NEOMACS_DATA_DIR", "data"),
+        ("NEOMACS_CACHE_DIR", "cache"),
+    ):
+        full_env[var] = str(tmp / name)
     if env:
         full_env.update(env)
     proc = subprocess.Popen(

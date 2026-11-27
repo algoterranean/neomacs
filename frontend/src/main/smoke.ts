@@ -1085,6 +1085,13 @@ export async function runSmoke(
     // -- the engine dies: say so, start another, attach afresh --
     shell.answerEngineGone = () => true;
     const oldEngine = shell.engine();
+    // The buffer "keys" has text that was never saved.  Give the journal its
+    // moment to write it before the engine is killed (ENGINE 11.1).
+    let journaled = "0";
+    for (let i = 0; i < 80 && (journaled === "0" || (await pyText("ed.journal.pending")) === "True"); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      journaled = await pyText("len(list(ed.journal.directory.glob('*.json')))");
+    }
     oldEngine?.process.kill("SIGKILL");
     for (let i = 0; i < 200 && (shell.engineRestarts === 0 || state.frame === null || shell.engine() === oldEngine); i++) {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -1092,6 +1099,15 @@ export async function runSmoke(
     const fresh = shell.control();
     await fresh?.call("engine.idle", 10);
     await frames(6);
+    // The new engine found what the dead one left, and said so unasked.
+    const offer = (await ui()).chrome.message;
+    const left = (await fresh?.eval("[e.text for e in ed.journal.left_behind() if e.name == 'keys']")) as string;
+    check(
+      "step11.unsaved_text_is_offered_after_the_engine_dies",
+      journaled !== "0" && offer.startsWith("Unsaved text from") && offer.endsWith("M-x recover") &&
+        left === "['typed in the first, back shared text']",
+      { journaled, offer, left },
+    );
     type("alive");
     for (let i = 0; i < 60; i++) {
       await new Promise((resolve) => setTimeout(resolve, 50));

@@ -911,7 +911,8 @@ ed.options.fill_column = 72  # sets the global value
 The project layer holds values from the nearest `.neomacs/settings.toml`
 above the buffer's file, and only for options declared with `project=True`
 (D31). EXTENSIONS.md section 8.1 has the file format and the rule for which
-options may opt in.
+options may opt in. `ed.projects.of(buffer)` is the project a buffer is in,
+and `ed.projects.reload()` reads the files again.
 
 Options are registered by name, so re-evaluating the definition updates the
 doc and default without discarding values already set. Each option has an
@@ -1393,6 +1394,7 @@ placement = {
     "messages": InPanel("bottom", dock="bottom"),
     "search": InPanel("bottom", dock="bottom"),
     "repl": InPanel("bottom", dock="bottom"),
+    "output": InPanel("bottom", dock="bottom"),
     "peek": InPanel("peek", floating="cursor", transient=True),
 }
 ```
@@ -1796,16 +1798,115 @@ Not done, or known to be wrong:
 
 - **Timers:** `ed.after(seconds, fn)`, `ed.every(seconds, fn)`,
   `ed.when_idle(seconds, fn)`; each returns a handle with `cancel()`.
-- **Processes:** `await ed.run(argv, input=...)` for one-shot commands;
-  `ed.spawn(argv, on_output=..., on_exit=...)` or output into a buffer for
-  long-lived ones. Built on asyncio subprocesses.
+  - `fn` takes no arguments. It may be a coroutine function, which is then
+    run as a background task.
+  - `when_idle` calls once for each pause in the user's input that lasts
+    `seconds`, counted from the last key, mouse event or paste, and from the
+    moment the timer is set.
+  - `every` keeps to its rhythm; if the loop was held up, the calls that were
+    missed are skipped, not made up.
+  - Setting a repeating timer (`every`, `when_idle`) for a named function that
+    already has one replaces it, as adding a hook function does, so the line
+    that sets it can be evaluated twice. `after` is not treated so: it may
+    properly be set many times. A function with no name of its own (a
+    `lambda`) cannot be told from another and is never replaced.
+  - A timer records the module that set it (D30) and is cancelled when that
+    module's registrations are released.
+  - Timers run on the main loop. While the debugger has a command paused they
+    wait (10.2).
+- **Processes:** `await ed.run(argv, input=..., cwd=..., env=...,
+  check=False, timeout=None)` for one-shot commands: it returns the exit
+  status and what was written to standard output and standard error, as
+  text. `ed.spawn(argv, on_output=..., on_exit=..., buffer=..., input=False)`
+  for long-lived ones: it returns a handle at once, and output is passed to
+  `on_output` and added to the end of `buffer` as it arrives. Built on
+  asyncio subprocesses.
+  - `argv` is a list. A command line for the shell is run with
+    `neomacs.proc.shell_argv(text)`.
+  - `env` is variables added to the engine's own environment.
+  - Output is decoded as UTF-8; bytes that are not valid become U+FFFD. A
+    spawned program's standard error is merged into its standard output.
+  - A view whose cursor is at the end of the output buffer follows the
+    output; any other view is left where it is. The buffer is not marked
+    modified and keeps no undo history for output. Beyond the
+    `process_output_limit` option (2,000,000 characters) the oldest output is
+    dropped, whole lines where there are lines.
+  - The handle has `pid`, `returncode`, `running`, `write`, `close_input`,
+    `interrupt`, `terminate`, `kill` and `await wait()`. A program that could
+    not be started sets `error` on the handle and still calls `on_exit`.
+  - On Unix a program runs in a process group of its own, and the signals go
+    to the group, so killing a shell kills its pipeline. They go to the group
+    for as long as the handle is being served, which is until the output is
+    closed: a shell may exit and leave a program in the background holding it.
+  - Cancelling a command that awaits `ed.run` kills the program. A spawned
+    program is a task in `ed.tasks`, and is killed if still running when the
+    engine stops.
 - **Threads:** `await ed.in_thread(fn, *args)` for CPU-bound work on
-  immutable inputs such as a text snapshot.
+  immutable inputs such as a text snapshot. The function must not touch
+  editor state (D1); with owner checking on, doing so raises.
 
 - **Tasks:** `ed.start_task(coro, name=...)` for detached work; `ed.tasks`
   lists what is running, with progress and a `cancel()` on each.
 
 All callbacks arrive on the main thread through the error wrapper.
+
+The standard command `shell_command` (`M-!`) runs a command line in the
+user's shell, in the directory of the file being edited, and shows its output
+as it is written in `*shell output*`, with the role `output`. There,
+`C-c C-c` interrupts the program and `C-c C-k` kills it.
+
+### 11.1 The recovery journal
+
+A crash of the engine must not lose what the user typed (section 15). The
+journal keeps the text of every buffer with unsaved changes on disk.
+
+- **Where.** `journal/` in the data directory (DISTRIBUTION 5). Each engine
+  has a directory of its own there, named by process id and start time and
+  created when it first has something to write. It holds a lock file, on
+  which the engine keeps an exclusive lock for as long as it runs, and one
+  JSON file for each unsaved buffer. Directories are created with mode 0700
+  and files with 0600.
+- **What.** A buffer is kept if it is modified and is either visiting a file
+  or not one of the editor's own buffers, which are the ones named like
+  `*this*`. `*scratch*` is the exception and is kept. A buffer longer than
+  the `journal_limit` option (50,000,000 characters) is left out, with one
+  warning. `buffer.locals["no_journal"] = True` leaves a buffer out, and the
+  `journal` option turns the whole thing off.
+- **An entry** is the buffer's name, its file, the time, the whole text, and
+  the file's modification time and size when the entry was written. It is
+  written to a temporary file and renamed, so what is on disk is always a
+  complete entry. It is not synced: the journal protects against the engine
+  dying, not against the machine losing power.
+- **When.** `journal_delay` seconds (1.0) after a change, all changed buffers
+  are written. The text is taken on the owner thread and written in a worker
+  thread. Taking the text of a long buffer costs the main loop something, so
+  the wait before the next write is at least fifty times what taking it cost
+  the last time. Up to that much typing can be lost.
+- **An entry is removed** when its buffer is saved or killed.
+- **Order.** Writes happen in a worker thread; removals, and the writes made
+  when the engine stops, happen on the owner thread. A lock keeps them
+  apart, and every step carries a number given when it was decided, so one
+  that reaches the disk after a later step for the same entry is dropped.
+  An older text cannot replace a newer one or bring back a removed entry.
+- **At exit** the engine writes what was waiting and keeps the entries of
+  buffers that are still unsaved. This is also the present answer to what
+  happens to unsaved buffers when the editor is closed (section 16): they
+  are offered back next time. A prompt before closing is still open.
+- **At start.** Entries in directories whose lock no running engine holds
+  are what earlier engines left. If there are any, the first frame to attach
+  is told: "Unsaved text from 2 buffers was kept when the editor last
+  stopped: M-x recover".
+- **`recover`** lists them: name, file, time, length, and whether the file
+  has changed on disk since. Return on a line (`recover.take`) puts the text
+  in the buffer visiting that file, or one of that name, leaves it unsaved
+  and removes the entry; undo there gives back what the file has. `d`
+  (`recover.discard`) removes the entry. Nothing is written to the user's
+  file until they save.
+- **Limits.** Where there are no file locks (Windows), a directory counts as
+  held while the process named in its lock file is alive. Two engines started
+  after a crash are both offered the same text; the one that takes it second
+  is told it has gone. The journal is written by timers, so it waits while
+  the debugger has a command paused.
 
 ## 12. Package layout
 
@@ -1835,7 +1936,13 @@ neomacs/
   debug/pause.py         monitoring callbacks, ownership hand-over, debug loop
   debug/breakpoints.py  debug/ui.py
   clipboard.py           kill ring, clipboard requests
-  proc.py  timers.py
+  proc.py  timers.py     processes and timers (section 11)
+  journal.py             the recovery journal (11.1)
+  project.py             project settings (section 6)
+  startup.py             single-file extensions and the init file
+  paths.py               where things are on disk (DISTRIBUTION 5)
+  safeio.py              reading small files a project supplies, without waiting
+  vcs.py                 the git branch a file is on
   std/                   standard commands, written only against the public API
     movement.py  editing.py  cursors.py  files.py  windows.py  help.py
     evalcmds.py
@@ -2079,8 +2186,9 @@ No open question blocks stage 0. These were considered and put off:
 - **Undo tree.** The change log already records enough to build one.
 - **Native text store.** Only if the latency benchmark calls for it (D10).
 - **Engine lifecycle, remaining part.** Who starts the engine is settled:
-  one per app instance (D29, DISTRIBUTION.md section 7). Still open: what
-  happens to unsaved buffers when the instance exits.
+  one per app instance (D29, DISTRIBUTION.md section 7). Unsaved buffers are
+  kept in the recovery journal when the instance exits and offered back the
+  next time (11.1). Still open: whether to ask before closing.
 - **External file changes.** Detecting that a file changed on disk,
   auto-save and backups. Only the crash-recovery journal is planned.
 - **Embedded languages and word segmentation** for scripts written without

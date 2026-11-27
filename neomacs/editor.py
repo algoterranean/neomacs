@@ -13,20 +13,24 @@ import sys
 import threading
 import traceback
 import types
-from collections.abc import Callable, Coroutine, Generator
+from collections.abc import Callable, Coroutine, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from neomacs import _owner
+from neomacs import _owner, paths
 from neomacs.errors import NoFrame, Quit
+from neomacs.ownership import caller_module
 from neomacs.rpc.protocol import Connection
 from neomacs.rpc.transport import Listener, socket_transport, stdio_transport
 from neomacs.stability import provisional
 
 if TYPE_CHECKING:
     from neomacs.dispatch import Dispatcher
+    from neomacs.journal import Journal
+    from neomacs.proc import Completed, Process
     from neomacs.text.buffer import Buffer
+    from neomacs.timers import Timer
     from neomacs.window import Frame, View, Window
 
 _current: contextvars.ContextVar[Editor] = contextvars.ContextVar("neomacs_editor")
@@ -78,6 +82,12 @@ class Editor:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._noted: set[str] = set()
         self._conn_count = 0
+        # Started with `--safe`: no extensions and no init file are loaded.
+        self.safe = False
+        # What went wrong loading the user's code, until a frame has been told.
+        self.startup_problems: list[str] = []
+        # Unsaved text is kept here while the engine serves (ENGINE 11.1).
+        self.journal: Journal | None = None
         self._init_state()
 
     def _init_state(self) -> None:
@@ -124,6 +134,12 @@ class Editor:
         # Round-trip times of requests to frontends, in seconds, likewise.
         self.request_times: list[float] | None = None
         self.tasks: list[TaskInfo] = []
+        from neomacs.project import Projects
+        from neomacs.timers import Timers
+
+        self.timers = Timers(self)
+        self.processes: set[Process] = set()  # started with `spawn` and still running
+        self.projects = Projects(self)
         # How many module evaluations `neomacs.tools.reevaluate` has done here.
         self.reevaluated = 0
 
@@ -364,6 +380,93 @@ class Editor:
         task.add_done_callback(done)
         return info
 
+    # -- timers, processes, threads (ENGINE 11) ----------------------------------
+
+    @provisional("0.1")
+    def after(self, seconds: float, fn: Callable[[], Any]) -> Timer:
+        """Call FN once, SECONDS from now.  Returns a handle with `cancel()`.
+
+        FN is called on the main thread; if it raises, that is reported and
+        nothing else is disturbed.  It may be a coroutine function, which is
+        then run as a background task.
+        """
+        return self.timers.add("after", seconds, fn, caller_module())
+
+    @provisional("0.1")
+    def every(self, seconds: float, fn: Callable[[], Any]) -> Timer:
+        """Call FN every SECONDS, until the handle returned is cancelled.
+
+        Setting a timer for the same named function again replaces the
+        earlier one, so a line that sets one can be evaluated twice.
+        """
+        return self.timers.add("every", seconds, fn, caller_module())
+
+    @provisional("0.1")
+    def when_idle(self, seconds: float, fn: Callable[[], Any]) -> Timer:
+        """Call FN each time the user has done nothing for SECONDS: once for
+        each such pause, until the handle returned is cancelled."""
+        return self.timers.add("idle", seconds, fn, caller_module())
+
+    @provisional("0.1")
+    async def run(
+        self,
+        argv: Sequence[str | Path],
+        *,
+        input: str | None = None,
+        cwd: str | Path | None = None,
+        env: Mapping[str, str] | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+    ) -> Completed:
+        """Run the program ARGV to completion and return its exit status and
+        what it wrote, as text.
+
+        INPUT is given to it as standard input.  ENV is variables to add to
+        the engine's own.  With CHECK, a failure status raises `ProcessError`;
+        so does not finishing within TIMEOUT seconds, after the program has
+        been killed.  Cancelling the command that is waiting kills it too.
+        """
+        from neomacs import proc
+
+        return await proc.run(argv, input=input, cwd=cwd, env=env, check=check, timeout=timeout)
+
+    @provisional("0.1")
+    def spawn(
+        self,
+        argv: Sequence[str | Path],
+        *,
+        on_output: Callable[[str], Any] | None = None,
+        on_exit: Callable[[Process], Any] | None = None,
+        buffer: Buffer | None = None,
+        cwd: str | Path | None = None,
+        env: Mapping[str, str] | None = None,
+        input: bool = False,
+    ) -> Process:
+        """Start the program ARGV and return at once with a handle on it.
+
+        What it writes, to standard output or standard error, is added to the
+        end of BUFFER and passed to ON_OUTPUT as text, as it arrives.
+        ON_EXIT is called with the handle when it has exited.  With INPUT,
+        `handle.write(text)` sends it standard input.  It is listed in
+        `ed.tasks`, and is killed if it is still running when the engine stops.
+        """
+        from neomacs import proc
+
+        return proc.spawn(
+            self, argv, on_output=on_output, on_exit=on_exit, buffer=buffer, cwd=cwd, env=env,
+            input=input,
+        )  # fmt: skip
+
+    @provisional("0.1")
+    async def in_thread[T](self, fn: Callable[..., T], *args: Any) -> T:
+        """Run FN(*ARGS) in a worker thread and return its result.
+
+        For work that takes long and needs nothing of the editor's: give it
+        values, such as a buffer's text, not the buffer.  Editor state may be
+        touched only by the thread that owns it.
+        """
+        return await asyncio.to_thread(fn, *args)
+
     def call_from_thread(self, fn: Callable[..., Any], *args: Any) -> None:
         """Schedule FN on the loop, in the editor's context, from any thread."""
         assert self._context is not None
@@ -375,13 +478,14 @@ class Editor:
 
     # -- lifecycle ------------------------------------------------------------
 
-    def run(
+    def serve_forever(
         self,
         *,
         listen: Path | None = None,
         stdio: bool = False,
         ready: Callable[[], None] | None = None,
     ) -> None:
+        """Run the engine until it is stopped."""
         with using_editor(self):
             asyncio.run(self.serve(listen=listen, stdio=stdio, ready=ready))
 
@@ -412,6 +516,11 @@ class Editor:
         self.debugger.install()
         sys.modules.setdefault(self.scratch.__name__, self.scratch)
         self._fill_scratch()
+        self.timers.start()
+        from neomacs import startup
+        from neomacs.journal import Journal
+
+        self.journal = Journal(self, paths.journal_dir())
         with contextlib.suppress(NotImplementedError, ValueError):
             self.loop.add_signal_handler(signal.SIGTERM, self.stop)
         previous_sigint: Any = None
@@ -419,17 +528,21 @@ class Editor:
             previous_sigint = signal.signal(signal.SIGINT, self._on_sigint)
         listener: Listener | None = None
         try:
+            if os.environ.get("NEOMACS_REEVALUATE"):
+                # Gate D: live-patch the standard modules before serving anyone.
+                from neomacs.tools import reevaluate
+
+                await reevaluate.all_modules()
+            # The user's own code has the last word (EXTENSIONS 6.1).  It is
+            # loaded before any connection is opened, on a socket or on
+            # stdio, so that no client is served by an engine half configured.
+            await startup.load_user_code(self)
             if listen is not None:
                 listener = Listener(listen, self._accept_from_thread)
                 self.listen_path = listen
                 listener.start()
             if stdio:
                 self._add_connection(Connection(self, stdio_transport()))
-            if os.environ.get("NEOMACS_REEVALUATE"):
-                # Gate D: live-patch the standard modules before serving anyone.
-                from neomacs.tools import reevaluate
-
-                await reevaluate.all_modules()
             if ready is not None:
                 ready()
             await self._stop.wait()
@@ -440,6 +553,10 @@ class Editor:
                 listener.close()
             for conn in list(self.connections):
                 conn.close(drain=1.0)
+            self.timers.close()
+            for process in list(self.processes):
+                process.kill()
+            self.guard("closing the recovery journal", self.journal.close)
             for task in list(self._tasks):
                 task.cancel()
             self.debugger.uninstall()
@@ -533,7 +650,11 @@ class _EdProxy:
 ed: Any = _EdProxy()
 
 # Importing these registers RPC methods, standard commands and default key bindings.
+from neomacs import journal as _journal  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
 from neomacs import panels as _panels  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
+from neomacs import proc as _proc  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
+from neomacs import project as _project  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
+from neomacs import startup as _startup  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
 from neomacs import std as _std  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
 from neomacs.debug import ui as _debug_ui  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
 from neomacs.rpc import ui as _ui  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]

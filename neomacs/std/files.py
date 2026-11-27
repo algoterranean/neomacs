@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any, cast
 
+from neomacs import paths
 from neomacs.commands import Ask, command
 from neomacs.editor import ed
 from neomacs.errors import NeomacsError
@@ -91,6 +92,22 @@ def drop() -> None:
         paths = cast(dict[str, Any], event).get("paths", [])
     for path in paths:
         ed.show(ed.buffers.visit(str(path)), focus=True)
+
+
+@command(name="init.open")
+def open_init_file() -> None:
+    """Visit the init file, which is loaded each time the editor starts.
+    Evaluating its buffer applies it now."""
+    ed.show(ed.buffers.visit(paths.init_file()), focus=True)
+
+
+@command(name="project.reload_settings")
+def reload_project_settings() -> None:
+    """Read every project's `.neomacs/settings.toml` again, including one
+    made since its files were opened."""
+    projects = ed.projects.reload()
+    count = len(projects)
+    ed.message(f"Read {count} project settings file{'' if count == 1 else 's'}")
 
 
 @command(name="engine.exit")
