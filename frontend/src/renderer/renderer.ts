@@ -12,6 +12,7 @@ import { type Json, RemoteError, Rpc } from "./protocol.ts";
 import { ViewElement } from "./view.ts";
 
 const PROTOCOL = 1;
+const SEARCH_PLACE = "search";
 const NO_SUCH_FRAME = -32002;
 
 interface ConnectState {
@@ -184,11 +185,19 @@ function syncViews(): void {
   if (mainElement) status(null);
   // The prompt: the minibuffer the engine put in the prompt area.
   let prompt: ViewElement | null = null;
+  let search: ViewElement | null = null;
   let label = "";
   for (const [id, shown] of frame.minibuffers) {
-    if (shown.host["kind"] !== "prompt") continue; // this frontend offers no named places
     const model = frame.views.get(id);
     if (!model) continue;
+    if (shown.host["kind"] === "place" && shown.host["name"] === SEARCH_PLACE) {
+      // The one named place this frontend offers: the search box.
+      live.add(model);
+      search = elementFor(model, true);
+      chrome.setSearch(runsText(shown.options["label"]), search.root);
+      continue;
+    }
+    if (shown.host["kind"] !== "prompt") continue;
     live.add(model);
     prompt = elementFor(model, true);
     prompt.minLines = Number(shown.options["min_lines"] ?? 1);
@@ -197,6 +206,7 @@ function syncViews(): void {
     chrome.setPrompt(label, prompt.root);
   }
   if (!prompt) chrome.setPrompt(null, null);
+  if (!search) chrome.setSearch(null, null);
   // A minibuffer embedded in a line lives as long as that line is in the page.
   for (const element of inlineElements) {
     if (element.root.isConnected && frame.views.get(element.model.id) === element.model) live.add(element.model);
@@ -371,7 +381,8 @@ async function attach(state: ConnectState): Promise<void> {
     return;
   }
   // "panels": this frontend draws window splits and panels (ENGINE 8.5).
-  const options: { [key: string]: Json } = { protocol: PROTOCOL, capabilities: ["panels"] };
+  // "places": the parts of the window a minibuffer can be shown in besides the prompt (ENGINE 7.5).
+  const options: { [key: string]: Json } = { protocol: PROTOCOL, capabilities: ["panels"], places: [SEARCH_PLACE] };
   let reply: Json;
   try {
     if (state.frame !== null && state.token !== null) {

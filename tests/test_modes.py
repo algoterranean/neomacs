@@ -364,14 +364,18 @@ def test_pairs(ui: HeadlessUI) -> None:
 def test_incremental_search(ui: HeadlessUI) -> None:
     at(ui, "import")
     ui.keys("C-s")
+    assert (
+        ui.prompt == "Search: "
+    )  # a box to type in; this frontend has no place for it but the prompt
+    assert value(ui, "_w.frame.focus is not _w") is True
     ui.type("name")
-    assert ui.message == "Search: name  [1/2]" or ui.model.keys == "Search: name  [1/2]"
+    assert ui.prompt == "Search [1/2]: name"
     assert value(ui, "(_b.line_of(_w.cursor.pos), _w.selections.primary.text)") == (3, "name")
     assert value(ui, "sorted((s.get('face'), _b.line_of(s.start)) for s in _b.layer('search'))") == [
         ("match", 6), ("match-current", 3),
     ]  # fmt: skip
     ui.keys("C-s")
-    assert value(ui, "_b.line_of(_w.cursor.pos)") == 6
+    assert value(ui, "_b.line_of(_w.cursor.pos)") == 6 and ui.prompt == "Search [2/2]: name"
     ui.keys("C-s")  # wraps
     assert value(ui, "_b.line_of(_w.cursor.pos)") == 3
     ui.keys("C-r")
@@ -379,27 +383,63 @@ def test_incremental_search(ui: HeadlessUI) -> None:
     ui.keys("<backspace>", "<backspace>")
     assert value(ui, "_w.selections.primary.text") == "na"
     ui.type("zz")
-    assert (ui.model.keys or ui.message).startswith("Failing search: nazz")
+    assert ui.prompt == "No match: nazz"
     ui.keys("C-g")  # back where it began
+    assert ui.prompt is None and value(ui, "_w.frame.focus is _w") is True
     assert value(ui, "(_b.line_of(_w.cursor.pos), len(_b.layer('search')))") == (1, 0)
-    # Another key ends the search and then does what it does.
+    # The pattern is real text: it can be edited in the middle like any other.
     ui.keys("C-s")
-    ui.type("times")
-    ui.keys("C-e")
-    assert value(ui, "(_b.line_of(_w.cursor.pos), _w.cursor.pos == _b.line_end(3))") == (3, True)
-    ui.keys("M-,")  # the search left a place to come back to
+    ui.type("tmes")
+    assert ui.prompt == "No match: tmes"
+    ui.keys("C-a", "C-f")
+    ui.type("i")
+    assert ui.prompt == "Search [1/2]: times"
+    ui.keys("<return>")
+    assert ui.prompt is None and value(ui, "_w.frame.focus is _w") is True
+    assert value(ui, "(_b.line_of(_w.cursor.pos), _w.selections.primary.text)") == (3, "times")
+    assert value(ui, "len(_b.layer('search'))") == 0
+    ui.keys("C-g", "M-,")  # the search left a place to come back to
     assert value(ui, "_b.line_of(_w.cursor.pos)") == 1
     # Case is ignored until a capital is typed.
     ui.keys("C-s")
     ui.type("thing")
     assert value(ui, "_w.selections.primary.text") == "Thing"
     ui.type("X")
-    assert (ui.model.keys or ui.message).startswith("Failing search")
+    assert ui.prompt == "No match: thingX"
     ui.keys("C-g")
     # C-s C-s searches again for the last thing found.
     ui.keys("C-s", "C-s")
-    assert value(ui, "_w.selections.primary.text") == "times"
-    ui.keys("<return>")
+    assert ui.prompt == "Search [1/2]: times" and value(ui, "_w.selections.primary.text") == "times"
+    ui.keys("C-w")  # and C-w takes in the rest of the word after the match
+    at_word = value(ui, "_w.selections.primary.text")
+    assert at_word == "times=2" or at_word.startswith("times")
+    ui.keys("C-g")
+    ui.keys("C-r")
+    assert ui.prompt == "Search backward: "
+    ui.keys("C-g")
+
+
+def test_the_search_box_goes_where_the_frontend_has_a_place_for_it(
+    engine: tuple[Path, bool],
+) -> None:
+    with HeadlessUI(
+        engine[0], rows=12, cols=60, attach={"capabilities": ["panels"], "places": ["search"]}
+    ) as ui:
+        ui.eval(
+            f"_pf = ed.frames[{ui.frame_id}]; _pb = ed.buffers.new('place', 'one two one'); _pf.window.show(_pb)"
+        )
+        ui.keys("C-s")
+        ui.type("one")
+        assert ui.prompt is None  # not in the prompt area
+        shown = [(host, options["label"][0][1]) for host, options in ui.model.minibuffers.values()]
+        assert shown == [({"kind": "place", "name": "search"}, "Search [1/2]: ")]
+        box = next(iter(ui.model.minibuffers))
+        assert ui.model.focus == box and ui.lines_of(ui.model.view(box)) == ["one"]
+        ui.keys("C-s", "<return>")
+        assert ui.model.minibuffers == {} and ui.model.focus == ui.view.id
+        assert value(ui, "_pf.window.selections.ranges()") == [(8, 11)]
+        ui.eval("ed.buffers.kill(_pb)")
+        ui.client.notify("ui.detach")
 
 
 def test_a_cursor_on_every_match_of_a_word(ui: HeadlessUI) -> None:

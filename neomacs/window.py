@@ -617,6 +617,7 @@ class Frame:
             self.prompt(minibuffer)
             return
         minibuffer.host = ("place", name)
+        minibuffer._previous_focus = self.focus  # pyright: ignore[reportPrivateUsage]
         self.minibuffers[minibuffer.view.id] = minibuffer
         self.schedule_update()
 

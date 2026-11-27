@@ -543,3 +543,45 @@ body {
   background: #6a6a6a;
   background-clip: content-box;
 }
+
+/* -- the search box -------------------------------------------------------------- */
+
+.nm-searchbox {
+  position: absolute;
+  top: 6px;
+  right: 22px;
+  width: min(420px, 60%);
+  z-index: 18;
+  display: flex;
+  align-items: flex-start;
+  padding: 0.35em 0.7em;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+
+.nm-searchbox-label {
+  flex: none;
+  white-space: pre;
+  opacity: 0.8;
+}
+
+.nm-searchbox-input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.nm-searchbox-failing {
+  border-color: #f44747;
+}
+
+.nm-searchbox-failing .nm-searchbox-label {
+  color: #f44747;
+  opacity: 1;
+}
+
+/* `display: flex` above would otherwise show a box that is meant to be hidden. */
+.nm-searchbox[hidden] {
+  display: none;
+}

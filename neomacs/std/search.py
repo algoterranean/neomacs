@@ -5,34 +5,41 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from neomacs import keys as keys_module
 from neomacs.commands import command
 from neomacs.editor import ed
 from neomacs.errors import NeomacsError
 from neomacs.keymap import Keymap
 from neomacs.live import keep
+from neomacs.minibuffer import Minibuffer, MinibufferMode
 from neomacs.text.buffer import Buffer
+from neomacs.window import View
 
 LAYER = "search"
 MAX_MARKED = 400  # matches given a face at once
+PLACE = "search"  # the part of a frontend's window the search box goes in, if it has one
 
-# What each key does during an incremental search.  A key that is not here
-# and is not text ends the search and then does what it normally does.
-search_map = Keymap("search")
-for _key, _action in [
-    ("C-s", "next"),
-    ("C-r", "previous"),
-    ("<down>", "next"),
-    ("<up>", "previous"),
-    ("<backspace>", "delete"),
-    ("<return>", "accept"),
-    ("C-g", "cancel"),
-    ("<escape>", "cancel"),
-    ("C-w", "word"),
-    ("M-n", "add"),
-    ("M-a", "all"),
+
+class SearchMode(MinibufferMode):
+    """The mode of the search box.  What is typed is the pattern; these keys
+    move among its matches."""
+
+    name = "search"
+    interactive = False
+    keymap = Keymap("search")
+
+
+assert SearchMode.keymap is not None
+search_map = SearchMode.keymap
+for _key, _name in [
+    ("C-s", "search.next"),
+    ("C-r", "search.previous"),
+    ("<down>", "search.next"),
+    ("<up>", "search.previous"),
+    ("C-w", "search.word"),
+    ("M-n", "search.add"),
+    ("M-a", "search.all"),
 ]:
-    search_map.bind(_key, _action)
+    search_map.bind(_key, _name)
 
 
 def _folds(pattern: str) -> bool:
@@ -76,137 +83,139 @@ def _mark(buffer: Buffer, matches: list[tuple[int, int]], current: tuple[int, in
             layer.add(start, end, priority=25, face="match")
 
 
+class Search:
+    """One incremental search: a box to type the pattern in, and the view being searched."""
+
+    def __init__(self, view: View, box: Minibuffer, direction: int) -> None:
+        self.view = view
+        self.buffer = view.buffer
+        self.box = box
+        self.direction = direction
+        self.origin = view.selections.ranges()
+        self.origin_primary = view.selections.primary_index
+        self.start = view.cursor.pos
+        self.pattern = ""
+        self.matches: list[tuple[int, int]] = []
+        self.current: tuple[int, int] | None = None
+        self.added: list[tuple[int, int]] = []  # matches kept selected with `add`
+        self.failed = False
+
+    def locate(self, from_pos: int, step: int, *, wrap: bool) -> None:
+        matches = self.matches
+        if not matches:
+            self.current, self.failed = None, bool(self.pattern)
+            return
+        if step > 0:
+            later = [m for m in matches if m[0] >= from_pos]
+            self.current = later[0] if later else (matches[0] if wrap else None)
+        else:
+            earlier = [m for m in matches if m[1] <= from_pos]
+            self.current = earlier[-1] if earlier else (matches[-1] if wrap else None)
+        self.failed = self.current is None
+
+    def changed(self, text: str) -> None:
+        """The pattern in the box changed: find it again, from where the search is."""
+        if text == self.pattern:
+            return
+        grew = text.startswith(self.pattern) and self.pattern != ""
+        self.pattern = text
+        self.matches = find_all(self.buffer, text)
+        self.added.clear()  # they matched the pattern as it was
+        if grew and self.current is not None:
+            anchor = self.current[0] if self.direction > 0 else self.current[0] + len(text)
+            self.locate(anchor, self.direction, wrap=False)
+        else:
+            self.locate(self.start, self.direction, wrap=True)
+        self.show()
+
+    def step(self, direction: int) -> None:
+        self.direction = direction
+        if not self.pattern:
+            history: list[str] = keep("search.history", list[str])
+            if history:
+                self.box.text = history[-1]  # the last thing searched for
+            return
+        if self.current is not None:
+            self.locate(self.current[1] if direction > 0 else self.current[0], direction, wrap=True)
+        else:
+            self.locate(self.start, direction, wrap=True)
+        self.show()
+
+    def show(self) -> None:
+        view, current = self.view, self.current
+        _mark(self.buffer, self.matches, current)
+        if current is not None:
+            # The matches kept with `add`, and the one the search is on now.
+            ranges = sorted({*self.added, current})
+            view.selections.set(ranges, ranges.index(current))
+            view.reveal(current[0], "nearest")
+        elif not self.pattern:
+            view.selections.set(self.origin, self.origin_primary)
+        # The box's label says how the search is going.
+        if self.failed:
+            label = "No match: "
+        elif current is not None:
+            label = f"Search [{self.matches.index(current) + 1}/{len(self.matches)}]: "
+        else:
+            label = "Search backward: " if self.direction < 0 else "Search: "
+        if self.box.label != label:
+            self.box.label = label
+            self.box.frame.schedule_update()
+
+    def finish(self, *, restore: bool) -> None:
+        self.buffer.layer(LAYER).clear()
+        view = self.view
+        if view.id not in view.frame.views or view.buffer is not self.buffer:
+            return
+        if restore:
+            view.selections.set(self.origin, self.origin_primary)
+            view.reveal()
+        elif self.pattern:
+            history: list[str] = keep("search.history", list[str])
+            if not history or history[-1] != self.pattern:
+                history.append(self.pattern)
+            view.jumps.push(self.buffer, self.start)
+
+
+def _session() -> Search:
+    box = Minibuffer.of(ed.view)
+    found: Any = box.buffer.locals.get("search") if box is not None else None
+    if not isinstance(found, Search):
+        raise NeomacsError("Not searching")
+    return found
+
+
 async def _search(direction: int) -> None:
     view = ed.view
     frame = ed.frame
     assert frame is not None
-    buffer = view.buffer
-    origin = view.selections.ranges()
-    origin_primary = view.selections.primary_index
-    start_pos = view.cursor.pos
-    history = keep("search.history", list[str])
-    pattern = ""
-    matches: list[tuple[int, int]] = []
-    current: tuple[int, int] | None = None
-    failed = False
-    added: list[tuple[int, int]] = []  # matches kept selected with `add`
-
-    def locate(from_pos: int, step: int, *, wrap: bool) -> None:
-        nonlocal current, failed
-        if not matches:
-            current, failed = None, bool(pattern)
-            return
-        if step > 0:
-            later = [m for m in matches if m[0] >= from_pos]
-            current = later[0] if later else (matches[0] if wrap else None)
-        else:
-            earlier = [m for m in matches if m[1] <= from_pos]
-            current = earlier[-1] if earlier else (matches[-1] if wrap else None)
-        failed = current is None
-        if current is None and matches:
-            current = None
-
-    def index_of(match: tuple[int, int] | None) -> int:
-        return matches.index(match) if match is not None and match in matches else 0
-
-    def show() -> None:
-        _mark(buffer, matches, current)
-        if current is not None:
-            # The matches kept with `add`, and the one the search is on now.
-            ranges = sorted({*added, (current[0], current[1])})
-            view.selections.set(ranges, ranges.index((current[0], current[1])))
-            view.reveal(current[0], "nearest")
-        elif not pattern:
-            view.selections.set(origin, origin_primary)
-        count = f"  [{index_of(current) + 1}/{len(matches)}]" if current is not None else ""
-        label = (
-            "Failing search: " if failed else ("Search backward: " if direction < 0 else "Search: ")
-        )
-        ed.message(label + pattern + count, kind="keys")
-
-    def done(*, restore: bool) -> None:
-        buffer.layer(LAYER).clear()
-        frame.clear_keys()
-        if restore:
-            view.selections.set(origin, origin_primary)
-            view.reveal()
-        elif pattern:
-            if not history or history[-1] != pattern:
-                history.append(pattern)
-            view.jumps.push(buffer, start_pos)
-
-    show()
+    if Minibuffer.of(view) is not None:
+        raise NeomacsError("Cannot search in a prompt")
+    # A box of its own to type the pattern in: real text, edited like any other.
+    # A frontend with a place for it shows it there; otherwise it is a prompt.
+    box = Minibuffer(frame, "Search backward: " if direction < 0 else "Search: ", history="search")
+    box.buffer.set_mode(SearchMode)
+    search = Search(view, box, direction)
+    box.buffer.locals["search"] = search
+    box.on_change.add(search.changed)
+    frame.place(box, PLACE)
+    frame.focus_view(box.view)
+    answer = box.answer()
+    accepted = False
     try:
-        while True:
-            key = await ed.read_key()
-            action = search_map.lookup([key])
-            text = keys_module.text_of(key)
-            if isinstance(action, Keymap):
-                action = None
-            if action is None and text is not None:
-                pattern += text
-                matches = find_all(buffer, pattern)
-                added.clear()
-                anchor = current[0] if current is not None else start_pos
-                locate(anchor if direction > 0 else anchor + len(pattern), direction, wrap=False)
-            elif action == "delete":
-                pattern = pattern[:-1]
-                matches = find_all(buffer, pattern)
-                added.clear()
-                locate(start_pos, direction, wrap=True)
-            elif action in ("next", "previous"):
-                direction = 1 if action == "next" else -1
-                if not pattern and history:
-                    pattern = history[-1]
-                    matches = find_all(buffer, pattern)
-                    locate(start_pos, direction, wrap=True)
-                elif current is not None:
-                    locate(current[1] if direction > 0 else current[0], direction, wrap=True)
-                else:
-                    locate(start_pos, direction, wrap=True)
-            elif action == "word":
-                at = current[1] if current is not None else view.cursor.pos
-                end = buffer.syntax.next_word_end(at)
-                pattern += buffer[at:end].lower() if _folds(pattern) else buffer[at:end]
-                matches = find_all(buffer, pattern)
-                added.clear()  # they matched the pattern as it was
-                locate(current[0] if current is not None else start_pos, 1, wrap=True)
-            elif action == "all":
-                done(restore=False)
-                if matches:
-                    view.selections.set(
-                        [(a, b) for a, b in matches],
-                        index_of(current),
-                    )
-                    ed.message(f"{len(matches)} selections")
-                return
-            elif action == "add":
-                # Keep this match selected and go on to the next one.
-                if current is not None:
-                    added.append((current[0], current[1]))
-                    locate(current[1], 1, wrap=True)
-            elif action == "accept":
-                done(restore=False)
-                return
-            elif action == "cancel":
-                done(restore=True)
-                ed.message("Quit")
-                return
-            else:
-                # Any other key ends the search and is then handled as usual.
-                done(restore=False)
-                ed.dispatcher.put(frame, "key", key)
-                return
-            show()
-    except BaseException:
-        done(restore=True)
-        raise
+        await ed.dispatcher.wait(answer)
+        accepted = True
+    finally:
+        box.close()
+        search.finish(restore=not accepted)
+        if answer.done() and not answer.cancelled():
+            answer.exception()  # seen: nothing is left to warn about
 
 
 @command
 async def search_forward() -> None:
-    """Search as you type.  C-s and C-r go to the next and previous match,
-    Return stays there, C-g goes back to where the search began."""
+    """Search as you type, in a box of its own.  C-s and C-r go to the next and
+    previous match, Return stays there, C-g goes back to where the search began."""
     await _search(1)
 
 
@@ -214,6 +223,54 @@ async def search_forward() -> None:
 async def search_backward() -> None:
     """Search backward as you type."""
     await _search(-1)
+
+
+@command(name="search.next")
+def search_next() -> None:
+    """Go to the next match.  With nothing typed yet, search for the last thing again."""
+    _session().step(1)
+
+
+@command(name="search.previous")
+def search_previous() -> None:
+    """Go to the previous match."""
+    _session().step(-1)
+
+
+@command(name="search.word")
+def search_word() -> None:
+    """Add the rest of the word after the match to the pattern."""
+    search = _session()
+    at = search.current[1] if search.current is not None else search.view.cursor.pos
+    end = search.buffer.syntax.next_word_end(at)
+    more = search.buffer[at:end]
+    search.box.text = search.pattern + (more.lower() if _folds(search.pattern) else more)
+
+
+@command(name="search.add")
+def search_add() -> None:
+    """Keep this match selected and go on to the next one."""
+    search = _session()
+    if search.current is None:
+        raise NeomacsError("No match to keep")
+    search.added.append(search.current)
+    search.locate(search.current[1], 1, wrap=True)
+    search.show()
+
+
+@command(name="search.all")
+def search_all() -> None:
+    """End the search with a selection on every match."""
+    search = _session()
+    matches, current = list(search.matches), search.current
+    if not matches:
+        raise NeomacsError("No matches")
+    search.added = [m for m in matches if m != current]
+    if current is None:
+        search.current = matches[0]
+    search.show()
+    search.box.submit()
+    ed.message(f"{len(matches)} selection{'s' if len(matches) != 1 else ''}")
 
 
 def _subject(view: Any) -> tuple[str, bool]:
