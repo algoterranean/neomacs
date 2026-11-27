@@ -426,7 +426,10 @@ Deferred with step 14 of IMPLEMENTATION.md.
   installing are done holding a lock on the environment. A second
   operation, in the same editor or from `neomacs ext` in another process,
   is refused until the first has finished; it is not queued, since the
-  first may be waiting for an answer. `list` is always allowed.
+  first may be waiting for an answer. `list` is always allowed. The lock
+  is a file lock, which this is written for Unix only: on Windows nothing
+  is held yet, and two operations can overlap there. That goes with the
+  rest of Windows, which is deferred (IMPLEMENTATION step 15).
 - **Where distributions come from** can be said in `extensions.toml`:
 
   ```toml
