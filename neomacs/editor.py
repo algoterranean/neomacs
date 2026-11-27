@@ -39,10 +39,22 @@ class Editor:
 
     def _init_state(self) -> None:
         """Create the registries.  Extended as subsystems are added."""
+        from neomacs.dispatch import InputQueue
+        from neomacs.display.faces import FaceTable
         from neomacs.text.buffer import BufferList
 
         self.buffers = BufferList(self)
+        self.buffers.new("*scratch*")
+        self.faces = FaceTable()
+        self.faces.on_change.append(self.update_frames)
+        self.frame_detach_timeout = 600.0
+        self.input = InputQueue(self)
         self.frames: dict[int, Any] = {}
+
+    def update_frames(self) -> None:
+        """Have every frame check whether its frontend needs anything."""
+        for frame in list(self.frames.values()):
+            frame.schedule_update()
 
     # -- messages and errors ------------------------------------------------
 
@@ -111,6 +123,7 @@ class Editor:
         self._stop = asyncio.Event()
         self._context = contextvars.copy_context()
         _owner.claim()
+        self.input.start()
         sys.modules.setdefault(self.scratch.__name__, self.scratch)
         with contextlib.suppress(NotImplementedError, ValueError):
             self.loop.add_signal_handler(signal.SIGTERM, self.stop)
@@ -181,3 +194,6 @@ class _EdProxy:
 
 
 ed: Any = _EdProxy()
+
+# Importing these registers their RPC methods.
+from neomacs.rpc import ui as _ui  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]

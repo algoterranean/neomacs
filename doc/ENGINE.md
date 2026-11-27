@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 18, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 19, 2026-11-27. Nothing is implemented. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
 This describes the backend ("engine") of Neomacs, a new, Python-native
@@ -164,6 +164,7 @@ timestamp, to a file for debugging.
 | `engine.eval(source, mode="auto")` | request | Evaluate Python in the scratch module; returns `repr` or an error. Used by scripts and tests. |
 | `engine.call(command, args)` | request | Run a named command. |
 | `engine.exit()` | notification | Ask the engine to exit. Sent by the app when it quits (DISTRIBUTION.md section 7). |
+| `engine.idle(timeout)` | request | Returns once all input has been handled and every responsive frame is up to date. For tests and scripts. |
 | `ui.attach(options)` | request | Carries the frontend's protocol version and capabilities, which must be compatible (STABILITY.md section 5). Create a frame for this connection and start receiving `redraw` for it. Options name the UI's capabilities, e.g. `{"rich_text": true, "images": true}`. Returns the frame id and a reattach token. With `{"frame": id, "token": ...}` it reattaches to an existing frame instead (4.6). |
 | `ui.resync()` | request | Ask for the full state again on this connection (4.6). |
 | `ui.detach()` | notification | Stop redraw and delete the frame. |
@@ -197,7 +198,8 @@ decides how it looks on screen.
 | `["resource_define", id, kind, source]` | An image or other binary resource. `source` is `{"path": ...}` when the UI can read the file itself, otherwise `{"mime": ..., "data": base64}`. Local frontends should always get a path. |
 | `["layout", {"main": tree, "panels": panels}]` | `tree` is the window tree: `["split", id, "h" or "v", ratios, children]` and `["win", id]`. The UI turns ratios into pixels. `panels` is described below. |
 | `["win_info", win, info]` | Per-window facts the UI needs: `line_count` (for the scroll bar), `wrap` mode, buffer name, and the presentation settings described below: `gutter`, `margins`, `max_width`, `tab_width`. |
-| `["lines", win, first, removed, lines]` | Splice: replace `removed` lines starting at line `first` with `lines`. If the range lies outside what the UI holds, `lines` is just a count, so the UI can renumber. |
+| `["lines", win, first, removed, lines]` | Splice: replace `removed` lines starting at line `first` with `lines`, which is either a list of lines or, when the frontend is not to hold them, just a count. See "What a frontend holds" below. |
+| `["held", win, first, last]` | Keep only lines `first` to `last` of what is held and forget the rest; `first` greater than `last` means forget everything. Sent when the view shows another buffer, jumps far away, or is holding far more than it needs. |
 | `["selections", win, primary, ranges, shape]` | Every selection in the window as `[anchor_line, anchor_offset, head_line, head_offset]`, in buffer order. The UI draws a cursor of the given shape (`block`, `bar`, `hollow`, `hidden`) at each head and highlights from anchor to head. `primary` is the index of the primary selection. Sent separately from `lines`, so moving or selecting does not re-send text. |
 | `["reveal", win, line, offset, align]` | Scroll so the position, normally the primary cursor, is visible. `align` is `nearest`, `center`, `top` or `bottom`. |
 | `["modeline", win, runs]` | The window's status line. |
@@ -208,6 +210,7 @@ decides how it looks on screen.
 | `["message", runs, kind]` | A transient message for the user. `kind` is `info`, `warning`, `error`, or `keys` for a pending key sequence or prefix argument. The UI chooses where to show it. |
 | `["title", text]`, `["bell"]`, `["busy", bool]` | Window title, alert, busy indicator. |
 | `["reset"]` | Discard everything held for this frame: faces, resources, layout, lines. First event of a full state sync (4.6). |
+| `["ui_faces", names]` | The face ids for what the frontend draws on its own account: `selection`, `cursor`, `gutter`, `placeholder`, `modeline`. Sent on attach and when the theme changes. |
 | `["flush", seq]` | End of batch. `seq` increases by one per batch, per frame. |
 
 A line is `[attrs, runs]`. `attrs` holds paragraph-level properties
@@ -228,6 +231,31 @@ so a cursor is never placed inside a cluster.
 
 All offsets are in code points. A JavaScript frontend must convert to and
 from UTF-16 indices.
+
+**What a frontend holds.** For each view the frontend holds one contiguous
+range of lines, and the engine always knows which. Three rules keep the two
+in step, and they are all a frontend needs to implement:
+
+- A `lines` event carrying a list touches the held range or lies inside it,
+  never leaving a gap. Afterwards the frontend holds the new lines together
+  with whatever it held on either side of the replaced range. The engine
+  uses this both for edits and to supply lines the frontend has not seen: a
+  fill replaces existing, unheld lines next to the held range with their
+  content, so `removed` equals the number of lines sent. When nothing is
+  held, the list becomes the held range.
+- A `lines` event carrying a count never overlaps the held range. If it
+  lies above, the held lines keep their content and are renumbered by the
+  difference; if below, nothing held changes.
+- `held` shrinks the range.
+
+An edit that would insert more than a few hundred lines into the held range
+is not sent as a list. The engine first shrinks the held range to end just
+above the edit, sends a count, and then fills in whatever the viewport
+needs.
+
+The frontend also keeps its scroll position on the same text: when lines are
+added or removed above the first visible line, that line's number changes by
+the difference and what is on screen does not move.
 
 **Panels.** Each entry of `layout.panels` is:
 
@@ -367,6 +395,7 @@ with `view.viewport`, and lines arrive as they would after any scroll.
 ### 4.7 Key notation
 
 Emacs notation, because it is compact and already familiar: `a`, `C-x`,
+`<space>`,
 `M-f`, `C-M-s`, `<return>`, `<f5>`, `S-<left>`. Modifier order is fixed
 (`C-M-S-s-`). The frontend is responsible for turning platform key events
 into this form; `neomacs.keys.parse("C-x C-f")` turns a string into a key
@@ -1186,6 +1215,8 @@ output from a background task appears as it arrives. An update:
    invisible text, attach inline objects, and emit the result as runs in a
    `lines` splice.
 2. Sends insertions and deletions outside the held range as counts.
+   Between updates the engine keeps one bounding range of changed lines per
+   view, so however many edits were skipped, an update is a single splice.
 3. Sends `selections` and `modeline` if they changed, and `reveal` if a
    command moved the primary cursor.
 4. Sends `flush` with the next sequence number.

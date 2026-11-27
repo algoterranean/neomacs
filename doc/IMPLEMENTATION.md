@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: plan written 2026-11-27. Steps 1 and 2 done; see the progress log (section 9).
+Status: plan written 2026-11-27. Steps 1 to 3 done; see the progress log (section 9).
 
 This is the working checklist for building Neomacs. It puts the stages of the
 five design documents into one order and says, for each step, what to read,
@@ -186,30 +186,30 @@ STABILITY 5, 10 (T1).
 
 **Build:**
 
-- [ ] `View` and `Window`; one window per frame for now.
-- [ ] Face registry and `face_define`.
-- [ ] The view builder: text, providers and spans merged into lines of runs.
-- [ ] Per-view tracking of which lines the frontend holds and their
+- [x] `View` and `Window`; one window per frame for now.
+- [x] Face registry and `face_define`.
+- [x] The view builder: text, providers and spans merged into lines of runs.
+- [x] Per-view tracking of which lines the frontend holds and their
       revisions; `lines` splices, including count-only splices outside the
       held range.
-- [ ] `win_info` with line count, wrap, gutter columns, margins, tab width;
+- [x] `win_info` with line count, wrap, gutter columns, margins, tab width;
       gutter marks in line attributes.
-- [ ] `selections` (one selection for now, sent as a list), `modeline`,
+- [x] `selections` (one selection for now, sent as a list), `modeline`,
       `reveal`.
-- [ ] `view.viewport` handling, with the margin of extra lines.
-- [ ] `flush` with a sequence number, `view.ack`, one batch in flight per
+- [x] `view.viewport` handling, with the margin of extra lines.
+- [x] `flush` with a sequence number, `view.ack`, one batch in flight per
       frame, the stalled-frontend rule.
-- [ ] Engine-to-client requests, with replies routed back to the awaiting
+- [x] Engine-to-client requests, with replies routed back to the awaiting
       coroutine; the `layout.*` calls as awaitable methods.
-- [ ] Frames: `ui.attach`, `ui.detach`, detach on connection loss, the
+- [x] Frames: `ui.attach`, `ui.detach`, detach on connection loss, the
       reattach token, expiry, `FrontendGone`; `reset` and the full state
       sync; `ui.resync`.
-- [ ] `monolayout`: wrapping, wide characters, tab stops, scrolling, and
+- [x] `monolayout`: wrapping, wide characters, tab stops, scrolling, and
       answers to every `layout.*` request, in character cells.
-- [ ] The terminal frontend on top of `monolayout`.
-- [ ] The headless test client, with a screen model built on `monolayout`.
-- [ ] Hard-wired self-insert and cursor movement, to be replaced in step 5.
-- [ ] T1: the protocol integer and capability list in `api_info` and
+- [x] The terminal frontend on top of `monolayout`.
+- [x] The headless test client, with a screen model built on `monolayout`.
+- [x] Hard-wired self-insert and cursor movement, to be replaced in step 5.
+- [x] T1: the protocol integer and capability list in `api_info` and
       `ui.attach`; refusal on mismatch.
 
 **Tests:** view tests; pacing tests; reattach tests; two clients on one
@@ -680,4 +680,5 @@ Add a row when a step or gate is finished, or when the design changed.
 | 2026-11-27 | Planning | | Plan written. Five corrections made to the design documents (section 8). |
 | 2026-11-27 | Step 1 | this commit | Done except CI, which is written but has never run (no remote). PyPI name not registered (needs the user). Differences from the design: `wcwidth` dropped in favour of `unicodedata`, since its current release ships compiled wheels (ENGINE 12, DISTRIBUTION 3.1 updated); `engine.exit` notification, the `NEOMACS-LISTENING` readiness line and `--exit-with-parent` added (ENGINE 4.1, 4.2). Verified by hand: `1 + 1` over a socket and over stdio; an exception returns an error and the engine keeps running; a built wheel installs into a clean free-threaded 3.15 environment and starts with the GIL disabled. |
 | 2026-11-27 | Step 2 | this commit | Done. No differences from the design. `GraphemeBreakTest.txt` for Unicode 17.0 is vendored under `tests/data/` (Unicode licence) so the test needs no network; it is skipped if the library's Unicode version has no matching file. The type checker's stubs do not know `unicodedata.iter_graphemes` yet, so that one call is typed as `Any`. Verified by hand over `engine.eval`: open a file, edit, undo, save. |
+| 2026-11-27 | Step 3 | this commit | Done. Protocol additions, all now in ENGINE 4: the `held` event and the three rules for what a frontend holds (the design said only "the held range"); `ui_faces`, so a frontend knows which face ids to draw selections, cursors and the gutter with; `engine.idle` for tests; `<space>` as the name of the space key. Other differences: the engine keeps an estimate of the viewport when a view shows another buffer or lines change above it, because a frontend reports its viewport only when it changes; frames are checked for updates after every RPC call, so a cursor moved by evaluated code is shown. A window's cursor advances when text is inserted exactly at it. The first conformance recording is `tests/data/sessions/basic.json`, made by `python -m neomacs.tools.record`. Verified by hand: none beyond the tests, which drive the terminal frontend in a pseudo-terminal (open a file, move, type, undo, quit) and reattach after a dropped connection. |
 | | | | |

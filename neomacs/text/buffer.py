@@ -75,6 +75,8 @@ class Buffer:
         self.saved_tick = 0
         self.read_only = False
         self.locals: dict[str, Any] = {}
+        # Decoration providers: callables that compute faces on demand (ENGINE 5.4).
+        self.providers: list[Any] = []
         self.undo = UndoLog(self)
         # How the text is written back to its file.
         self.encoding = "utf-8"

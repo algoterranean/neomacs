@@ -2,6 +2,34 @@
  "format": 1,
  "names": [
   {
+   "name": "neomacs.display.faces.FaceTable",
+   "kind": "class",
+   "signature": "() -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.display.faces.FaceTable.attrs",
+   "kind": "method",
+   "signature": "(self, face_id: 'int') -> 'Attrs'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.display.faces.FaceTable.define",
+   "kind": "method",
+   "signature": "(self, name: 'str', **attrs: 'Any') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.display.faces.FaceTable.id_for",
+   "kind": "method",
+   "signature": "(self, names: 'tuple[str, ...] | str') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.hooks.Hook",
    "kind": "class",
    "signature": "(name: 'str', doc: 'str' = '') -> 'None'",
@@ -495,6 +523,90 @@
    "name": "neomacs.text.undo.UndoLog.undo",
    "kind": "method",
    "signature": "(self) -> 'UndoGroup | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Frame",
+   "kind": "class",
+   "signature": "(editor: 'Editor', conn: 'Connection', capabilities: 'list[str]') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Frame.delete",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Frame.full_sync",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Frame.request",
+   "kind": "method",
+   "signature": "(self, method: 'str', *params: 'Any', timeout: 'float' = 2.0) -> 'Any'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Frame.schedule_update",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.View",
+   "kind": "class",
+   "signature": "(frame: 'Frame', buffer: 'Buffer') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.View.collapse",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.View.move_visual",
+   "kind": "method",
+   "signature": "(self, count: 'int', unit: 'str' = 'visual_line') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.View.reveal",
+   "kind": "method",
+   "signature": "(self, pos: 'int | None' = None, align: 'str' = 'nearest') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.View.show",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.View.visual_line_edge",
+   "kind": "method",
+   "signature": "(self, which: 'str') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Window",
+   "kind": "class",
+   "signature": "(frame: 'Frame', buffer: 'Buffer') -> 'None'",
    "tier": "provisional",
    "since": "0.1"
   }

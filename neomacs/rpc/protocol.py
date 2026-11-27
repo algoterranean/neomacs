@@ -175,6 +175,9 @@ class Connection:
         except Exception as exc:
             self._failed(method, msgid, is_request, exc)
             return
+        finally:
+            # Whatever the call did (move a cursor, change a face) may need showing.
+            self.editor.update_frames()
         if inspect.isawaitable(result):
             task = self._loop.create_task(self._finish(method, msgid, is_request, result))
             self.editor.keep_task(task)
@@ -187,6 +190,8 @@ class Connection:
         except Exception as exc:
             self._failed(method, msgid, is_request, exc)
             return
+        finally:
+            self.editor.update_frames()
         if is_request:
             self._send({"jsonrpc": "2.0", "id": msgid, "result": result})
 
