@@ -69,6 +69,8 @@ def test_typing_and_motion(ui: HeadlessUI) -> None:
     assert text(ui) == ""
     ui.keys("C-y", "C-a", "M-d", "M->", "M-<backspace>")
     assert text(ui) == " brave new "
+    ui.keys("C-<backspace>")  # the same command as M-<backspace>
+    assert text(ui) == " brave "
     ui.keys("C-x", "C-q")
     assert ui.message == "C-x C-q is undefined"
 
