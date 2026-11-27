@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import os
 import signal
 import socket
 import sys
@@ -54,6 +55,10 @@ class Editor:
         self.listen_path: Path | None = None
         self.scratch = types.ModuleType("neomacs_scratch")
         self.scratch.__dict__["ed"] = self
+        # State that survives re-evaluation (`neomacs.live.keep`).
+        self.kept: dict[str, Any] = {}
+        # Redefinitions that could not be applied in place: (module, name, reason).
+        self.eval_warnings: list[tuple[str, str, str]] = []
         self.on_connection: list[Callable[[Connection], None]] = []
         self._stop: asyncio.Event | None = None
         self._context: contextvars.Context | None = None
@@ -98,6 +103,8 @@ class Editor:
         # Round-trip times of requests to frontends, in seconds, likewise.
         self.request_times: list[float] | None = None
         self.tasks: list[TaskInfo] = []
+        # How many module evaluations `neomacs.tools.reevaluate` has done here.
+        self.reevaluated = 0
 
     # -- context (ENGINE 7.7) -------------------------------------------------
 
@@ -240,6 +247,8 @@ class Editor:
         frame = self._need_frame()
         target: View = frame.window
         if target.buffer is not buffer:
+            if role in ("help", "traceback"):
+                buffer.locals["_shown_over"] = target.buffer.name  # for quit_window
             target.show(buffer)
         if focus:
             frame.focus_view(target)
@@ -324,6 +333,7 @@ class Editor:
         _owner.claim()
         self.dispatcher.start()
         sys.modules.setdefault(self.scratch.__name__, self.scratch)
+        self._fill_scratch()
         with contextlib.suppress(NotImplementedError, ValueError):
             self.loop.add_signal_handler(signal.SIGTERM, self.stop)
         previous_sigint: Any = None
@@ -337,6 +347,11 @@ class Editor:
                 listener.start()
             if stdio:
                 self._add_connection(Connection(self, stdio_transport()))
+            if os.environ.get("NEOMACS_REEVALUATE"):
+                # Gate D: live-patch the standard modules before serving anyone.
+                from neomacs.tools import reevaluate
+
+                await reevaluate.all_modules()
             if ready is not None:
                 ready()
             await self._stop.wait()
@@ -350,6 +365,30 @@ class Editor:
             for task in list(self._tasks):
                 task.cancel()
             _owner.release()
+
+    def _fill_scratch(self) -> None:
+        """Give the scratch module the public API, so it need not be imported."""
+        from neomacs import commands, completion, hooks, keymap, live, modes, options, selection
+
+        names: dict[str, Any] = {
+            "asyncio": asyncio,
+            "command": commands.command,
+            "Ask": commands.Ask,
+            "Prefix": commands.Prefix,
+            "RawPrefix": commands.RawPrefix,
+            "KeyText": commands.KeyText,
+            "Selection": selection.Selection,
+            "global_map": keymap.global_map,
+            "Keymap": keymap.Keymap,
+            "Hook": hooks.Hook,
+            "Option": options.Option,
+            "Mode": modes.Mode,
+            "Candidate": completion.Candidate,
+            "keep": live.keep,
+            "forget": live.forget,
+        }
+        for name, value in names.items():
+            self.scratch.__dict__.setdefault(name, value)
 
     def stop(self) -> None:
         if self._stop is not None:

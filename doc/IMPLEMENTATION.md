@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: plan written 2026-11-27. Steps 1 to 6 and Gates A, B and C done; step 7 is next. See the progress log (section 9).
+Status: plan written 2026-11-27. Steps 1 to 7 and Gates A to D done; step 8 is next. See the progress log (section 9).
 
 This is the working checklist for building Neomacs. It puts the stages of the
 five design documents into one order and says, for each step, what to read,
@@ -382,20 +382,20 @@ window.
 
 **Build:**
 
-- [ ] The pipeline of ENGINE 9.1: parse, shift line numbers, split a trailing
+- [x] The pipeline of ENGINE 9.1: parse, shift line numbers, split a trailing
       expression, compile with top-level `await`, execute, await if needed.
-- [ ] The namespace rule: a file's module, or the scratch module.
-- [ ] In-place patching of functions, decorated functions and classes, with
+- [x] The namespace rule: a file's module, or the scratch module.
+- [x] In-place patching of functions, decorated functions and classes, with
       a visible warning on every fallback to rebinding.
-- [ ] After evaluating a whole module, remove registrations it made before
+- [x] After evaluating a whole module, remove registrations it made before
       and did not make this time, using the ownership record.
-- [ ] `linecache` registration, so tracebacks and `inspect` see buffer text.
-- [ ] `keep` and `forget`.
-- [ ] Loading a module from disk goes through the same pipeline.
-- [ ] Commands: `eval_last_expression`, `eval_definition`, `eval_selection`,
+- [x] `linecache` registration, so tracebacks and `inspect` see buffer text.
+- [x] `keep` and `forget`.
+- [x] Loading a module from disk goes through the same pipeline.
+- [x] Commands: `eval_last_expression`, `eval_definition`, `eval_selection`,
       `eval_buffer`, `eval_expression`, `repl`.
-- [ ] The scratch buffer; the `*traceback*` buffer with a span per frame.
-- [ ] `describe_command`, `describe_key`, `describe_option`, `find_source`,
+- [x] The scratch buffer; the `*traceback*` buffer with a span per frame.
+- [x] `describe_command`, `describe_key`, `describe_option`, `find_source`,
       `apropos`.
 
 **Done when:** from the scratch buffer, redefine a built-in command and
@@ -406,7 +406,7 @@ From here on, develop inside the editor where practical.
 
 ### Gate D: patching on real code
 
-- [ ] A script evaluates every module under `std/` and `modes/` with
+- [x] A script evaluates every module under `std/` and `modes/` with
       `eval_buffer` in a running engine, then runs the test suite inside
       that engine. It passes, with no fallback warnings that are not
       understood and noted.
@@ -688,4 +688,6 @@ Add a row when a step or gate is finished, or when the design changed.
 | 2026-11-27 | Gate B | this commit | Passed. `python -m neomacs.tools.bench --keys 2000 --check` on an Apple M3 Max, free-threaded 3.15.2, GIL off, four runs after the fixes below: engine time from `input.key` arriving to the batch being handed to the writer, 99th percentile between 0.6 and 2.0 ms in every scenario (plain typing, with line breaks, three cursors, a highlighted code line, top of file, a 3,000-character line), median 0.4 to 0.55 ms, against a 5 ms limit. The worst single sample in each scenario was usually 1 to 5 ms, with isolated spikes of 8, 9, 12, 15 and 17 ms across the runs, roughly one key in ten thousand; their cause was not investigated. As the client sees it, including the socket and the test client's own parsing and layout: median 0.9 to 2.9 ms. Two faults were found on the way. (1) The first long run showed latency growing by about 1 ms per 1,000 characters on the line being typed on, 99th percentile up to 4 ms: the modeline's column count walked the line cluster by cluster. It is now a binary search, and the 3,000-character case costs the same as any other. A 400-key run had hidden this. (2) The highlighting scenario was first typing on a line of plain letters with a broken keyword pattern, so it measured nothing; the benchmark now types on a code line and reports the runs per line as evidence (3.9 on average, 4 on the typed line). **Limits:** the highlighting is a simple regular-expression provider standing in for step 9's; the measurement stops at the writer queue and does not include the socket write or any frontend; vertical motion, which needs a geometry round trip, is not measured yet; CI has not run it. To be re-run with real highlighting at the end of step 9. |
 | 2026-11-27 | Step 6 | this commit | Done. In the Electron window, driven by real key events in `npm run smoke`: typing, Meta and Shift keys, three cursors editing three places, a drawn selection, a prompt with completion and the prompt of the command it ran, text committed through the EditContext, the message strip. 50 smoke checks pass in three consecutive runs; 21 frontend unit tests. Differences from the design, now in FRONTEND 7: geometry is answered from text rectangles and binary search, not by hit-testing points, which fails for rows that are laid out but off screen; views re-measure the default face when faces change. **Not done or not verified:** nothing was checked in a visible window or with a real input method (composition is implemented but only a committed insert was exercised); the mouse, and so pixels-to-position, is step 10; the block cursor is drawn translucent over its character as a stopgap; the 250 ms give-up is tested only in the reference frontend; bidirectional text is not handled. |
 | 2026-11-27 | Gate C | this commit | Passed, three consecutive runs of `npm run smoke`. (1) Agreement with the reference layout, monospaced face, 80 lines of ASCII of which 20 wrap: 4,629 answers compared, none different (4,008 `layout.move` over eight distances, a 155-step walk carrying the goal, 334 `layout.line_edge`, 125 `layout.rect`, the viewport, four page moves). The first run of this check failed with 2,691 differences, which is what showed that a view's character width and page size went stale after a face change; that it failed then is also the evidence that it can. (2) Goal column in proportional text with rows of 16 and 27 pixels: over 24 rows down through six lines the cursor stayed within 15.5 px of the goal, the limit being one character's width (24 px allowed), and 25 rows up returned it to the exact starting offset. (3) A vertical motion, timed in the engine from the key arriving to the redraw leaving and including the round trip to Electron: 99th percentile 1.8 to 2.5 ms against the 5 ms budget; the round trip alone 0.9 to 1.6 ms. With ten cursors in one request: 2.7 to 5.1 ms at the 99th percentile over 60 keys, reported and not part of the gate. Found on the way: the Python reference frontend answered questions about lines it did not hold with a guess; it now fetches them first, as FRONTEND 7 requires, and the comparison tool is itself tested against it, including that a layout one column narrower is caught. **Limits:** off-screen rendering at 60 frames per second; wrapped lines with spaces are excluded from (1) because the browser wraps at words and the reference at the column; rectangles are compared in whole cells, since a row of text sits a pixel or two inside its line box. |
+| 2026-11-27 | Step 7 | this commit | Done. The pipeline, in-place patching, `keep`/`forget`, the six evaluation commands, the REPL, the `*traceback*` buffer with a link per frame, `describe_command`, `describe_key`, `describe_option`, `find_source`, `apropos`. The "done when" is tested through the reference frontend and again in Electron with real keys: a built-in command redefined and a key bound from the scratch buffer both act on the next keystroke, and `find_source` goes to the scratch buffer for the new definition and to the file for an untouched one. 28 new tests (213 in all); 52 Electron smoke checks. Differences from the design are listed in ENGINE 9.7. **Not done:** the traceback buffer is not shown automatically, because without panels it would replace the buffer being edited; startup still imports the standard modules with Python's import, and `load_file` (the pipeline's entry for files) is tested but has no caller yet; "develop inside the editor" has not started, since nobody has used the editor by hand. |
+| 2026-11-27 | Gate D | this commit | Passed. `python -m neomacs.tools.reevaluate` makes every engine evaluate all 11 modules (the ten under `std/`, and `modes.py`; there is no `modes/` directory yet) twice through the buffer pipeline before it serves, then runs the whole suite against such engines: 213 pass, and the Electron smoke test passes the same way. No fallback warnings at all, so none to explain. Evidence that the evaluation really happens: a re-evaluated engine reports 22 evaluations, the module still holds its original function object while the registry holds a newer one, and both run the same code object, compiled from the buffer. A separate test runs the real `eval_buffer` command on every module twice and then edits with several cursors, kill and yank, undo and a prompt. **The gate failed twice before passing, both real faults:** a subclass defined in the same module as its base fell back to rebinding (the new base was not recognised as the kept one), and re-evaluating `neomacs.std` emptied the menu (registrations made by a function at startup were treated as made by loading). **Limits:** the startup path calls the function behind `eval_buffer`, not the command; the command itself is covered by the separate test. Only these 11 modules are covered: the core (`dispatch`, `window`, `minibuffer`, `editor`) is not re-evaluated and is not expected to survive it. The standard modules hold four classes, so class patching is exercised lightly here and mostly by unit tests. |
 | | | | |

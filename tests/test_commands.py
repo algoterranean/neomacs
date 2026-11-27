@@ -746,11 +746,11 @@ def test_messages_menu_and_new_frame(ui: HeadlessUI) -> None:
     assert ui.model.messages[-1] == ("careful", "warning")  # a log message is recorded, not shown
     assert ui.client.eval("ed.messages[-1]") == "'quiet'"
     menu = {item["label"]: item for item in ui.model.menu}
-    assert list(menu) == ["File", "Edit", "Tools"]
+    assert list(menu) == ["File", "Edit", "Tools", "Help"]
     opened = menu["File"]["children"][0]
     assert opened == {"label": "Open…", "command": "files.find", "key": "s-o", "enabled": True}
     ui.eval("ed.menu.add('Tools/Mine', 'forward_word')")
-    assert ui.model.menu[-1]["children"][-1] == {
+    assert ui.model.menu[2]["children"][-1] == {
         "label": "Mine", "command": "forward_word", "key": "M-f", "enabled": True,
     }  # fmt: skip
     ui.eval("ed.menu.remove('Tools/Mine')")

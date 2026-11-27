@@ -7,6 +7,7 @@ from typing import Annotated
 from neomacs.commands import Ask, Prefix, command
 from neomacs.editor import ed
 from neomacs.selection import Selection
+from neomacs.text.marker import Marker
 
 
 @command
@@ -97,25 +98,35 @@ def goto_line(line: Annotated[int, Ask.integer("Go to line: ")]) -> None:
     _long_move(buffer.line_start(max(1, min(buffer.line_count, line))))
 
 
+def _go_to(marker: Marker) -> None:
+    """Put the cursor at a jump-list entry, showing its buffer if it is another one."""
+    view = ed.view
+    if marker.buffer is not view.buffer:
+        if ed.buffers.get(marker.buffer.name) is not marker.buffer:
+            ed.message("That buffer is gone")
+            return
+        view.show(marker.buffer)
+    view.selections.keep_primary()
+    view.selections.primary.select(marker.pos, marker.pos)
+    view.reveal()
+
+
 @command
 def jump_back() -> None:
-    """Go back to where the last long move started."""
+    """Go back to where the last long move started, in whichever buffer that was."""
     view = ed.view
     marker = view.jumps.back(view.buffer, view.cursor.pos)
     if marker is None:
         ed.message("No earlier position")
-    elif marker.buffer is view.buffer:
-        view.selections.keep_primary()
-        view.selections.primary.select(marker.pos, marker.pos)
+    else:
+        _go_to(marker)
 
 
 @command
 def jump_forward() -> None:
     """Go forward again after `jump_back`."""
-    view = ed.view
-    marker = view.jumps.forward()
+    marker = ed.view.jumps.forward()
     if marker is None:
         ed.message("No later position")
-    elif marker.buffer is view.buffer:
-        view.selections.keep_primary()
-        view.selections.primary.select(marker.pos, marker.pos)
+    else:
+        _go_to(marker)

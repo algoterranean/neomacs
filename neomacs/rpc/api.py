@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
@@ -56,13 +57,28 @@ def api_info(conn: Connection) -> dict[str, Any]:
     }
 
 
-@method("engine.eval")
-def engine_eval(conn: Connection, source: str, mode: str = "auto") -> str | None:
-    """Evaluate Python in the scratch module; return the repr of the value, if any."""
+async def _eval(conn: Connection, source: str, mode: str) -> str | None:
+    from neomacs.live import run
     from neomacs.live.evaluate import NO_VALUE, evaluate
 
-    value = evaluate(source, conn.editor.scratch.__dict__, filename="<engine.eval>", mode=mode)
-    return None if value is NO_VALUE else repr(value)
+    scratch = conn.editor.scratch
+    result = await evaluate(source, scratch.__dict__, filename="<engine.eval>", mode=mode)
+    run.announce(scratch.__name__, result)
+    return None if result.value is NO_VALUE else repr(result.value)
+
+
+@method("engine.eval")
+def engine_eval(conn: Connection, source: str, mode: str = "auto") -> Any:
+    """Evaluate Python in the scratch module; return the repr of the value, if any.
+
+    Top-level `await` is allowed.  Code that does not await runs to completion
+    before the next message is read.
+    """
+    task = asyncio.Task(_eval(conn, source, mode), eager_start=True)
+    if task.done():
+        return task.result()
+    conn.editor.keep_task(task)
+    return task
 
 
 @method("engine.call")

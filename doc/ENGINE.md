@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 22, 2026-11-27. Stages 0 to 3 are implemented; see
+Status: draft 23, 2026-11-27. Stages 0 to 4 are implemented; see
 IMPLEMENTATION.md for what exists. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
@@ -1488,6 +1488,49 @@ Built on what Python already records: `describe_command` and
 `describe_key` show the signature and docstring; `find_source` uses
 `inspect` plus the `linecache` registration to open the definition;
 `apropos` searches the command and option registries.
+
+### 9.7 As built
+
+Differences from the sections above, and details they left open:
+
+- **Redefined base classes.** Evaluating a module defines its classes anew,
+  so a subclass in the same text names the new base, not the one that is
+  kept. The patcher remembers which new object each kept object replaced
+  and treats the two as the same base. Without this every subclass in a
+  re-evaluated module fell back to rebinding.
+- **`super()` in methods that are new.** Methods find their class in a cell
+  shared by the whole class body. That cell is pointed at the kept class,
+  so a method added by a redefinition can call `super()`.
+- **Every generation is patched.** A decorator may have stored an earlier
+  function object (the command registry does). All objects a name has held
+  are tracked weakly and patched, not only the current one.
+- **Classes with a custom metaclass** (enumerations, abstract base classes)
+  are rebound with a warning, not patched.
+- **What re-evaluating a module removes.** Only registrations made while
+  the module was being loaded or evaluated. One made later by a function of
+  the module, when called, is left alone: evaluating the module again would
+  not have repeated it. (Found by Gate D: the menu, filled by a function in
+  `neomacs.std` at startup, vanished.)
+- **The traceback is not shown automatically.** Until panels exist (8.5)
+  showing it would replace the buffer being worked on. The error is shown
+  as a message and `show_traceback` shows the buffer.
+- **`eval_buffer` shows "Evaluated"** when the last expression's value is
+  `None`, which is what a trailing call such as `global_map.bind(...)` gives.
+- **`engine.eval`** uses the same pipeline, so it accepts top-level `await`.
+  Code that does not await still runs before the next message is read.
+- **The scratch module** has `ed`, `asyncio`, `command`, `Ask`, `Prefix`,
+  `RawPrefix`, `KeyText`, `Selection`, `global_map`, `Keymap`, `Hook`,
+  `Option`, `Mode`, `Candidate`, `keep` and `forget`.
+- **Code from a buffer with no file** is compiled under the name
+  `<neomacs:BUFFER NAME>`; tracebacks, `inspect` and `find_source` resolve
+  that back to the buffer. Renaming the buffer breaks the link.
+- **The jump list crosses buffers**, so `jump_back` returns from
+  `find_source` or a traceback link.
+- **Not done:** loading the standard modules at startup still uses Python's
+  import; `neomacs.live.run.load_file` is the pipeline's entry for files and
+  nothing calls it at startup yet (the init file arrives with extensions).
+  `eval_definition` on a method evaluates the whole class, as specified;
+  nested functions and lambdas held elsewhere are not patched.
 
 ## 10. Debugging
 

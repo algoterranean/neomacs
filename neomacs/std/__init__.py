@@ -4,9 +4,29 @@ Everything here is written against the public API, as an extension would be.
 """
 
 from neomacs.keymap import global_map
-from neomacs.std import cursors, editing, files, mouse, movement, prefix, prompts
+from neomacs.std import (
+    cursors,
+    editing,
+    evaluation,
+    files,
+    help,  # noqa: A004
+    mouse,
+    movement,
+    prefix,
+    prompts,
+)
 
-__all__ = ["cursors", "editing", "files", "mouse", "movement", "prefix", "prompts"]
+__all__ = [
+    "cursors",
+    "editing",
+    "evaluation",
+    "files",
+    "help",
+    "mouse",
+    "movement",
+    "prefix",
+    "prompts",
+]
 
 global_map.default = "self_insert"
 
@@ -51,6 +71,14 @@ _BINDINGS = {
     "M-x": "execute_command",
     "C-x 5 2": "new_frame",
     "C-x C-c": "engine.exit",
+    # evaluation
+    "C-x C-e": "eval_last_expression", "C-M-x": "eval_definition", "M-:": "eval_expression",
+    "C-c C-b": "eval_buffer", "C-c C-r": "eval_selection",
+    # help
+    "C-h k": "describe_key", "C-h x": "describe_command", "C-h v": "describe_option",
+    "C-h a": "apropos", "M-.": "find_source",
+    "<f1> k": "describe_key", "<f1> x": "describe_command", "<f1> v": "describe_option",
+    "<f1> a": "apropos",
     # mouse
     "<mouse-1>": "mouse.set_cursor", "<drag-mouse-1>": "mouse.drag",
     "M-<mouse-1>": "mouse.add_cursor",
@@ -72,6 +100,12 @@ MENU = [
     ("Edit/Paste", "yank"),
     ("Edit/Select All", "select_all"),
     ("Tools/Run Command…", "execute_command"),
+    ("Tools/Evaluate Buffer", "eval_buffer"),
+    ("Tools/Evaluate Definition", "eval_definition"),
+    ("Tools/Python REPL", "repl"),
+    ("Help/Describe Key…", "describe_key"),
+    ("Help/Describe Command…", "describe_command"),
+    ("Help/Search Commands…", "apropos"),
 ]
 
 

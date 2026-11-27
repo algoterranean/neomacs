@@ -366,6 +366,20 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.live.forget",
+   "kind": "function",
+   "signature": "(key: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.live.keep",
+   "kind": "function",
+   "signature": "(key: 'str', factory: 'Callable[[], T]') -> 'T'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.menu.Menu",
    "kind": "class",
    "signature": "() -> 'None'",

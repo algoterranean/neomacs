@@ -298,6 +298,60 @@ export async function runSmoke(
     u = await ui();
     check("f2.message_strip", u.chrome.message === "C-q is undefined", u.chrome.message);
 
+    // Step 7: redefine a built-in command and rebind a key from the scratch
+    // buffer; both take effect on the next keystroke.
+    results["engine.reevaluated"] = await pyJson<number>("ed.reevaluated");
+    await control.eval(
+      `_sc = ed.buffers.get('*scratch*')\n` +
+        `_sc.replace(0, len(_sc), "@command\\ndef end_of_line(sel: Selection) -> None:\\n    sel.start_of_line()\\n\\nglobal_map.bind('<f6>', 'end_of_line')\\n")\n` +
+        `${win}.show(_sc)`,
+    );
+    await settle();
+    press("c", ["control"]);
+    press("b", ["control"]);
+    await settle();
+    u = await ui();
+    const evaluated = u.chrome.message;
+    await control.eval(`${win}.show(_k); ${win}.selections.set([(5, 5)])`);
+    await settle();
+    press("End");
+    await settle();
+    const afterEnd = (await ui()).selections;
+    await control.eval(`${win}.selections.set([(5, 5)])`);
+    press("F6");
+    await settle();
+    const afterF6 = (await ui()).selections;
+    check(
+      "live.redefinition_and_binding_take_effect_on_the_next_key",
+      evaluated === "Evaluated" && JSON.stringify(afterEnd) === "[[1,0,1,0]]" && JSON.stringify(afterF6) === "[[1,0,1,0]]",
+      { evaluated, afterEnd, afterF6 },
+    );
+    press("x", ["alt"]);
+    await settle();
+    type("find_source");
+    press("Return");
+    await settle();
+    type("end_of_line");
+    press("Return");
+    await settle();
+    const sourceIn = await pyText(`${win}.buffer.name`);
+    // Put the real one back by evaluating its file, found through the same command.
+    await control.eval(`import neomacs.std.movement as _mvmod\n${win}.show(ed.buffers.visit(_mvmod.__file__))`);
+    await settle();
+    press("c", ["control"]);
+    press("b", ["control"]);
+    await settle();
+    await control.eval(`global_map.unbind('<f6>'); ${win}.show(_k); ${win}.selections.set([(5, 5)])`);
+    await settle();
+    press("End");
+    await settle();
+    const restored = (await ui()).selections;
+    check(
+      "live.find_source_and_restore_from_the_file",
+      sourceIn === "'*scratch*'" && JSON.stringify(restored) === "[[1,11,1,11]]" && (await pyText("ed.eval_warnings")) === "[]",
+      { sourceIn, restored, warnings: await pyText("ed.eval_warnings") },
+    );
+
     // Several cursors.
     await control.eval(`_k.replace(0, len(_k), 'aaa\\nbbb\\nccc'); ${win}.selections.set([(0, 0)])`);
     await settle();

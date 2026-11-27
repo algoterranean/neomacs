@@ -74,10 +74,17 @@ def test_ownership() -> None:
     own.record("mod2", "thing", "c", lambda: store.pop("c", None))
     assert own.owner_of("thing", "a") == "mod1"
     assert sorted(own.owned("mod1")) == [("thing", "a"), ("thing", "b")]
-    own.record("mod2", "thing", "b", lambda: store.pop("b", None))  # taken over
+    with own.tracking("mod2"):  # as while the module is being evaluated
+        own.record("mod2", "thing", "b", lambda: store.pop("b", None))  # taken over
     assert own.owned("mod1") == [("thing", "a")]
-    assert own.release("mod2", keep={("thing", "c")}) == [("thing", "b")]
+    # Evaluated again, the module registers "c" and "d" and no longer "b".
+    own.record("mod2", "thing", "late", lambda: store.pop("late", None))  # made when called
+    with own.tracking("mod2") as made:
+        own.record("mod2", "thing", "c", lambda: store.pop("c", None))
+    assert own.release("mod2", keep=made) == [("thing", "b")]  # not "late": not made by loading
     assert store == {"a": 1, "c": 3}
+    assert own.release("mod2") == [("thing", "c"), ("thing", "late")]
+    store["c"] = 3
     own.forget("thing", "a")
     assert own.release("mod1") == [] and store == {"a": 1, "c": 3}
 
