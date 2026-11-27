@@ -687,3 +687,21 @@ def test_the_search_box_goes_back_and_forward_through_its_history(ui: HeadlessUI
     assert ui.prompt.endswith(": two")
     assert value(ui, "[s.text for s in _w.selections]") == ["two"]
     ui.keys("C-g")
+
+
+def test_a_search_ended_with_another_buffer_in_its_window_lets_go_of_the_first(
+    ui: HeadlessUI,
+) -> None:
+    ui.eval("_b.replace(0, len(_b), 'foo bar foo'); _w.selections.set([(0, 0)])")
+    before = value(ui, "len(_b.display_preparers)")
+    ui.keys("C-s")
+    ui.type("foo")
+    assert value(ui, "len(_b.display_preparers)") == before + 1
+    ui.eval("_other = ed.buffers.new('elsewhere'); _w.show(_other)")
+    ui.keys("C-g")
+    assert value(ui, "len(_b.display_preparers)") == before
+    # Back in the first buffer, an edit does not bring the search's faces back.
+    ui.eval("_w.show(_b); _b.insert(0, 'foo ')")
+    ui.idle()
+    assert value(ui, "len(_b.layer('search'))") == 0
+    ui.eval("ed.buffers.kill(_other)")

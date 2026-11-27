@@ -236,7 +236,7 @@ async def _search(direction: int) -> None:
     search = Search(view, box, direction)
     box.buffer.locals["search"] = search
     box.on_change.add(search.changed)
-    view.buffer.display_preparers.append(search.refresh)
+    search.buffer.display_preparers.append(search.refresh)
     frame.place(box, PLACE)
     frame.focus_view(box.view)
     answer = box.answer()
@@ -246,8 +246,9 @@ async def _search(direction: int) -> None:
         accepted = True
     finally:
         box.close()
-        if search.refresh in view.buffer.display_preparers:
-            view.buffer.display_preparers.remove(search.refresh)
+        # From the buffer searched: the view may be showing another by now.
+        if search.refresh in search.buffer.display_preparers:
+            search.buffer.display_preparers.remove(search.refresh)
         search.finish(restore=not accepted)
         if answer.done() and not answer.cancelled():
             answer.exception()  # seen: nothing is left to warn about
