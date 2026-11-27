@@ -1,6 +1,6 @@
 # Electron frontend design
 
-Status: draft 5, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 6, 2026-11-27. Stages F0 and F1 are implemented in `frontend/`. The decisions in
 section 2 are confirmed.
 
 This describes the Electron frontend of `neomacs`. It is the client side of the
@@ -34,7 +34,7 @@ Non-goals:
 
 | # | Decision | Reason |
 |---|---|---|
-| F1 | One `BrowserWindow` is one frame and has one engine connection. The main process owns the socket and relays lines of JSON to the renderer unparsed. | Matches ENGINE D11. Keeping the socket in the main process lets a renderer reload without dropping the connection. |
+| F1 | One `BrowserWindow` is one frame and has one engine connection. The main process owns the socket and relays lines of JSON between it and the renderer, unparsed, over Electron's IPC. | Matches ENGINE D11. Keeping the socket in the main process lets a renderer reload without dropping the connection. |
 | F2 | Text is rendered with the DOM, one element per logical line, not on a canvas. | The browser already does shaping, wrapping, bidi, font fallback, images and hit testing. Rich text on a canvas means rebuilding all of it. |
 | F3 | The document is not `contenteditable`. Text input comes through the EditContext API. | The engine is the only thing that edits text. EditContext gives input-method support without letting the browser mutate the DOM. |
 | F4 | Selections and cursors are drawn by the frontend as overlay elements, not with the browser's native selection. | Multiple cursors and several selections (ENGINE D16) are not expressible as a native selection. |
@@ -51,7 +51,7 @@ Non-goals:
 
 ```
  Engine (Python)            Electron main (Node)              Renderer (sandboxed)
-┌───────────────┐  socket  ┌─────────────────────┐ MessagePort ┌────────────────────┐
+┌───────────────┐  socket  ┌─────────────────────┐     IPC     ┌────────────────────┐
 │ one connection│◄────────►│ one socket per       │◄──────────►│ protocol client     │
 │ per frame     │  JSON    │ window; clipboard;   │  lines of  │ model, layout, DOM  │
 └───────────────┘  lines   │ resources; menus     │  JSON      │ input, geometry     │
@@ -59,15 +59,20 @@ Non-goals:
 ```
 
 - **Main process.** Starts the engine, opens one connection per
-  window, and forwards each line of JSON to that window's renderer over a
-  `MessagePort` without parsing it. It also holds what a sandboxed renderer
+  window, and forwards each line of JSON to that window's renderer over IPC
+  without parsing it. It also holds what a sandboxed renderer
   may not: the system clipboard, native menus and dialogs, and the resource
   protocol (section 9).
 - **Renderer.** Parses messages, keeps the frame's model, renders, and sends
   input. It never touches the file system or the network.
-- **Preload script.** Exposes exactly one object to the page: the message
-  port and a handful of typed calls (`clipboardRead`, `clipboardWrite`,
-  `beep`, `setTitle`).
+- **Preload script.** Exposes exactly one object to the page, `neomacsHost`:
+  send a line, receive lines, learn how to attach (fresh, resync, or
+  reattach with a frame id and token), and report the frame once attached.
+  Clipboard, beep and similar calls are added to it as later stages need
+  them.
+- **The page itself** is served from a private scheme, `neomacs-app://`,
+  that maps only onto the bundled renderer files, so the content security
+  policy's `'self'` means exactly those files.
 
 **Starting the engine.** On launch the main process picks a socket path in
 the runtime directory (DISTRIBUTION.md section 5), starts the bundled engine
@@ -142,8 +147,10 @@ view (scroll container)
 ### 5.2 Faces
 
 `face_define(id, attrs)` generates one CSS rule, `.f<id> { … }`. Face 0 is
-applied to the view root, so everything else inherits from it. A `size`
-given as a multiple becomes `em`; `line_height`, weight, slant, colours,
+applied to the frame's root element, so everything else inherits from it. A
+`size` that is a number is a multiple and becomes `em`; a string such as
+`"12pt"` is an absolute size. Every value is checked before it is written
+into the sheet, so a face cannot inject CSS; `line_height`, weight, slant, colours,
 underline, strike and box map to the corresponding CSS properties. A theme
 change arrives as new `face_define` events and rewrites rules in place.
 
@@ -381,9 +388,12 @@ moving the cursor does not re-lay-out lines.
   with astral characters, combining sequences and bidirectional text.
 - **Security.** A corpus of hostile buffer contents (markup, script URLs,
   resource ids not defined) must render as inert text.
-- **End to end.** Playwright drives the packaged app against a real engine
-  for a small set of scenarios: type, scroll, split, prompt, reload,
-  reconnect.
+- **End to end.** `npm run smoke` starts the real app, off screen, against a
+  real engine and runs a script in the main process: open a 100,000-line
+  file in a proportional font, scroll, edit above and inside the viewport,
+  reload the page, show hostile text. It prints one line of JSON results and
+  exits 0 or 1. Scenarios are added to it as stages land (type, split,
+  prompt, reconnect).
 - **Performance.** The budgets in section 11.
 
 ## 13. Implementation stages

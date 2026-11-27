@@ -38,6 +38,23 @@ jobs:
       - name: API manifest is up to date
         run: uv run --python .venv python -m neomacs.tools.manifest --check
 
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # `npm run smoke` needs a display and the engine; it is run by hand for now.
+
   wheel:
     name: wheel installs and starts
     runs-on: ubuntu-latest

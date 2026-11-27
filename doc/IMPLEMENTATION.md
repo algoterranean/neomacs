@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: plan written 2026-11-27. Steps 1 to 3 done; see the progress log (section 9).
+Status: plan written 2026-11-27. Steps 1 to 4 and Gate A done; step 5 is next. See the progress log (section 9).
 
 This is the working checklist for building Neomacs. It puts the stages of the
 five design documents into one order and says, for each step, what to read,
@@ -225,21 +225,21 @@ DISTRIBUTION 7 (the app starts its own engine).
 
 **Build:**
 
-- [ ] `frontend/`: TypeScript project, pinned Electron, build and test
+- [x] `frontend/`: TypeScript project, pinned Electron, build and test
       scripts, lock file.
-- [ ] Main process: choose a socket path, start the engine as a child,
+- [x] Main process: choose a socket path, start the engine as a child,
       connect, relay lines to the renderer over a `MessagePort`.
-- [ ] Preload with the minimal exposed surface; sandbox, context isolation
+- [x] Preload with the minimal exposed surface; sandbox, context isolation
       and content security policy as in FRONTEND 9.
-- [ ] Renderer protocol client and the per-frame, per-view model.
-- [ ] Line rendering from runs; faces as generated CSS rules; `tab-size`;
+- [x] Renderer protocol client and the per-frame, per-view model.
+- [x] Line rendering from runs; faces as generated CSS rules; `tab-size`;
       wrap modes.
-- [ ] Height index, virtual scrolling, scroll anchoring, placeholders for
+- [x] Height index, virtual scrolling, scroll anchoring, placeholders for
       lines not held.
-- [ ] `view.viewport` reports; `reveal`.
-- [ ] Render on `flush`, acknowledge after paint, immediately when hidden.
-- [ ] `reset` and `ui.resync` on reload.
-- [ ] The security corpus test: hostile buffer text renders inert.
+- [x] `view.viewport` reports; `reveal`.
+- [x] Render on `flush`, acknowledge after paint, immediately when hidden.
+- [x] `reset` and `ui.resync` on reload.
+- [x] The security corpus test: hostile buffer text renders inert.
 
 **Done when:** the app starts with no terminal involved, opens a large file,
 scrolls it smoothly in a proportional font with a second face at a larger
@@ -250,13 +250,13 @@ size, and shows the same thing after the page is reloaded.
 The protocol's central bet is that the frontend owns layout (ENGINE D5). The
 terminal frontend cannot test it. Before building the command system on top:
 
-- [ ] Scrolling a 100,000-line file never shows a placeholder for more than
+- [x] Scrolling a 100,000-line file never shows a placeholder for more than
       a frame or two at ordinary scrolling speed.
-- [ ] Editing near the top of a long wrapped file does not make the viewport
+- [x] Editing near the top of a long wrapped file does not make the viewport
       jump.
-- [ ] The line-based `lines` splice was sufficient; note any event that had
+- [x] The line-based `lines` splice was sufficient; note any event that had
       to be added or changed.
-- [ ] Any protocol change is made in ENGINE 4 and in both frontends now.
+- [x] Any protocol change is made in ENGINE 4 and in both frontends now.
 
 Record the outcome in the progress log, including "no changes needed".
 
@@ -681,4 +681,6 @@ Add a row when a step or gate is finished, or when the design changed.
 | 2026-11-27 | Step 1 | this commit | Done except CI, which is written but has never run (no remote). PyPI name not registered (needs the user). Differences from the design: `wcwidth` dropped in favour of `unicodedata`, since its current release ships compiled wheels (ENGINE 12, DISTRIBUTION 3.1 updated); `engine.exit` notification, the `NEOMACS-LISTENING` readiness line and `--exit-with-parent` added (ENGINE 4.1, 4.2). Verified by hand: `1 + 1` over a socket and over stdio; an exception returns an error and the engine keeps running; a built wheel installs into a clean free-threaded 3.15 environment and starts with the GIL disabled. |
 | 2026-11-27 | Step 2 | this commit | Done. No differences from the design. `GraphemeBreakTest.txt` for Unicode 17.0 is vendored under `tests/data/` (Unicode licence) so the test needs no network; it is skipped if the library's Unicode version has no matching file. The type checker's stubs do not know `unicodedata.iter_graphemes` yet, so that one call is typed as `Any`. Verified by hand over `engine.eval`: open a file, edit, undo, save. |
 | 2026-11-27 | Step 3 | this commit | Done. Protocol additions, all now in ENGINE 4: the `held` event and the three rules for what a frontend holds (the design said only "the held range"); `ui_faces`, so a frontend knows which face ids to draw selections, cursors and the gutter with; `engine.idle` for tests; `<space>` as the name of the space key. Other differences: the engine keeps an estimate of the viewport when a view shows another buffer or lines change above it, because a frontend reports its viewport only when it changes; frames are checked for updates after every RPC call, so a cursor moved by evaluated code is shown. A window's cursor advances when text is inserted exactly at it. The first conformance recording is `tests/data/sessions/basic.json`, made by `python -m neomacs.tools.record`. Verified by hand: none beyond the tests, which drive the terminal frontend in a pseudo-terminal (open a file, move, type, undo, quit) and reattach after a dropped connection. |
+| 2026-11-27 | Step 4 | this commit | Done: Electron 45.5.0, TypeScript, no framework. Differences from the design, now in FRONTEND.md: lines are relayed over Electron IPC, not a `MessagePort`; the page is served from a private `neomacs-app://` scheme; a face `size` that is a number is a multiple and a string like `"12pt"` is absolute. Verified by `npm run smoke`, which runs the real app off screen against a real engine: every check passes. **Not verified:** the app with a visible window, by a person. Run `cd frontend && npm start -- FILE` to see it. There is no cursor or keyboard input yet; those are step 6. The frontend's CI job is written but has not run. |
+| 2026-11-27 | Gate A | this commit | Passed, with no protocol changes needed. (1) Scrolling a 100,000-line file at 120 px per frame (about 7,000 px per second): no frame out of 150 showed a line that had not arrived. At 1,500 px per frame, the speed of dragging the scroll bar, every frame did; the view fills in as soon as scrolling stops. That is the designed behaviour (placeholders), but if it looks bad in practice the margin of held lines (two pages) is the thing to tune. (2) Inserting three lines at the top, lengthening a wrapped line above the viewport and deleting fifty lines above it left the first visible line the same text at the same pixel position (within 0.1 px). (3) The line-based splice was sufficient. The `held` and `ui_faces` events had already been added in step 3. (4) Reloading the page returned the same frame and the same top line. |
 | | | | |

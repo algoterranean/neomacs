@@ -1,0 +1,90 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Face 0 is applied here by the generated sheet; these are the fallbacks. */
+.nm-frame {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  color: #d4d4d4;
+  background: #1e1e1e;
+  font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: text;
+  user-select: none;
+}
+
+.nm-view {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.nm-scroller {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  /* The frontend keeps the viewport on the same text itself (FRONTEND 5.4). */
+  overflow-anchor: none;
+}
+
+.nm-spacer {
+  width: 1px;
+  visibility: hidden;
+}
+
+.nm-lines {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+}
+
+.nm-line {
+  display: flex;
+  align-items: flex-start;
+}
+
+.nm-gutter-col {
+  flex: none;
+  box-sizing: border-box;
+  padding-right: 1ch;
+  text-align: right;
+  white-space: pre;
+  font-variant-numeric: tabular-nums;
+}
+
+.nm-content {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.nm-nowrap .nm-content {
+  white-space: pre;
+}
+
+/* An empty line still takes up a line. */
+.nm-content:empty::before {
+  content: "\200b";
+}
+
+.nm-modeline {
+  flex: none;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.nm-status {
+  padding: 1em;
+  white-space: pre-wrap;
+}

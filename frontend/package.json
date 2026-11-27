@@ -1,0 +1,22 @@
+{
+  "name": "neomacs-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The Electron frontend of Neomacs",
+  "license": "MIT",
+  "type": "module",
+  "main": "out/main.cjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.ts\"",
+    "start": "node build.mjs && electron .",
+    "smoke": "node build.mjs && electron . --smoke"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.11",
+    "electron": "45.5.0",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}
