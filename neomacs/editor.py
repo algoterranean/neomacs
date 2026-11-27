@@ -528,20 +528,21 @@ class Editor:
             previous_sigint = signal.signal(signal.SIGINT, self._on_sigint)
         listener: Listener | None = None
         try:
+            if os.environ.get("NEOMACS_REEVALUATE"):
+                # Gate D: live-patch the standard modules before serving anyone.
+                from neomacs.tools import reevaluate
+
+                await reevaluate.all_modules()
+            # The user's own code has the last word (EXTENSIONS 6.1).  It is
+            # loaded before any connection is opened, on a socket or on
+            # stdio, so that no client is served by an engine half configured.
+            await startup.load_user_code(self)
             if listen is not None:
                 listener = Listener(listen, self._accept_from_thread)
                 self.listen_path = listen
                 listener.start()
             if stdio:
                 self._add_connection(Connection(self, stdio_transport()))
-            if os.environ.get("NEOMACS_REEVALUATE"):
-                # Gate D: live-patch the standard modules before serving anyone.
-                from neomacs.tools import reevaluate
-
-                await reevaluate.all_modules()
-            # The user's own code has the last word, and is loaded before
-            # anyone is served (EXTENSIONS 6.1).
-            await startup.load_user_code(self)
             if ready is not None:
                 ready()
             await self._stop.wait()

@@ -84,8 +84,11 @@ def _environment(env: Mapping[str, str] | None) -> dict[str, str] | None:
 _GROUP: dict[str, Any] = {"start_new_session": True} if sys.platform != "win32" else {}
 
 
-def _signal(process: asyncio.subprocess.Process, signum: int) -> None:
-    if process.returncode is not None:
+def _signal(process: asyncio.subprocess.Process, signum: int, *, group: bool = False) -> None:
+    """Send SIGNUM to PROCESS and what it started.  With GROUP, also when the
+    process itself has exited: a shell can exit and leave a program it put in
+    the background holding the output open."""
+    if process.returncode is not None and not group:
         return
     with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
         if sys.platform != "win32":
@@ -127,11 +130,11 @@ async def run(
         async with asyncio.timeout(timeout):
             out, err = await process.communicate(data)
     except TimeoutError:
-        _signal(process, _SIGKILL)
+        _signal(process, _SIGKILL, group=True)
         await process.wait()
         raise ProcessError(f"{args[0]} did not finish in {timeout:g} seconds") from None
     except BaseException:
-        _signal(process, _SIGKILL)
+        _signal(process, _SIGKILL, group=True)
         with contextlib.suppress(BaseException):
             await asyncio.shield(process.wait())
         raise
@@ -207,8 +210,10 @@ class Process:
     def _send(self, signum: int) -> None:
         if self._process is None:
             self._stop = signum
-        else:
-            _signal(self._process, signum)
+        elif self.running:
+            # Still being served, so something of its group may be alive even
+            # if the program first started is not.
+            _signal(self._process, signum, group=True)
 
     @provisional("0.1")
     def interrupt(self) -> None:
@@ -278,7 +283,7 @@ class Process:
                 self.returncode = await process.wait()
             except BaseException:
                 # The task was cancelled, or the engine is stopping: take the program with it.
-                _signal(process, _SIGKILL)
+                _signal(process, _SIGKILL, group=True)
                 with contextlib.suppress(BaseException):
                     self.returncode = await asyncio.shield(process.wait())
                 raise
@@ -323,8 +328,11 @@ class Process:
             buffer.insert(end, text)
             limit = int(self.editor.options.process_output_limit)
             if len(buffer) > limit + limit // 4:
-                cut = buffer.line_start(buffer.line_of(len(buffer) - limit))
-                buffer.delete(0, cut)
+                keep_from = len(buffer) - limit
+                cut = buffer.line_start(buffer.line_of(keep_from))
+                # At a line's start where there is one to be had; a single
+                # line longer than the limit is cut where it must be.
+                buffer.delete(0, cut if cut > 0 else keep_from)
         finally:
             buffer.read_only = read_only
         # Output is not an edit: nothing to undo, nothing to save.

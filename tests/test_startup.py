@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -228,3 +231,25 @@ def test_no_configuration_at_all_is_not_an_error(tmp_path: Path) -> None:
     with running_engine(env=env_for(tmp_path / "absent")) as path, Client(path) as c:
         assert value(c, "[m for m in ed.messages if 'rror' in m]") == []
         assert not (tmp_path / "absent").exists()  # and nothing is created by starting
+
+
+def test_a_client_on_stdio_is_not_served_before_the_init_file_has_run(tmp_path: Path) -> None:
+    # A client on stdio has no line to wait for: its requests are there from
+    # the start.  The init file here takes its time.
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "init.py").write_text(
+        "import asyncio\nfrom neomacs import ed\n"
+        "await asyncio.sleep(0.4)\ned.options.tab_width = 3\n"
+    )
+    lines = (
+        b'{"jsonrpc":"2.0","id":1,"method":"engine.eval","params":["ed.options.tab_width"]}\n'
+        b'{"jsonrpc":"2.0","method":"engine.exit","params":[]}\n'
+    )
+    env = dict(os.environ, NEOMACS_DATA_DIR=str(tmp_path / "data"), **env_for(config))
+    done = subprocess.run(
+        [sys.executable, "-m", "neomacs", "--stdio"],
+        input=lines, capture_output=True, timeout=20, env=env,
+    )  # fmt: skip
+    assert done.returncode == 0
+    assert json.loads(done.stdout)["result"] == "3"

@@ -1830,12 +1830,14 @@ Not done, or known to be wrong:
     output; any other view is left where it is. The buffer is not marked
     modified and keeps no undo history for output. Beyond the
     `process_output_limit` option (2,000,000 characters) the oldest output is
-    dropped.
+    dropped, whole lines where there are lines.
   - The handle has `pid`, `returncode`, `running`, `write`, `close_input`,
     `interrupt`, `terminate`, `kill` and `await wait()`. A program that could
     not be started sets `error` on the handle and still calls `on_exit`.
   - On Unix a program runs in a process group of its own, and the signals go
-    to the group, so killing a shell kills its pipeline.
+    to the group, so killing a shell kills its pipeline. They go to the group
+    for as long as the handle is being served, which is until the output is
+    closed: a shell may exit and leave a program in the background holding it.
   - Cancelling a command that awaits `ed.run` kills the program. A spawned
     program is a task in `ed.tasks`, and is killed if still running when the
     engine stops.
@@ -1881,6 +1883,11 @@ journal keeps the text of every buffer with unsaved changes on disk.
   the wait before the next write is at least fifty times what taking it cost
   the last time. Up to that much typing can be lost.
 - **An entry is removed** when its buffer is saved or killed.
+- **Order.** Writes happen in a worker thread; removals, and the writes made
+  when the engine stops, happen on the owner thread. A lock keeps them
+  apart, and every step carries a number given when it was decided, so one
+  that reaches the disk after a later step for the same entry is dropped.
+  An older text cannot replace a newer one or bring back a removed entry.
 - **At exit** the engine writes what was waiting and keeps the entries of
   buffers that are still unsaved. This is also the present answer to what
   happens to unsaved buffers when the editor is closed (section 16): they

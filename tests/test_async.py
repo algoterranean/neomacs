@@ -309,6 +309,51 @@ def test_old_output_is_dropped_past_the_limit(client: Client) -> None:
     assert len(text) <= 2500 and text.endswith("line 1999\n") and text.startswith("line ")
 
 
+def test_one_line_longer_than_the_limit_is_still_cut(client: Client) -> None:
+    client.eval(
+        "ed.options.process_output_limit = 2000; _out = ed.buffers.new('output')\n"
+        f"_p = ed.spawn([{PY!r}, '-c', 'import sys; sys.stdout.write(\"x\" * 50000 + \"END\")'], "
+        "buffer=_out)"
+    )
+    wait_for(lambda: value(client, "_p.running") is False)
+    size, tail = value(client, "(len(_out), _out.text[-3:])")
+    client.eval("ed.options.unset('process_output_limit')")
+    assert size <= 2500 and tail == "END"
+
+
+def test_a_program_the_shell_left_in_the_background_can_still_be_stopped(
+    client: Client, tmp_path: Path
+) -> None:
+    if sys.platform == "win32":
+        pytest.skip("process groups")
+    # The shell exits at once.  What it started holds the output open, so the
+    # handle is still being served, and stopping it must reach that program.
+    marker = tmp_path / "pid"
+    code = f"import os, time; open({str(marker)!r}, 'w').write(str(os.getpid())); time.sleep(60)"
+    line = f"{PY} -c {code!r} & echo started"
+    client.eval(f"_seen = []; _p = ed.spawn(['/bin/sh', '-c', {line!r}], on_output=_seen.append)")
+    wait_for(lambda: value(client, "_seen") == ["started\n"] and marker.exists())
+    wait_for(lambda: marker.read_text() != "")
+    child = int(marker.read_text())
+    time.sleep(0.3)  # the shell has gone by now
+    assert value(client, "_p.running") is True
+    began = time.monotonic()
+    client.eval("_p.kill()")
+    wait_for(lambda: value(client, "_p.running") is False)
+    assert time.monotonic() - began < 5
+
+    def gone() -> bool:
+        import os
+
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            return True
+        return False
+
+    wait_for(gone)
+
+
 def test_a_running_program_is_killed_when_the_engine_stops(tmp_path: Path) -> None:
     import os
 

@@ -14,6 +14,7 @@ import itertools
 import json
 import os
 import shutil
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -144,6 +145,10 @@ class Journal:
         self._changed: set[Buffer] = set()
         self._timer: Any = None
         self._flushing = False
+        # Steps are numbered in the order they were decided on the owner thread.
+        self._order = itertools.count(1)
+        self._done: dict[Path, int] = {}  # the latest step done for each file
+        self._io = threading.Lock()
         self._cost = 0.0  # seconds the last round took of the main loop
         self._offered = False
         self._too_long: set[str] = set()
@@ -207,10 +212,10 @@ class Journal:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self._lock_fd = fd
 
-    def _take(self) -> tuple[list[tuple[Path, dict[str, Any]]], list[Path]]:
-        """What to write and what to remove, for the buffers that have changed."""
-        writes: list[tuple[Path, dict[str, Any]]] = []
-        removes: list[Path] = []
+    def _take(self) -> list[tuple[int, Path, dict[str, Any] | None]]:
+        """What to do for the buffers that have changed: (order, file, the
+        entry to write there or None to remove it)."""
+        steps: list[tuple[int, Path, dict[str, Any] | None]] = []
         changed, self._changed = self._changed, set()
         for buffer in changed:
             if self.wanted(buffer):
@@ -221,18 +226,28 @@ class Journal:
                     "time": time.time(),
                     "text": buffer.store.snapshot(),
                 }
-                writes.append((self._path(buffer), record))
+                steps.append((next(self._order), self._path(buffer), record))
             elif _ID in buffer.locals:
-                removes.append(self._path(buffer))
-        return writes, removes
+                steps.append((next(self._order), self._path(buffer), None))
+        return steps
 
-    @staticmethod
-    def _apply(writes: list[tuple[Path, dict[str, Any]]], removes: list[Path]) -> None:
-        for path, record in writes:
-            _write(path, record)
-        for path in removes:
-            with contextlib.suppress(OSError):
-                path.unlink()
+    def _apply(self, steps: list[tuple[int, Path, dict[str, Any] | None]]) -> None:
+        """Write and remove entries.  This runs in a worker thread, and also on
+        the owner thread when a buffer is saved or killed and when the engine
+        stops, so the two are kept apart by a lock; and a step is passed over
+        if a later one for the same file has been done already, so that an
+        older text never replaces a newer one or brings back an entry that
+        was removed."""
+        for order, path, record in steps:
+            with self._io:
+                if order < self._done.get(path, 0):
+                    continue
+                self._done[path] = order
+                if record is not None:
+                    _write(path, record)
+                else:
+                    with contextlib.suppress(OSError):
+                        path.unlink()
 
     async def flush(self) -> None:
         """Write the buffers that have changed.  The text is taken here, on the
@@ -243,12 +258,12 @@ class Journal:
         self._flushing = True
         try:
             began = time.perf_counter()
-            writes, removes = self._take()
-            if writes:
+            steps = self._take()
+            if any(record is not None for _, _, record in steps):
                 self._open()
             self._cost = time.perf_counter() - began
-            if writes or removes:
-                await self.editor.in_thread(self._apply, writes, removes)
+            if steps:
+                await self.editor.in_thread(self._apply, steps)
         except OSError as exc:
             self.editor.note_once(f"The recovery journal could not be written: {exc}")
         finally:
@@ -260,8 +275,7 @@ class Journal:
         """BUFFER has nothing unsaved any more: its entry goes at once."""
         self._changed.discard(buffer)
         if _ID in buffer.locals:
-            with contextlib.suppress(OSError):
-                self._path(buffer).unlink()
+            self._apply([(next(self._order), self._path(buffer), None)])
 
     def close(self) -> None:
         """The engine is stopping: write what is waiting, and let go of the directory.
@@ -270,10 +284,10 @@ class Journal:
             self._timer.cancel()
             self._timer = None
         with contextlib.suppress(OSError):
-            writes, removes = self._take()
-            if writes:
+            steps = self._take()
+            if any(record is not None for _, _, record in steps):
                 self._open()
-            self._apply(writes, removes)
+            self._apply(steps)  # waits for a write that is under way, and goes after it
         fd, self._lock_fd = self._lock_fd, None
         if fd is None:
             return

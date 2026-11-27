@@ -333,3 +333,46 @@ def test_a_buffer_that_is_costly_to_take_is_written_less_often(tmp_path: Path) -
         ui.eval("ed.journal._timer.cancel(); ed.journal._timer = None; ed.journal._cost = 0.0")
         ui.eval("_u.insert(0, 'c')")
         assert value(ui.client, "ed.journal._timer.seconds") == 0.02
+
+
+def test_an_older_write_never_replaces_a_newer_one_or_brings_an_entry_back(tmp_path: Path) -> None:
+    # A write runs in a worker thread.  The engine may stop, or the buffer be
+    # saved, while one is still on its way: whichever was decided later wins,
+    # in whatever order they reach the disk.
+    data = tmp_path / "data"
+    with engine(data) as ui:
+        ui.eval("ed.options.journal_delay = 600.0")  # nothing is written but what is asked for
+        ui.eval("_u = ed.buffers.new('untitled'); _u.insert(0, 'first')")
+        ui.eval("_older = ed.journal._take(); ed.journal._open()")
+        ui.eval("_u.insert(len(_u), ' second'); _newer = ed.journal._take()")
+        ui.eval("ed.journal._apply(_newer); ed.journal._apply(_older)")
+        assert texts(data) == {"untitled": "first second"}
+        # Removed, as when the buffer is saved, with a write still on its way.
+        ui.eval("_u.insert(len(_u), ' third'); _late = ed.journal._take()")
+        ui.eval("ed.journal.forget(_u); ed.journal._apply(_late)")
+        assert texts(data) == {}
+        # And an entry written after that is not held back by it.
+        ui.eval("_u.insert(len(_u), ' fourth'); ed.journal._apply(ed.journal._take())")
+        assert texts(data) == {"untitled": "first second third fourth"}
+
+
+def test_stopping_waits_for_a_write_that_is_under_way(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    with engine(data) as ui:
+        ui.eval("_u = ed.buffers.new('untitled'); _u.insert(0, 'first')")
+        wait_for(lambda: texts(data) == {"untitled": "first"})
+        # Make each write slow, change the text twice with a write between, and stop.
+        ui.eval(
+            "import time, neomacs.journal as _j; _w0 = _j._write\n"
+            "def _slow(path, record):\n    time.sleep(0.3)\n    _w0(path, record)\n"
+            "_j._write = _slow"
+        )
+        ui.eval("_u.insert(len(_u), ' second')")
+        wait_for(lambda: value(ui.client, "ed.journal._flushing") is True)
+        ui.eval("_u.insert(len(_u), ' third')")
+        ui.client.notify("engine.call", "engine.exit", [])
+        wait_for(lambda: texts(data) == {"untitled": "first second third"})
+        time.sleep(0.5)
+        assert texts(data) == {"untitled": "first second third"}
+        (session,) = list((data / "journal").iterdir())
+        assert sorted(p.name for p in session.iterdir()) == ["1.json", "lock"]
