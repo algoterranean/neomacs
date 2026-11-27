@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -66,6 +68,41 @@ def test_a_linked_worktree(tmp_path: Path) -> None:
     assert vcs.branch(root / "a") == "main"
 
 
+def test_a_head_that_is_not_a_file_is_not_waited_on(tmp_path: Path) -> None:
+    # Reading a named pipe that nothing writes to would never return.
+    root = tmp_path / "project"
+    (root / ".git").mkdir(parents=True)
+    os.mkfifo(root / ".git" / "HEAD")
+    answers: list[str | None] = []
+    asking = threading.Thread(target=lambda: answers.append(vcs.branch(root / "a")), daemon=True)
+    asking.start()
+    asking.join(5)
+    assert answers == [None]
+    # Nor a `.git` that is a pipe, where a worktree has a file.
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    os.mkfifo(tree / ".git")
+    assert vcs.branch(tree / "a") is None
+
+
+def test_only_the_start_of_a_huge_head_is_read(tmp_path: Path) -> None:
+    root = repo(tmp_path, "ref: refs/heads/main\n" + "x" * 1_000_000)
+    assert vcs.branch(root / "a") == "main"
+
+
+def test_a_repository_made_later_nearer_the_file_is_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outer = repo(tmp_path / "outer", "ref: refs/heads/outer\n")
+    inner = outer / "vendor" / "inner"
+    inner.mkdir(parents=True)
+    assert vcs.branch(inner / "a") == "outer"
+    repo(inner, "ref: refs/heads/inner\n")
+    assert vcs.branch(inner / "a") == "outer"  # not looked for again yet
+    monkeypatch.setattr(vcs, "_RECHECK", 0.0)
+    assert vcs.branch(inner / "a") == "inner"
+
+
 def test_a_repository_made_by_git(tmp_path: Path) -> None:
     try:
         subprocess.run(
@@ -90,3 +127,17 @@ def test_the_modeline_shows_the_branch(ui: HeadlessUI, tmp_path: Path) -> None:
     assert ui.modeline_right == " \u2387 another "
     ui.call("files.find", str(tmp_path / "loose.txt"))
     assert ui.modeline == " - loose.txt   L1 C0   (text) " and ui.modeline_right == ""
+
+
+def test_a_branch_name_in_wide_characters_stays_inside_its_window(
+    ui: HeadlessUI, tmp_path: Path
+) -> None:
+    root = repo(tmp_path / "project", "ref: refs/heads/feature/\u4e2d\u6587\n")
+    (root / "wide.txt").write_text("text\n")
+    ui.call("files.find", str(root / "wide.txt"))
+    assert ui.modeline_right == " \u2387 feature/\u4e2d\u6587 "
+    cells = ui.compose()[-1]
+    assert len(cells) == 60  # one entry for each column, and none past the edge
+    row = "".join(text for text, _ in cells)
+    # 16 columns: the two wide characters take two each, so 14 characters.
+    assert row == " - wide.txt   L1 C0   (text) ".ljust(60 - 16) + " \u2387 feature/\u4e2d\u6587 "

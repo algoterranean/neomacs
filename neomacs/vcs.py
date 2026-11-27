@@ -8,6 +8,7 @@ view update.
 from __future__ import annotations
 
 import os
+import stat
 import time
 from pathlib import Path
 
@@ -15,13 +16,30 @@ from pathlib import Path
 # the alternative key symbol, is what is generally used for it.
 BRANCH_SYMBOL = "\u2387"
 
-# How long a directory found outside any repository is taken to still be so.
+# How long what was found for a directory, a repository or none, is taken to
+# still be so.  A repository made later, around the file or nearer to it than
+# the one found, is noticed after this long.
 _RECHECK = 5.0
+# As much of a file as is read.  Both files read here are a line long.
+_READ_LIMIT = 4096
 
 # directory -> (the HEAD file of the repository it is in, when that was looked up)
 _heads: dict[Path, tuple[Path | None, float]] = {}
 # HEAD file -> (what stat said about it, the branch read from it)
 _branches: dict[Path, tuple[tuple[int, int, int], str | None]] = {}
+
+
+def _read_start(path: Path) -> str:
+    """The start of the regular file at PATH.  Anything else there (a named pipe
+    with nothing writing to it, say) raises OSError rather than being waited on:
+    this runs on the editor's main loop, on files a project supplies."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{path} is not a regular file")
+        return os.read(fd, _READ_LIMIT).decode("utf-8", errors="replace")
+    finally:
+        os.close(fd)
 
 
 def _find_head(directory: Path) -> Path | None:
@@ -32,7 +50,7 @@ def _find_head(directory: Path) -> Path | None:
             if dot_git.is_dir():
                 return dot_git / "HEAD"
             if dot_git.is_file():  # a linked worktree or a submodule
-                first = dot_git.read_text(errors="replace").split("\n", 1)[0]
+                first = _read_start(dot_git).split("\n", 1)[0]
                 if first.startswith("gitdir:"):
                     return parent / first[len("gitdir:") :].strip() / "HEAD"
         except OSError:
@@ -41,7 +59,7 @@ def _find_head(directory: Path) -> Path | None:
 
 
 def _parse_head(text: str) -> str | None:
-    head = text.strip()
+    head = text.split("\n", 1)[0].strip()
     if head.startswith("ref:"):
         ref = head[len("ref:") :].strip()
         name = ref.removeprefix("refs/heads/")
@@ -58,7 +76,7 @@ def branch(file: Path | None) -> str | None:
     directory = file.parent
     now = time.monotonic()
     found = _heads.get(directory)
-    if found is None or (found[0] is None and now - found[1] > _RECHECK):
+    if found is None or now - found[1] > _RECHECK:
         found = _heads[directory] = (_find_head(directory), now)
     head = found[0]
     if head is None:
@@ -69,12 +87,14 @@ def branch(file: Path | None) -> str | None:
         _heads.pop(directory, None)  # the repository went away: look again next time
         _branches.pop(head, None)
         return None
+    if not stat.S_ISREG(st.st_mode):
+        return None
     key = (st.st_mtime_ns, st.st_size, st.st_ino)
     cached = _branches.get(head)
     if cached is not None and cached[0] == key:
         return cached[1]
     try:
-        name = _parse_head(head.read_text(errors="replace"))
+        name = _parse_head(_read_start(head))
     except OSError:
         name = None
     _branches[head] = (key, name)
