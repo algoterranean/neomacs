@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -82,6 +83,10 @@ def test_what_the_user_types_to_add_an_extension(tmp_path: Path) -> None:
         "x", git="ssh://git@example.org/r.git"
     )
     assert parse("my-tools @ ~/src/my-tools") == Wanted("my-tools", path="~/src/my-tools")
+    # A relative path is relative to where the command was run, when that is known.
+    assert parse("tools @ ./tools", base=tmp_path) == Wanted("tools", path=str(tmp_path / "tools"))
+    assert parse("tools @ ./tools") == Wanted("tools", path="./tools")
+    assert parse("tools @ /abs/tools", base=tmp_path) == Wanted("tools", path="/abs/tools")
     project = tmp_path / "proj"
     project.mkdir()
     (project / "pyproject.toml").write_text('[project]\nname = "from-its-project"\n')
@@ -120,6 +125,49 @@ def test_editing_the_manifest_keeps_what_the_user_wrote(tmp_path: Path) -> None:
     assert fresh.read_text() == '[extensions]\na = "*"\n'
     manifest_module.edit(fresh, remove="absent")
     assert fresh.read_text() == '[extensions]\na = "*"\n'
+
+
+def test_an_entry_is_edited_however_it_was_written(tmp_path: Path) -> None:
+    path = tmp_path / "extensions.toml"
+    path.write_text(
+        "[extensions]\n"
+        'plain = "*"   # keep\n'
+        'dotted.path = "~/d"\n'
+        "dotted.editable = true\n"
+        "\n"
+        "[extensions.tabled]\n"
+        'path = "~/t"\n'
+        "editable = true\n"
+        "\n"
+        "[resolver]\n"
+        "offline = true\n"
+    )
+    assert sorted(manifest_module.read(path).wanted) == ["dotted", "plain", "tabled"]
+    manifest_module.edit(path, remove="tabled")
+    assert sorted(manifest_module.read(path).wanted) == ["dotted", "plain"]
+    manifest_module.edit(path, add=Wanted("dotted", ">=2"))  # replaced, not defined twice
+    assert manifest_module.read(path).wanted["dotted"] == Wanted("dotted", ">=2")
+    assert path.read_text() == (
+        '[extensions]\nplain = "*"   # keep\ndotted = ">=2"\n\n[resolver]\noffline = true\n'
+    )
+    # A table of its own is replaced by a line in the main table.
+    path.write_text('[extensions.tabled]\npath = "~/t"\n')
+    manifest_module.edit(path, add=Wanted("tabled", "==1"))
+    assert manifest_module.read(path).wanted == {"tabled": Wanted("tabled", "==1")}
+
+
+def test_an_edit_that_would_spoil_the_file_leaves_it_alone(tmp_path: Path) -> None:
+    path = tmp_path / "extensions.toml"
+    # Written in a way the editing does not understand: an inline table for the whole section.
+    original = 'extensions = { odd = "*" }\n'
+    path.write_text(original)
+    assert sorted(manifest_module.read(path).wanted) == ["odd"]
+    with pytest.raises(ManifestError, match="extensions.toml"):
+        manifest_module.edit(path, add=Wanted("more"))
+    with pytest.raises(ManifestError, match="could not be removed by editing"):
+        manifest_module.edit(path, remove="odd")
+    assert path.read_text() == original
+    assert list(tmp_path.iterdir()) == [path]  # and no trial file is left
 
 
 # -- extensions.lock ---------------------------------------------------------------------
@@ -234,11 +282,12 @@ def test_the_lock_file_round_trips_and_says_what_to_install(tmp_path: Path) -> N
     project.mkdir(parents=True)
     lock = lock_module.from_uv(UV_LOCK, project, {"neomacs"})
     path = tmp_path / "extensions.lock"
+    lock.wanted = "0123456789abcdef"
     lock.write(path)
     assert lock_module.read(path) == lock
     assert lock_module.read(tmp_path / "absent.lock") is None
     stub = tmp_path / "neomacs-0.0.1-py3-none-any.whl"
-    text, where = lock_module.requirements(lock, {"neomacs": stub})
+    text, where = lock_module.requirements(lock, {"neomacs": stub}, {"neomacs": "0.0.1"})
     assert text.split("\n") == [
         f"a-directory @ {(tmp_path / 'src' / 'a-directory').resolve().as_uri()}",
         "compiled-for-both==3.0 --hash=sha256:cc --hash=sha256:dd",
@@ -251,9 +300,12 @@ def test_the_lock_file_round_trips_and_says_what_to_install(tmp_path: Path) -> N
         "",
     ]
     assert where == ["--index-url", "https://pypi.org/simple"]
-    # A lock made for another engine cannot be installed for this one.
+    # A lock made for another engine cannot be installed for this one: what is
+    # in it was chosen to go with that engine.
+    with pytest.raises(lock_module.LockError, match="has neomacs 0.0.1, and this one has 0.2"):
+        lock_module.requirements(lock, {"neomacs": stub}, {"neomacs": "0.2"})
     with pytest.raises(lock_module.LockError, match="neomacs ext upgrade"):
-        lock_module.requirements(lock, {})
+        lock_module.requirements(lock, {}, {})
     path.write_text("format = 99\n")
     with pytest.raises(lock_module.LockError, match="format 99"):
         lock_module.read(path)
@@ -343,10 +395,11 @@ def test_two_extensions_with_a_shared_dependency_install_and_a_third_that_confli
         with pytest.raises(ExtensionError) as refused:
             await env.plan(env.with_change(add=manifest_module.parse_request("neomacs-c")))
         message = str(refused.value)
-        assert message.startswith("These extensions cannot be installed together.")
-        # Both requirements are named, with who makes each.
-        assert "neomacs-b==0.1 depends on shared>=2" in message
-        assert "neomacs-c==0.1 depends on shared<2" in message
+        assert message.startswith("These extensions cannot be installed together. Because ")
+        # Both requirements are named, with who makes each.  (How uv puts it
+        # varies a little between its versions.)
+        assert re.search(r"neomacs-b(==0\.1)? depends? on shared>=2", message), message
+        assert re.search(r"neomacs-c(==0\.1)? depends? on shared<2", message), message
         assert "extensions.toml asks for neomacs-b and neomacs-c" in message
         # And nothing was changed by asking.
         assert (env.manifest_path.read_text(), env.lock_path.read_text()) == before
@@ -362,7 +415,7 @@ def test_two_extensions_with_a_shared_dependency_install_and_a_third_that_confli
 @needs_uv
 def test_an_extension_that_needs_another_engine_is_refused(tmp_path: Path) -> None:
     env, _ = make(tmp_path)
-    with pytest.raises(ExtensionError, match=r"neomacs-future==0.1 depends on neomacs>=99"):
+    with pytest.raises(ExtensionError, match=r"neomacs-future(==0\.1)? depends? on neomacs>=99"):
         asyncio.run(env.plan(env.with_change(add=manifest_module.parse_request("neomacs-future"))))
     with pytest.raises(ExtensionError, match="is part of the engine"):
         asyncio.run(env.plan(env.with_change(add=manifest_module.parse_request("neomacs"))))
@@ -422,6 +475,56 @@ def test_a_file_that_is_not_the_one_locked_is_not_installed(tmp_path: Path) -> N
         asyncio.run(elsewhere.sync())
 
 
+@needs_uv
+def test_a_lock_resolved_for_another_engine_is_not_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env, _ = make(tmp_path)
+    asyncio.run(add(env, "neomacs-a"))  # which needs neomacs<1
+    monkeypatch.setattr("neomacs.__version__", "1.5.0")
+    with pytest.raises(lock_module.LockError, match="has neomacs 0.0.1, and this one has 1.5.0"):
+        asyncio.run(env.sync())
+    # Resolving again for this engine finds the conflict that the lock hid.
+    with pytest.raises(ExtensionError, match=r"neomacs-a(==0\.1)? depends? on neomacs>=0\.0\.1,<1"):
+        asyncio.run(env.plan(upgrade=True))
+
+
+@needs_uv
+def test_only_one_operation_at_a_time_has_the_environment(tmp_path: Path) -> None:
+    env, _ = make(tmp_path)
+    other = Environment(
+        config=tmp_path / "config", data=tmp_path / "data", cache=tmp_path / "cache"
+    )
+    with env.exclusive():
+        # Another task in this process, or another process: refused, not left
+        # to install what it decided without this one's change.
+        with pytest.raises(ExtensionError, match="being installed or removed already"):
+            with other.exclusive():
+                pass
+        refused = ext(tmp_path, "add", "neomacs-a", "--yes")
+        assert refused.returncode == 1 and "already" in refused.stderr
+        assert not env.lock_path.exists()
+        assert ext(tmp_path, "list").returncode == 0  # looking is always allowed
+    with other.exclusive():
+        pass
+    assert ext(tmp_path, "add", "neomacs-a", "--yes").returncode == 0
+
+
+@needs_uv
+def test_the_lock_knows_when_the_manifest_has_moved_on(tmp_path: Path) -> None:
+    env, _ = make(tmp_path)
+    assert env.stale() is True  # no lock at all
+    asyncio.run(add(env, "neomacs-a"))
+    assert env.stale() is False
+    env.manifest_path.write_text(env.manifest_path.read_text() + 'neomacs-b = "*"\n')
+    assert env.stale() is True
+    asyncio.run(env.apply(asyncio.run(env.plan())))
+    assert env.stale() is False and "neomacs_b-0.1.dist-info" in installed(env)
+    # A comment is not a change in what is asked for.
+    env.manifest_path.write_text("# a note\n" + env.manifest_path.read_text())
+    assert env.stale() is False
+
+
 def test_without_uv_the_reason_is_said(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     env = Environment(config=tmp_path / "c", data=tmp_path / "d", cache=tmp_path / "k")
     monkeypatch.setenv("NEOMACS_UV", str(tmp_path / "no-such-uv"))
@@ -479,10 +582,22 @@ def test_the_command_line(tmp_path: Path) -> None:
     assert (
         "\nneomacs ext: These extensions cannot be installed together. Because " in refused.stderr
     )
-    assert "depends on shared>=2" in refused.stderr and "depends on shared<2" in refused.stderr
+    assert re.search(r"depends? on shared>=2", refused.stderr)
+    assert re.search(r"depends? on shared<2", refused.stderr)
 
     assert ext(tmp_path, "upgrade", "--yes").stdout == "Nothing to change.\nNothing newer.\n"
     assert ext(tmp_path, "sync").stdout == "The environment matches the lock file.\n"
+    # The file is edited by hand, as its heading invites: sync resolves what it asks for now.
+    manifest = tmp_path / "config" / "extensions.toml"
+    manifest.write_text(manifest.read_text().replace('neomacs-b = "*"\n', ""))
+    unasked = ext(tmp_path, "sync")
+    assert unasked.returncode == 1 and "  - neomacs-b 0.1\n" in unasked.stdout
+    edited = ext(tmp_path, "sync", "--yes")
+    assert edited.stdout == (
+        "To be removed:\n  - neomacs-b 0.1\nThe environment matches extensions.toml.\n"
+    )
+    assert ext(tmp_path, "sync").stdout == "The environment matches the lock file.\n"
+    assert ext(tmp_path, "add", "neomacs-b", "-y").returncode == 0
     removed = ext(tmp_path, "remove", "neomacs-b", "--yes")
     assert removed.stdout == "To be removed:\n  - neomacs-b 0.1\nRemoved neomacs-b.\n"
     assert ext(tmp_path, "remove", "neomacs-b", "--yes").stderr == (

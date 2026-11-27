@@ -61,12 +61,15 @@ class Locked:
 @dataclass
 class Lock:
     distributions: dict[str, Locked] = field(default_factory=dict[str, Locked])
+    # A mark of the `extensions.toml` this was resolved for.
+    wanted: str = ""
 
     def write(self, path: Path) -> None:
         lines = [
             "# Written by neomacs.  Do not edit: change extensions.toml and run",
             "# `neomacs ext sync`, or use the extensions commands in the editor.",
             f"format = {FORMAT}",
+            f"wanted = {json.dumps(self.wanted)}",
             "",
         ]
         for name in sorted(self.distributions):
@@ -105,7 +108,7 @@ def read(path: Path) -> Lock | None:
             f"{path} is in format {data.get('format')!r}, which this neomacs does not read; "
             "run `neomacs ext upgrade` to write it again"
         )
-    lock = Lock()
+    lock = Lock(wanted=str(data.get("wanted", "")))
     for entry in cast(list[dict[str, Any]], data.get("distribution", [])):
         try:
             dist = Locked(
@@ -207,9 +210,16 @@ def from_uv(text: str, project: Path, engine: set[str]) -> Lock:
 # -- to something that can be installed ------------------------------------------------
 
 
-def requirements(lock: Lock, engine_wheels: dict[str, Path]) -> tuple[str, list[str]]:
+def requirements(
+    lock: Lock, engine_wheels: dict[str, Path], engine_versions: dict[str, str]
+) -> tuple[str, list[str]]:
     """The requirements file that installs LOCK, and the arguments that say
-    where to look.  ENGINE_WHEELS has the file standing for each engine package."""
+    where to look.  ENGINE_WHEELS has the file standing for each of the
+    engine's packages, and ENGINE_VERSIONS the version this engine has of each.
+
+    A lock resolved for another engine is refused: what it holds was chosen
+    to go with that one, and may not go with this."""
+    versions = {normalize(name): version for name, version in engine_versions.items()}
     lines: list[str] = []
     indexes: list[str] = []
     links: list[str] = []
@@ -218,10 +228,12 @@ def requirements(lock: Lock, engine_wheels: dict[str, Path]) -> tuple[str, list[
         hashes = "".join(f" --hash={h}" for h in dist.hashes)
         if dist.source == ENGINE:
             wheel = engine_wheels.get(name)
-            if wheel is None:
+            if wheel is None or versions.get(name) != dist.version:
+                have = versions.get(name)
                 raise LockError(
-                    f"the lock file is for an engine that has {dist.name} {dist.version}; "
-                    "run `neomacs ext upgrade` to resolve again for this one"
+                    f"the lock file is for an engine that has {dist.name} {dist.version}, and "
+                    + (f"this one has {have}" if have else "this one has no such package")
+                    + "; run `neomacs ext upgrade` to resolve again for this one"
                 )
             lines.append(f"{dist.name} @ {wheel.as_uri()}")
         elif dist.source == "registry":

@@ -83,12 +83,24 @@ jobs:
           # without a graphics card is allowed a multiple, as the engine's
           # latency benchmark is.
           NEOMACS_BUDGET_SCALE: "4"
+          # And longer to get through it all than a developer's machine needs.
+          NEOMACS_SMOKE_TIMEOUT: "1200"
         run: |
           # Chromium's sandbox needs unprivileged user namespaces, which this
           # image restricts.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           xvfb-run --auto-servernum npm run smoke > smoke.log 2>&1 || status=$?
           grep -o 'SMOKE-RESULT {"ok":[a-z]*,"failures":\[[^]]*\]' smoke.log || tail -40 smoke.log
+          # What each failing check found, and how far a run that timed out got.
+          python3 - <<'PY'
+          import json, re
+          found = re.search(r"SMOKE-RESULT (\{.*\})", open("smoke.log").read())
+          if found:
+              report = json.loads(found.group(1))
+              print(len(report["results"]), "checks reached; last:", list(report["results"])[-1:])
+              for name in report["failures"]:
+                  print(name, json.dumps(report["results"].get(name))[:3000])
+          PY
           grep -o '"f5.performance_budgets":{[^}]*}[^}]*}[^}]*}[^}]*}[^}]*}[^}]*}[^}]*}' smoke.log || true
           exit ${status:-0}
 

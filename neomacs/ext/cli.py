@@ -44,6 +44,14 @@ def _request(args: argparse.Namespace) -> Wanted:
 async def _run(args: argparse.Namespace) -> int:
     env = Environment()
     env.progress = lambda text: print(f"{text}...", file=sys.stderr)
+    if args.action == "list":
+        _list(env)
+        return 0
+    with env.exclusive():
+        return await _change(env, args)
+
+
+async def _change(env: Environment, args: argparse.Namespace) -> int:
     if args.action == "add":
         wanted = _request(args)
         plan = await env.plan(env.with_change(add=wanted))
@@ -64,16 +72,16 @@ async def _run(args: argparse.Namespace) -> int:
         await env.apply(plan)
         print("Nothing newer." if plan.empty else "Upgraded.")
     elif args.action == "sync":
-        if env.lock() is None:
+        if env.stale():
+            # extensions.toml was edited by hand: what it asks for now is resolved.
             plan = await env.plan()
             if not _confirm(plan, args.yes):
                 return 1
             await env.apply(plan)
+            print("The environment matches extensions.toml.")
         else:
             await env.sync()
-        print("The environment matches the lock file.")
-    elif args.action == "list":
-        _list(env)
+            print("The environment matches the lock file.")
     return 0
 
 
@@ -114,7 +122,10 @@ def main(argv: list[str]) -> int:
     remove.add_argument("name")
     upgrade = actions.add_parser("upgrade", help="resolve again, allowing newer versions")
     upgrade.add_argument("name", nargs="?", help="only this distribution")
-    actions.add_parser("sync", help="make the environment match the lock file")
+    actions.add_parser(
+        "sync", help="make the environment match the lock file, resolving first if "
+        "extensions.toml has changed"
+    )  # fmt: skip
     actions.add_parser("list", help="say what is installed")
     for sub in (add, remove, upgrade, actions.choices["sync"]):
         sub.add_argument("--yes", "-y", action="store_true", help="do not ask before installing")

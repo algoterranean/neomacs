@@ -94,7 +94,7 @@ export async function runSmoke(
   const timer = setTimeout(() => {
     console.log("SMOKE-RESULT " + JSON.stringify({ ok: false, failures: ["timed out"], results }));
     process.exit(1);
-  }, 300_000);
+  }, Number(process.env["NEOMACS_SMOKE_TIMEOUT"] ?? "300") * 1000);
 
   try {
     await whenAttached(state as never);

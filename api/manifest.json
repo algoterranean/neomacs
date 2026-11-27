@@ -366,6 +366,13 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.ext.environment.Environment.stale",
+   "kind": "method",
+   "signature": "(self) -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.ext.environment.Environment.sync",
    "kind": "method",
    "signature": "(self, lock: 'Lock | None' = None) -> 'None'",
@@ -382,7 +389,7 @@
   {
    "name": "neomacs.ext.lock.Lock",
    "kind": "class",
-   "signature": "(distributions: 'dict[str, Locked]' = <factory>) -> None",
+   "signature": "(distributions: 'dict[str, Locked]' = <factory>, wanted: 'str' = '') -> None",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -901,6 +908,13 @@
    "name": "neomacs.ownership.Ownership.owner_of",
    "kind": "method",
    "signature": "(self, kind: 'str', key: 'Any') -> 'str | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ownership.Ownership.owners",
+   "kind": "method",
+   "signature": "(self) -> 'list[str]'",
    "tier": "provisional",
    "since": "0.1"
   },

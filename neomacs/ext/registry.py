@@ -335,6 +335,10 @@ class Extensions:
             if callable(activate):
                 activate()
         except Exception as exc:
+            # Python takes a module that failed out of `sys.modules`, but what
+            # it registered before failing is still registered.  Half an
+            # extension is worse than none: take all of it out.
+            self._discard(extension)
             extension.state, extension.error = "failed", f"{type(exc).__name__}: {exc}"
             editor.report_exception(f"loading the extension {extension.name}", exc, keep=True)
             editor.startup_problems.append(
@@ -369,6 +373,28 @@ class Extensions:
                 f"{', '.join(sorted(keys))}",
                 kind="log",
             )
+
+    def _owners(self, extension: Extension) -> list[str]:
+        """Every module name that is EXTENSION's and has registered something
+        or is loaded: found by name, so one that failed part-way is included."""
+        if extension.kind == "file":
+            return [extension.module]
+        top = extension.module.split(".", 1)[0]
+        names = [*sys.modules, *ownership.owners()]
+        return list(dict.fromkeys(n for n in names if n == top or n.startswith(top + ".")))
+
+    def _discard(self, extension: Extension) -> None:
+        """Release everything EXTENSION's modules registered, and forget the modules."""
+        for owner in (*self._owners(extension), extension.stub_owner):
+            ownership.release(owner)
+        for module in self._owners(extension):
+            if sys.modules.pop(module, None) is None:
+                continue
+            parent, _, child = module.rpartition(".")
+            if parent in sys.modules:
+                with contextlib.suppress(AttributeError):
+                    delattr(sys.modules[parent], child)
+        importlib.invalidate_caches()
 
     def modules_of(self, extension: Extension) -> list[str]:
         """The loaded modules that are EXTENSION's, in the order they were imported."""
@@ -407,15 +433,7 @@ class Extensions:
         for mode in list(editor.global_modes):
             if type(mode).__module__ in owners:
                 editor.global_modes.remove(mode)
-        for owner in (*modules, extension.stub_owner):
-            ownership.release(owner)
-        for module in modules:
-            sys.modules.pop(module, None)
-            parent, _, child = module.rpartition(".")
-            if parent in sys.modules:
-                with contextlib.suppress(AttributeError):
-                    delattr(sys.modules[parent], child)
-        importlib.invalidate_caches()
+        self._discard(extension)
         extension.state, extension.error = "disabled", ""
         editor.update_frames()
         return extension
@@ -468,15 +486,20 @@ class Extensions:
             extension.error = "it says it does not survive being reloaded"
             return extension
         gil_before = _gil_enabled()
+        # Looked at before anything is evaluated: an extension that cannot be
+        # reloaded whole is left running its old code whole, not new source
+        # beside an old compiled module.
+        sources: list[tuple[str, str]] = []
         for module_name in self.modules_of(extension):
-            module = sys.modules.get(module_name)
-            file = getattr(module, "__file__", None)
+            file = getattr(sys.modules.get(module_name), "__file__", None)
             if file is None:
                 continue  # a namespace package: nothing to evaluate
             if not str(file).endswith(".py"):
                 extension.state = "restart"
                 extension.error = f"{module_name} is compiled and cannot be reloaded"
                 return extension
+            sources.append((module_name, str(file)))
+        for module_name, file in sources:
             ok = await startup.load_module(
                 self.editor, Path(file), module_name, f"extension {name} ({module_name})"
             )
@@ -490,9 +513,15 @@ class Extensions:
 
     # -- after the environment has changed -----------------------------------------------------
 
-    async def refresh(self, site_packages: Path | None) -> list[str]:
+    async def refresh(
+        self, site_packages: Path | None, changed: set[str] | None = None
+    ) -> list[str]:
         """The environment was installed into: take up what is new, reload
-        what changed, and drop what has gone.  Returns what was done, in words."""
+        what changed, and drop what has gone.  CHANGED is the names of the
+        distributions that were replaced, which need not show in a version: a
+        git source moves to another commit with the same one.  Returns what
+        was done, in words."""
+        changed = {normalize(name) for name in (changed or ())}
         self.use_environment(site_packages)
         done: list[str] = []
         before = {e.name: e for e in self.known.values() if e.kind == "package"}
@@ -503,6 +532,8 @@ class Extensions:
                     self.disable(name)
                 del self.known[name]
                 done.append(f"removed {name}")
+        ours = {normalize(e.distribution) for e in now.values()}
+        libraries = changed - ours  # changed, and not themselves extensions
         for name, new in now.items():
             old = before.get(name)
             if old is None:
@@ -510,23 +541,35 @@ class Extensions:
                 self.make_available(new)
                 done.append(f"added {name} {new.version}")
                 continue
-            if (
-                old.version == new.version
-                and old.commands == new.commands
-                and old.modes == new.modes
-            ):
+            replaced = normalize(new.distribution) in changed or old.version != new.version
+            declared = old.commands != new.commands or old.modes != new.modes
+            uses = sorted(libraries & set(new.needs))
+            if not (replaced or declared or uses):
                 continue
-            new.state, new.gil = old.state, old.gil
+            new.state, new.gil, new.error = old.state, old.gil, old.error
             self.known[name] = new
             if old.state == "known":
                 ownership.release(old.stub_owner)
                 self.make_available(new)
-                done.append(f"updated {name} to {new.version}")
-            elif old.state == "loaded":
+                if replaced or declared:
+                    done.append(f"updated {name} to {new.version}")
+            elif old.state == "loaded" and replaced:
                 await self.reload(name)
                 if new.state == "restart":
                     done.append(f"{name} {new.version} is installed; restart to finish upgrading")
                 else:
                     done.append(f"reloaded {name} at {new.version}")
+            elif old.state == "loaded" and uses:
+                # A library it has imported was replaced.  The old one is what
+                # is loaded, and there is no telling what holds on to it.
+                new.state = "restart"
+                new.error = f"{', '.join(uses)} was upgraded under it"
+                done.append(f"{name} uses {', '.join(uses)}, which changed; restart to take it up")
+        loaded = [
+            e.name for e in self.known.values() if e.state == "loaded" and e.kind == "package"
+        ]
+        if libraries and loaded and not any("restart" in line for line in done):
+            # Not a direct dependency of anything loaded, as far as is known.
+            done.append("a library changed; restart if a loaded extension uses it")
         self.editor.update_frames()
         return done

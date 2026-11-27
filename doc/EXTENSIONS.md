@@ -57,10 +57,8 @@ Non-goals:
 [project]
 name = "neomacs-git"
 version = "0.3.0"
-dependencies = ["neomacs>=1.2,<2", "pygit2>=1.15"]
-
-[project]
 description = "Git status, staging and commit"
+dependencies = ["neomacs>=1.2,<2", "pygit2>=1.15"]
 
 [project.entry-points."neomacs.extensions"]
 git = "neomacs_git"
@@ -418,6 +416,17 @@ Deferred with step 14 of IMPLEMENTATION.md.
   hashes. Building the environment on another machine needs the two files
   and nothing else. A later `add` there has none of uv's memory to go on and
   may move other versions; that is shown before anything is installed.
+- **A lock is for one engine and one manifest.** `sync` refuses a lock that
+  was resolved for another version of the engine: what is in it was chosen
+  to go with that one. The lock also carries a mark of the `extensions.toml`
+  it was resolved for, and when that file has been edited since, by hand,
+  `sync` resolves what it now asks for, shows the change and asks, before
+  installing. So editing the file and running `sync` works.
+- **One operation at a time.** Deciding what to install, asking, and
+  installing are done holding a lock on the environment. A second
+  operation, in the same editor or from `neomacs ext` in another process,
+  is refused until the first has finished; it is not queued, since the
+  first may be waiting for an answer. `list` is always allowed.
 - **Where distributions come from** can be said in `extensions.toml`:
 
   ```toml
@@ -437,8 +446,11 @@ Deferred with step 14 of IMPLEMENTATION.md.
   `uv/` in the cache directory.
 - **Adding** takes `NAME`, `NAME>=1.0`, `NAME @ git+URL[@REV]`,
   `NAME @ PATH`, or a directory with a `pyproject.toml` that names a project.
-  `extensions.toml` is edited in place: the user's comments and other entries
-  are left as they were.
+  A relative path given to `neomacs ext add` is relative to where the
+  command was run. `extensions.toml` is edited in place: the user's comments
+  and other entries are left as they were, and an entry is found however it
+  was written (a line, dotted keys, or a table of its own). The result is
+  checked before it replaces the file.
 
 **Before installing (4.3, 8).** Every operation that would change the
 environment first shows what would be added, changed and removed, and which
@@ -485,7 +497,16 @@ environment only; an editor that is running sees it when it next starts.
   lasts until the editor is restarted: which extensions are disabled is not
   recorded on disk.
 - Reloading evaluates each of the extension's modules again, in the order
-  they were first imported, through the live evaluation pipeline.
+  they were first imported, through the live evaluation pipeline. All of
+  them are looked at first: if one is compiled, none is evaluated.
+- **An extension that fails while loading** is taken out whole: what its
+  modules registered before the failure is released.
+- **After an install,** an extension whose distribution was replaced is
+  reloaded even if its version did not change, as when a git source moves to
+  another commit. If a library a loaded extension depends on was replaced,
+  the extension is marked as needing a restart: the old library is what is
+  loaded. Only direct dependencies are known; for any other library that
+  changed the user is told to restart if something uses it.
 - **After each import** the engine checks whether the GIL is on and was not
   before; the extension whose import did it is recorded, the user is told,
   and `extensions.list` shows it.

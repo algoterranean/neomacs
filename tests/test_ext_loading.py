@@ -434,6 +434,99 @@ def test_a_package_extension_is_disabled_reloaded_and_told_to_wait_for_a_restart
         assert "Some changes need the editor to be restarted" in listing
 
 
+@needs_uv
+def test_an_extension_that_fails_part_way_leaves_nothing_registered(tmp_path: Path) -> None:
+    wheels = tmp_path / "wheels"
+    source = (
+        "from neomacs.commands import command\nfrom neomacs.keymap import global_map\n"
+        "from . import part\n"
+        "@command(name='half.made')\ndef made() -> None: pass\n"
+        "global_map.bind('<f9>', 'half.made')\n"
+        "raise RuntimeError('and then it failed')\n"
+    )
+    part = (
+        "from neomacs.commands import command\n@command(name='half.part')\ndef p() -> None: pass\n"
+    )
+    extension(wheels, "half", source=source, extra={"part.py": part})
+    install(tmp_path, "neomacs-half")
+    with running_engine(env=dirs(tmp_path)) as path, HeadlessUI(path, rows=8, cols=90) as ui:
+        c = ui.client
+        assert value(c, "ed.extensions.get('half').state") == "failed"
+        assert value(c, "[n for n in ed.commands if n.startswith('half.')]") == []
+        assert value(c, f"[o for o in {OWN}.owners() if o.startswith('neomacs_half')]") == []
+        assert value(c, f"[m for m in {MODS} if m.startswith('neomacs_half')]") == []
+        ui.keys("<f9>")
+        assert ui.message == "<f9> is undefined"
+
+
+@needs_uv
+def test_an_extension_with_a_compiled_module_is_not_half_reloaded(tmp_path: Path) -> None:
+    wheels = tmp_path / "wheels"
+    source = (
+        "from neomacs import ed\nfrom neomacs.commands import command\n"
+        "@command(name='mixed.hello')\ndef hello() -> None: ed.message('old source')\n"
+    )
+    extension(wheels, "mixed", source=source)
+    env = install(tmp_path, "neomacs-mixed")
+    site = env.site_packages()
+    assert site is not None
+    with running_engine(env=dirs(tmp_path)) as path, HeadlessUI(path, rows=8, cols=90) as ui:
+        # A compiled module of its own, imported after the package was: later in the order.
+        ui.eval(
+            "import sys, types\n_fast = types.ModuleType('neomacs_mixed.fast')\n"
+            "_fast.__file__ = '/somewhere/fast.cpython-315t-darwin.so'\n"
+            "sys.modules['neomacs_mixed.fast'] = _fast"
+        )
+        (site / "neomacs_mixed" / "__init__.py").write_text(source.replace("old source", "NEW"))
+        ui.eval("await ed.extensions.reload('mixed')")
+        state = value(
+            ui.client, "(ed.extensions.get('mixed').state, ed.extensions.get('mixed').error)"
+        )
+        assert state == ("restart", "neomacs_mixed.fast is compiled and cannot be reloaded")
+        ui.call("mixed.hello")
+        assert ui.message == "old source"  # none of the new source was evaluated
+
+
+@needs_uv
+def test_what_was_replaced_is_reloaded_whatever_its_version_says(tmp_path: Path) -> None:
+    wheels = tmp_path / "wheels"
+    library(wheels, "shared", "1.0")
+    extension(wheels, "same", requires=("shared",))
+    extension(wheels, "other")
+    env = install(tmp_path, "neomacs-same", "neomacs-other")
+    site = env.site_packages()
+    assert site is not None
+    with running_engine(env=dirs(tmp_path)) as path, HeadlessUI(path, rows=8, cols=100) as ui:
+        c = ui.client
+        ui.call("same.hello")
+        assert ui.message == "hello from same 0.1"
+        # Its files are replaced with the version unchanged, as a git source's
+        # are when it moves to another commit.
+        init = site / "neomacs_same" / "__init__.py"
+        init.write_text(init.read_text().replace("hello from same", "a later commit of same"))
+        site_expr = f"__import__('pathlib').Path({str(site)!r})"
+        assert (
+            value(c, f"await ed.extensions.refresh({site_expr})") == []
+        )  # nothing said to have changed
+        ui.call("same.hello")
+        assert ui.message == "hello from same 0.1"
+        done = value(c, f"await ed.extensions.refresh({site_expr}, {{'neomacs-same'}})")
+        assert done == ["reloaded same at 0.1"]
+        ui.call("same.hello")
+        assert ui.message == "a later commit of same 0.1"
+        # A library under it changes: what is loaded is the old one, so it says to restart.
+        done = value(c, f"await ed.extensions.refresh({site_expr}, {{'shared'}})")
+        assert done == ["same uses shared, which changed; restart to take it up"]
+        states = value(c, "{e.name: (e.state, e.error) for e in ed.extensions}")
+        assert states == {
+            "other": ("loaded", ""),
+            "same": ("restart", "shared was upgraded under it"),
+        }
+        # One that nothing loaded is known to use: said, without accusing anyone.
+        done = value(c, f"await ed.extensions.refresh({site_expr}, {{'unrelated'}})")
+        assert done == ["a library changed; restart if a loaded extension uses it"]
+
+
 # -- installing from inside the editor -----------------------------------------------------------
 
 
@@ -486,7 +579,8 @@ def test_adding_and_removing_in_the_running_editor(tmp_path: Path) -> None:
         wait_for(lambda: ui.message.startswith("These extensions cannot be installed together."))
         assert ui.message.endswith("See *extensions*.")
         explained = value(c, "ed.buffers.get('*extensions*').text")
-        assert "depends on shared>=2" in explained and "depends on shared<2" in explained
+        assert __import__("re").search(r"depends? on shared>=2", explained)
+        assert __import__("re").search(r"depends? on shared<2", explained)
         assert value(c, "sorted(e.name for e in ed.extensions)") == ["a", "b"]
 
         ui.keys("M-x")

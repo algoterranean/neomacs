@@ -9,14 +9,16 @@ an extension needing another version of one of them fails to resolve.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import hashlib
 import json
 import os
 import platform
 import re
 import shutil
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from pathlib import Path
 
 import neomacs
@@ -40,6 +42,19 @@ PROJECT = "neomacs-extensions-environment"
 @provisional("0.1")
 class ExtensionError(NeomacsError):
     """Extensions could not be resolved or installed."""
+
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+
+
+def fingerprint(manifest: Manifest) -> str:
+    """Something that changes when what `extensions.toml` asks for changes."""
+    wanted = sorted(dataclasses.astuple(w) for w in manifest.wanted.values())
+    record = json.dumps([wanted, dataclasses.astuple(manifest.resolver)], sort_keys=True)
+    return hashlib.sha256(record.encode()).hexdigest()[:16]
 
 
 def find_uv() -> str:
@@ -68,9 +83,9 @@ def _plain(message: str) -> str:
     ]
     text = "\n".join(line.replace("╰─▶", " ").replace("│", " ").replace("×", " ") for line in lines)
     text = re.sub(r"\n\s+", " ", text).strip()
-    text = re.sub(
-        r"^No solution found when resolving dependencies(?: for split \(.*?\))?:\s*", "", text
-    )
+    # Versions of uv differ in what they put before the explanation itself.
+    if "Because " in text:
+        text = text[text.index("Because ") :]
     text = text.replace("your project's requirements are", "what extensions.toml asks for is")
     text = text.replace("your project depends on", "extensions.toml asks for")
     text = text.replace("your project requires", "extensions.toml asks for")
@@ -100,6 +115,30 @@ class Environment:
         self.venv = self.root / "venv"
         # Called with a few words as work goes on.
         self.progress: Callable[[str], None] = lambda text: None
+
+    # -- one at a time ------------------------------------------------------------
+
+    @contextlib.contextmanager
+    def exclusive(self) -> Generator[None]:
+        """Hold the environment for one whole operation: deciding what to
+        install, asking, and installing.  Two at once, in one editor or in two
+        processes, would each install what it decided without the other's
+        change.  A second is refused, not made to wait: the first may be
+        waiting for the user."""
+        self.root.mkdir(parents=True, exist_ok=True)
+        fd = os.open(self.root / "lock", os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            if fcntl is not None:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    raise ExtensionError(
+                        "Extensions are being installed or removed already, here or in "
+                        "another neomacs. Try again when that has finished"
+                    ) from None
+            yield
+        finally:
+            os.close(fd)
 
     # -- what is there ------------------------------------------------------------
 
@@ -252,7 +291,16 @@ class Environment:
                 f"These extensions cannot be installed together. {_plain(done.stderr)}"
             )
         text = (self.project / "uv.lock").read_text(encoding="utf-8")
-        return lock_module.from_uv(text, self.project, set(self.engine_wheels()))
+        lock = lock_module.from_uv(text, self.project, set(self.engine_wheels()))
+        lock.wanted = fingerprint(manifest)
+        return lock
+
+    @provisional("0.1")
+    def stale(self) -> bool:
+        """Whether `extensions.toml` has been changed since the lock file was
+        written for it, so that the lock no longer says what it asks for."""
+        lock = self.lock()
+        return lock is None or lock.wanted != fingerprint(self.manifest())
 
     @provisional("0.1")
     async def plan(
@@ -273,7 +321,7 @@ class Environment:
             raise ExtensionError(f"there is no {self.lock_path.name} to install from")
         await self.check_uv()
         self.progress("installing")
-        text, where = lock_module.requirements(lock, self.engine_wheels())
+        text, where = lock_module.requirements(lock, self.engine_wheels(), self.engine_packages())
         self.root.mkdir(parents=True, exist_ok=True)
         made = await self.uv("venv", "--allow-existing", "--python", sys.executable, str(self.venv))
         if made.returncode != 0:
@@ -295,6 +343,8 @@ class Environment:
         lock file, and make the environment match it."""
         if add is not None or remove is not None:
             manifest_module.edit(self.manifest_path, add=add, remove=remove)
+            # The plan was made for the manifest as it would be; it is that now.
+            plan.lock.wanted = fingerprint(self.manifest())
         plan.lock.write(self.lock_path)
         await self.sync(plan.lock)
 

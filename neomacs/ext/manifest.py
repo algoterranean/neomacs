@@ -165,6 +165,10 @@ def parse_request(text: str, *, base: Path | None = None) -> Wanted:
         name, _, target = text.partition("@")
         name, target = name.strip(), target.strip()
         if not target.startswith("git+"):
+            directory = Path(target).expanduser()
+            if base is not None and not directory.is_absolute():
+                # As typed where the command was run, not where the manifest is.
+                return parse_entry(name, {"path": str(base / directory)})
             return parse_entry(name, {"path": target})
         url, rev = target[4:], ""
         # A revision follows the last "@", when that comes after the last "/"
@@ -191,50 +195,96 @@ def parse_request(text: str, *, base: Path | None = None) -> Wanted:
     return parse_entry(found.group(1), found.group(2).strip())
 
 
-_SECTION = re.compile(r"^\s*\[([^\]]+)\]\s*(?:#.*)?$")
-_KEY = re.compile(r"""^\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9._-]+))\s*=""")
+_SECTION = re.compile(r"""^\s*\[\s*([^\]]+?)\s*\]\s*(?:#.*)?$""")
+_KEY = re.compile(r"""^\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*(\.|=)""")
+
+
+def _unquote(key: str) -> str:
+    key = key.strip()
+    return key[1:-1] if len(key) >= 2 and key[0] == key[-1] and key[0] in "\"'" else key
+
+
+def _without(lines: list[str], target: str) -> list[str]:
+    """LINES without the entry for TARGET, however it was written: a line of
+    the `[extensions]` table, dotted keys there, or a table of its own
+    (`[extensions.NAME]`)."""
+    kept: list[str] = []
+    section = ""  # the table the line is in
+    dropping = False  # inside `[extensions.TARGET]`
+    for line in lines:
+        heading = _SECTION.match(line)
+        if heading is not None:
+            if dropping and kept and kept[-1].strip():
+                kept.append("")  # the blank line that stood before the table removed
+            section = heading.group(1)
+            parts = [_unquote(p) for p in section.split(".", 1)]
+            dropping = (
+                len(parts) == 2 and parts[0] == "extensions" and normalize(parts[1]) == target
+            )
+            if dropping:
+                while kept and kept[-1].strip() == "":
+                    kept.pop()
+                continue
+        if dropping:
+            continue
+        if section.strip() == "extensions":
+            key = _KEY.match(line)
+            name = next((g for g in key.groups()[:3] if g), "") if key is not None else ""
+            if name and normalize(name) == target:
+                continue
+        kept.append(line)
+    return kept
 
 
 @provisional("0.1")
 def edit(path: Path, *, add: Wanted | None = None, remove: str | None = None) -> None:
     """Add, replace or remove one entry of `extensions.toml`, leaving the rest
-    of the file, comments included, as the user wrote it."""
+    of the file, comments included, as the user wrote it.
+
+    The result is checked before the file is replaced: if it would not be a
+    manifest, `ManifestError` is raised and the file is left as it was.
+    """
     try:
-        lines = path.read_text(encoding="utf-8").split("\n")
+        original = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        lines = []
+        original = ""
     target = normalize(add.name if add is not None else remove or "")
-    start = end = None  # the lines of the [extensions] table, after its heading
-    for i, line in enumerate(lines):
-        section = _SECTION.match(line)
-        if section is None:
-            continue
-        if start is not None and end is None:
-            end = i
-        if section.group(1).strip() == "extensions":
-            start, end = i + 1, None
-    if start is None:
-        if add is None:
-            return
-        if lines and lines[-1] == "":
-            lines.pop()
-        lines += ([""] if lines else []) + ["[extensions]"]
-        start = len(lines)
-    if end is None:
-        end = len(lines)
-    kept: list[str] = []
-    for line in lines[start:end]:
-        key = _KEY.match(line)
-        name = next((g for g in key.groups() if g), "") if key is not None else ""
-        if not (name and normalize(name) == target):
-            kept.append(line)
+    lines = _without(original.split("\n") if original else [], target)
     if add is not None:
-        while kept and kept[-1].strip() == "":
-            kept.pop()
-        kept.append(f"{add.name} = {add.toml()}")
-        if end < len(lines):
-            kept.append("")
-    text = "\n".join(lines[:start] + kept + lines[end:])
+        entry = f"{add.name} = {add.toml()}"
+        headings = [i for i, line in enumerate(lines) if _SECTION.match(line) is not None]
+        start = next(
+            (i for i in headings if _SECTION.match(lines[i]).group(1).strip() == "extensions"),  # type: ignore[union-attr]
+            None,
+        )
+        if start is None:
+            while lines and lines[-1].strip() == "":
+                lines.pop()
+            lines += ([""] if lines else []) + ["[extensions]", entry]
+        else:
+            # After the last line of the table that has anything on it.
+            end = next((i for i in headings if i > start), len(lines))
+            last = max((i for i in range(start, end) if lines[i].strip()), default=start)
+            lines.insert(last + 1, entry)
+    text = "\n".join(lines)
+    if text and not text.endswith("\n"):
+        text += "\n"
+    if text == original:
+        # Nothing was found to take out.  If the entry is there all the same,
+        # written some way this does not follow, say so: do not leave it behind.
+        if remove is not None and original and target in read(path).wanted:
+            raise ManifestError(f"{path}: the entry for {target} could not be removed by editing")
+        return
+    # It must still be a manifest, with the entry there or gone, before it is the file.
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
-    read(path)  # it must still be a manifest
+    trial = path.with_name(path.name + ".tmp")
+    trial.write_text(text, encoding="utf-8")
+    try:
+        result = read(trial)
+        if (target in result.wanted) != (add is not None):
+            what = "added" if add is not None else "removed"
+            raise ManifestError(f"{path}: the entry for {target} could not be {what} by editing")
+    except ManifestError as exc:
+        trial.unlink(missing_ok=True)
+        raise ManifestError(str(exc).replace(str(trial), str(path))) from None
+    trial.replace(path)

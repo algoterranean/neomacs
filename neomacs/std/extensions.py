@@ -81,22 +81,35 @@ async def _confirm(plan: Plan, what: str) -> bool:
     return True
 
 
-def _in_background(name: str, work: Callable[[Environment], Awaitable[str | None]]) -> None:
+def _replaced(plan: Plan) -> set[str]:
+    """The distributions a plan puts other files in place of."""
+    return {new.name for _, new in plan.changed}
+
+
+def _in_background(
+    name: str, work: Callable[[Environment], Awaitable[tuple[str, set[str]] | None]]
+) -> None:
     """Run WORK as a task, with what it is doing shown in the task list, and
-    then have the running editor take up what changed."""
+    then have the running editor take up what changed.  WORK returns what to
+    say and which distributions were replaced, or None if nothing was done.
+
+    The environment is held from deciding what to install until it is
+    installed, so two of these cannot each install without the other's change."""
     env = Environment()
 
     async def task() -> None:
         try:
-            said = await work(env)
+            with env.exclusive():
+                result = await work(env)
         except NeomacsError as exc:
             # Said in full where it can be read: a conflict takes sentences to explain.
             _show(f"{name}\n\n{exc}\n", focus=False)
             ed.message(str(exc).split(". ", 1)[0] + ". See *extensions*.", kind="error")
             return
-        if said is None:
+        if result is None:
             return
-        changes = await ed.extensions.refresh(env.site_packages())
+        said, replaced = result
+        changes = await ed.extensions.refresh(env.site_packages(), replaced)
         ed.message("; ".join([said, *changes]))
 
     info = ed.start_task(task(), name=name)
@@ -118,12 +131,12 @@ def add_extension(
     installed, and on a yes install and activate it."""
     wanted = manifest_module.parse_request(request)
 
-    async def work(env: Environment) -> str | None:
+    async def work(env: Environment) -> tuple[str, set[str]] | None:
         plan = await env.plan(env.with_change(add=wanted))
         if not await _confirm(plan, f"Adding {wanted.name}"):
             return None
         await env.apply(plan, add=wanted)
-        return f"Added {wanted.name}"
+        return f"Added {wanted.name}", _replaced(plan)
 
     _in_background(f"extensions: add {wanted.name}", work)
 
@@ -139,7 +152,7 @@ async def remove_extension() -> None:
         "Remove extension: ", completer=FunctionCompleter(lambda text: rank(listed, text))
     )
 
-    async def work(env: Environment) -> str | None:
+    async def work(env: Environment) -> tuple[str, set[str]] | None:
         plan = await env.plan(env.with_change(remove=name))
         if not await _confirm(plan, f"Removing {name}"):
             return None
@@ -150,7 +163,7 @@ async def remove_extension() -> None:
                 if extension.state != "disabled":
                     ed.extensions.disable(extension.name)
         await env.apply(plan, remove=name)
-        return f"Removed {name}"
+        return f"Removed {name}", _replaced(plan)
 
     _in_background(f"extensions: remove {name}", work)
 
@@ -162,31 +175,33 @@ def upgrade_extensions(
     """Resolve again allowing newer versions, install them, and reload what changed."""
     only = name.strip()
 
-    async def work(env: Environment) -> str | None:
+    async def work(env: Environment) -> tuple[str, set[str]] | None:
         plan = await env.plan(upgrade=[only] if only else True)
         if plan.empty:
-            return "Nothing newer"
+            return "Nothing newer", set()
         if not await _confirm(plan, "Upgrading " + (only or "everything")):
             return None
         await env.apply(plan)
-        return "Upgraded"
+        return "Upgraded", _replaced(plan)
 
     _in_background("extensions: upgrade " + (only or "all"), work)
 
 
 @command(name="extensions.sync")
 def sync_extensions() -> None:
-    """Make the extensions environment match the lock file."""
+    """Make the extensions environment match the lock file.  If
+    `extensions.toml` has been edited since the lock file was written, what it
+    now asks for is resolved first."""
 
-    async def work(env: Environment) -> str | None:
-        if env.lock() is None:
+    async def work(env: Environment) -> tuple[str, set[str]] | None:
+        if env.stale():
             plan = await env.plan()
             if not await _confirm(plan, "Installing what extensions.toml asks for"):
                 return None
             await env.apply(plan)
-        else:
-            await env.sync()
-        return "The environment matches the lock file"
+            return "The environment matches extensions.toml", _replaced(plan)
+        await env.sync()
+        return "The environment matches the lock file", set()
 
     _in_background("extensions: sync", work)
 
