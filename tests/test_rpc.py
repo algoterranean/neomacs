@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import sysconfig
+import time
 from pathlib import Path
 
 import pytest
@@ -180,3 +181,44 @@ def test_stdio_reply_survives_input_closing_early() -> None:
     )
     assert done.returncode == 0
     assert json.loads(done.stdout)["result"] == "2"
+
+
+def test_retrying_a_deferred_request_does_not_hold_a_lock_while_the_handler_runs(
+    client: Client,
+) -> None:
+    """A handler takes its own lock.  One thread retries deferred requests while
+    holding that lock (having just applied a batch); a timer retries them
+    without it.  Each must not wait for the other for ever."""
+    import threading
+
+    from neomacs.testing import NotReady
+
+    outer = threading.Lock()
+    entered = threading.Event()
+
+    def handler() -> str:
+        entered.set()
+        with outer:
+            raise NotReady("still not ready")
+
+    client.defer_seconds = 30  # no timer of its own during the test
+    client.request_handlers["test.slow"] = handler
+    client._deferred.append(
+        ({"id": 999001, "method": "test.slow", "params": []}, time.monotonic() + 30)
+    )
+    with outer:
+        timer = threading.Thread(target=client.retry_deferred, daemon=True)
+        timer.start()
+        assert entered.wait(5)  # the timer's retry is inside the handler, waiting for our lock
+        finished = threading.Event()
+        holder = threading.Thread(
+            target=lambda: (client.retry_deferred(), finished.set()), daemon=True
+        )
+        holder.start()
+        assert finished.wait(5), (
+            "retry_deferred waited for the other retry while we hold the handler's lock"
+        )
+    timer.join(5)
+    assert not timer.is_alive()
+    client._deferred.clear()
+    del client.request_handlers["test.slow"]

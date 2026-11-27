@@ -28,6 +28,8 @@ export function socketPath(): string {
 export interface Engine {
   process: ChildProcess;
   socketPath: string;
+  /** The last of what the engine wrote to its standard error. */
+  log: () => string;
 }
 
 /** Start the engine as a child and resolve once it is listening. */
@@ -42,10 +44,10 @@ export function startEngine(python: string, cwd: string): Promise<Engine> {
     let err = "";
     child.stdout?.on("data", (chunk: Buffer) => {
       out += chunk.toString();
-      if (out.includes("NEOMACS-LISTENING")) resolve({ process: child, socketPath: sock });
+      if (out.includes("NEOMACS-LISTENING")) resolve({ process: child, socketPath: sock, log: () => err });
     });
     child.stderr?.on("data", (chunk: Buffer) => {
-      err = (err + chunk.toString()).slice(-4000);
+      err = (err + chunk.toString()).slice(-8000);
     });
     child.on("error", reject);
     child.on("exit", (code) => reject(new Error(`the engine exited (${code}) before listening\n${err}`)));

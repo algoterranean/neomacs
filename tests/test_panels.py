@@ -328,3 +328,28 @@ def test_a_window_with_one_row_shows_its_text_and_no_modeline() -> None:
         assert all(0 <= y < rows for y in covered)
     assert set(arrange(layout, 40, 3).views) == {1, 2, 3} and arrange(layout, 40, 3).modelines == []
     assert len(arrange(layout, 40, 6).modelines) == 3
+
+
+def test_the_frontend_resizes_a_split_and_a_panel(ui: HeadlessUI) -> None:
+    ui.keys("C-x", "2")
+    split = ui.model.layout["main"]
+    assert split[3] == [0.5, 0.5]
+    ui.client.call("view.split_resized", split[1], [3, 1])
+    ui.idle()
+    assert ui.model.layout["main"][3] == [0.75, 0.25]
+    rows = [ui.arrangement.views[w].h for w in ui.model.windows()]
+    assert rows[0] > 2 * rows[1]
+    for bad in ([1], [1, 0], ["a", 1]):
+        with pytest.raises(Exception, match="ratios|positive"):
+            ui.client.call("view.split_resized", split[1], bad)
+    with pytest.raises(Exception, match="no such split"):
+        ui.client.call("view.split_resized", 99999, [1, 1])
+    ui.keys("C-x", "1")
+    ui.eval("_m = ed.buffers.get('*messages*'); ed.show(_m, 'messages')")
+    panel = ui.panels()["bottom"]
+    ui.client.call("ui.panel", panel["id"], "resize", 0.5)
+    ui.idle()
+    assert ui.panels()["bottom"]["size"] == 0.5
+    with pytest.raises(Exception, match="not a size"):
+        ui.client.call("ui.panel", panel["id"], "resize", "big")
+    ui.eval("_fr.panels.pop('bottom')")

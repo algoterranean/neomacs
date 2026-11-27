@@ -5,7 +5,9 @@ import { Chrome } from "./chrome.ts";
 import { FaceSheet } from "./faces.ts";
 import type { Position } from "./geometry.ts";
 import { Input } from "./input.ts";
+import { type Layout, Workspace } from "./layout.ts";
 import { FrameModel, type RedrawEvent, type Run, type ViewModel } from "./model.ts";
+import { Mouse } from "./mouse.ts";
 import { type Json, RemoteError, Rpc } from "./protocol.ts";
 import { ViewElement } from "./view.ts";
 
@@ -25,6 +27,12 @@ interface Host {
   onStatus(callback: (text: string) => void): void;
   attached(frame: number, token: string): void;
   ready(): void;
+  clipboardRead(which: string): Promise<string>;
+  clipboardWrite(which: string, text: string): void;
+  setMenu(items: unknown): void;
+  onMenuCommand(callback: (command: string) => void): void;
+  openFrame(options: unknown): void;
+  pathsOf(files: File[]): string[];
 }
 
 declare global {
@@ -43,16 +51,94 @@ let frame = new FrameModel();
 // The element for each view the frame has, by the model object it draws.
 const elements = new Map<ViewModel, ViewElement>();
 let mainElement: ViewElement | null = null;
+// Views embedded in the text of another view (FRONTEND 5.6), and those that have been measured.
+const inlineElements = new Set<ViewElement>();
+const mounted = new WeakSet<ViewElement>();
+let generation = 0; // goes up when the view elements are all replaced
+let sentMenu: unknown = null;
+const blobUrls = new Map<number, string>();
 let renderQueued = false;
 let pendingAcks: number[] = [];
 let batches = 0;
 let renders = 0;
 let attachedFrame: number | null = null;
+let attaches = 0;
 let statusEl: HTMLDivElement | null = null;
 let shownMessage: { text: string; kind: string } | null = null;
 
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
 const input = new Input(root, rpc, { mac, optionIsMeta: true }, () => focusedElement());
+
+const workspace = new Workspace({
+  viewRoot: (id) => {
+    const model = frame.views.get(id);
+    return model ? elementFor(model, false).root : null;
+  },
+  // The engine is the authority: say what was asked and wait for its `layout`.
+  panelAction: (panel, action, arg) => {
+    void rpc.call("ui.panel", panel, action, arg ?? null).catch((error: unknown) => console.error(error));
+  },
+  splitResized: (split, ratios) => {
+    void rpc.call("view.split_resized", split, ratios).catch((error: unknown) => console.error(error));
+  },
+  positionRect: (view, line, offset) => {
+    const model = frame.views.get(view);
+    const element = model ? elements.get(model) : undefined;
+    const caret = element?.geometry.caret(line, offset);
+    return caret ? new DOMRect(caret.left, caret.top, caret.width, caret.bottom - caret.top) : null;
+  },
+});
+chrome.main.prepend(workspace.root, workspace.floatingLayer);
+
+ViewElement.host = {
+  resourceUrl: (id) => {
+    const resource = frame.resources.get(id);
+    if (!resource || resource.kind !== "image") return null;
+    // A file is fetched through the main process, which serves only what the
+    // engine defined for this frame (FRONTEND 9).
+    if (typeof resource.source["path"] === "string") return attachedFrame === null ? null : `neomacs-resource://frame-${attachedFrame}/${id}`;
+    const data = resource.source["data"];
+    const mime = resource.source["mime"];
+    if (typeof data !== "string" || typeof mime !== "string" || !/^image\/[a-z0-9.+-]+$/i.test(mime)) return null;
+    let url = blobUrls.get(id);
+    if (!url) {
+      try {
+        const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+        blobUrls.set(id, url);
+      } catch {
+        return null;
+      }
+    }
+    return url;
+  },
+  inlineRoot: (id) => {
+    const model = frame.views.get(id);
+    if (!model) return null;
+    const element = elementFor(model, true);
+    inlineElements.add(element);
+    return element.root;
+  },
+  resized: () => queueRender(),
+};
+
+function viewOf(target: Element): ViewElement | null {
+  const root = target.closest(".nm-view");
+  if (!root) return null;
+  for (const element of elements.values()) if (element.root === root) return element;
+  return null;
+}
+
+const mouse = new Mouse(root, rpc, {
+  viewOf,
+  pathsOf: (files) => host.pathsOf(files),
+  middlePaste: () => {
+    // The click has put the cursor there; now what was selected, or copied, goes in.
+    void host.clipboardRead("primary").then((text) => {
+      if (text.length > 0) rpc.notify("input.paste", text, "primary");
+    });
+  },
+});
 
 function focusedElement(): ViewElement | null {
   const model = frame.focus !== null ? frame.views.get(frame.focus) : undefined;
@@ -86,40 +172,49 @@ function runsText(runs: unknown): string {
 /** Create, place and remove view elements to match the model. */
 function syncViews(): void {
   const live = new Set<ViewModel>();
-  const main = frame.mainView;
-  if (main) {
-    live.add(main);
-    const element = elementFor(main, false);
-    if (mainElement !== element) {
-      mainElement?.root.remove();
-      mainElement = element;
-      chrome.main.prepend(element.root);
-      element.mounted();
-      status(null);
-    }
+  // The main area and the panels.
+  const before = new Map<ViewElement, Element | null>();
+  for (const element of elements.values()) before.set(element, element.root.parentElement);
+  for (const id of workspace.update(frame.layout as Layout | null, generation)) {
+    const model = frame.views.get(id);
+    if (model) live.add(model);
   }
+  const main = frame.mainView;
+  mainElement = (main ? elements.get(main) : undefined) ?? null;
+  if (mainElement) status(null);
   // The prompt: the minibuffer the engine put in the prompt area.
   let prompt: ViewElement | null = null;
   let label = "";
   for (const [id, shown] of frame.minibuffers) {
-    if (shown.host["kind"] !== "prompt") continue; // named places are stage F3
+    if (shown.host["kind"] !== "prompt") continue; // this frontend offers no named places
     const model = frame.views.get(id);
     if (!model) continue;
     live.add(model);
-    const fresh = !elements.has(model);
     prompt = elementFor(model, true);
     prompt.minLines = Number(shown.options["min_lines"] ?? 1);
     prompt.maxLines = shown.options["multiline"] ? Number(shown.options["max_lines"] ?? 10) : 1;
     label = runsText(shown.options["label"]);
     chrome.setPrompt(label, prompt.root);
-    if (fresh) prompt.mounted();
   }
   if (!prompt) chrome.setPrompt(null, null);
+  // A minibuffer embedded in a line lives as long as that line is in the page.
+  for (const element of inlineElements) {
+    if (element.root.isConnected && frame.views.get(element.model.id) === element.model) live.add(element.model);
+    else inlineElements.delete(element);
+  }
   for (const [model, element] of elements) {
     if (!live.has(model)) {
       element.destroy();
       elements.delete(model);
       if (mainElement === element) mainElement = null;
+      continue;
+    }
+    if (!element.root.isConnected) continue;
+    if (!mounted.has(element)) {
+      mounted.add(element);
+      element.mounted();
+    } else if (before.get(element) !== element.root.parentElement) {
+      element.reparented();
     }
   }
   const popup = frame.popup;
@@ -134,7 +229,22 @@ function render(): void {
   const focused = focusedElement();
   for (const element of elements.values()) {
     element.focused = element === focused;
-    element.render();
+    if (element.root.isConnected) element.render();
+  }
+  // A line just drawn may have embedded a minibuffer: measure and draw it now.
+  for (const element of inlineElements) {
+    if (element.root.isConnected && !mounted.has(element)) {
+      mounted.add(element);
+      element.mounted();
+      element.focused = element === focusedElement();
+      element.render();
+    }
+  }
+  workspace.placeFloating();
+  if (frame.menu !== sentMenu) {
+    // The application menu is the main process's to build (FRONTEND 8.4).
+    sentMenu = frame.menu;
+    host.setMenu(frame.menu);
   }
   if (frame.message && frame.message !== shownMessage) {
     shownMessage = frame.message;
@@ -184,9 +294,7 @@ rpc.onNotification("redraw", (events) => {
   }
   if (frame.resets !== before) {
     // The views were replaced: their elements go too.
-    for (const element of elements.values()) element.destroy();
-    elements.clear();
-    mainElement = null;
+    dropElements();
   }
   for (const element of elements.values()) element.batchApplied();
   queueRender();
@@ -219,13 +327,40 @@ rpc.onRequest("layout.line_edge", (view, line, offset, which) =>
 rpc.onRequest("layout.rect", (view, line, offset) => withView(view, (v) => v.geometry.rect(line as number, offset as number)));
 rpc.onRequest("layout.viewport", (view) => withView(view, (v) => Promise.resolve(v.viewportInfo())));
 
+// -- what only the main process can do (FRONTEND 8.4, 10) --------------------------
+
+rpc.onNotification("clipboard.set", (which, content) => {
+  const text = (content as { text?: Json } | null)?.text;
+  if (typeof text === "string") host.clipboardWrite(typeof which === "string" ? which : "clipboard", text);
+});
+rpc.onRequest("clipboard.get", async (which) => ({ text: await host.clipboardRead(typeof which === "string" ? which : "clipboard") }));
+rpc.onNotification("ui.open_frame", (options) => host.openFrame(options ?? {}));
+host.onMenuCommand((command) => {
+  if (command === "yank") {
+    // The menu's Paste: what is on the clipboard, sent as a paste.
+    void host.clipboardRead("clipboard").then((text) => rpc.notify("input.paste", text, "clipboard"));
+    return;
+  }
+  void rpc.call("engine.call", command, []).catch((error: unknown) => console.error(error));
+});
+
 // -- attaching -------------------------------------------------------------------
+
+/** Throw away every view element: the views they drew have been replaced. */
+function dropElements(): void {
+  for (const element of elements.values()) element.destroy();
+  elements.clear();
+  inlineElements.clear();
+  mainElement = null;
+  generation += 1;
+  for (const url of blobUrls.values()) URL.revokeObjectURL(url);
+  blobUrls.clear();
+}
 
 async function attach(state: ConnectState): Promise<void> {
   rpc.abandon("reconnected");
-  for (const element of elements.values()) element.destroy();
-  elements.clear();
-  mainElement = null;
+  dropElements();
+  attaches += 1;
   frame = new FrameModel();
   faces.clear();
   pendingAcks = [];
@@ -235,7 +370,8 @@ async function attach(state: ConnectState): Promise<void> {
     await rpc.call("ui.resync");
     return;
   }
-  const options: { [key: string]: Json } = { protocol: PROTOCOL, capabilities: [] };
+  // "panels": this frontend draws window splits and panels (ENGINE 8.5).
+  const options: { [key: string]: Json } = { protocol: PROTOCOL, capabilities: ["panels"] };
   let reply: Json;
   try {
     if (state.frame !== null && state.token !== null) {
@@ -284,7 +420,61 @@ window.neomacsDebug = {
     chrome: chrome.snapshot(),
     input: { keys: input.keysSent, texts: input.textsSent, editContext: input.hasEditContext },
     activeIsRoot: document.activeElement === root,
+    attaches,
+    mouse: { sent: mouse.sent, drops: mouse.drops },
+    layoutRebuilds: workspace.rebuilds,
   }),
+  /** The arrangement as drawn: every view on show with its rectangle, and the panels. */
+  arrangement: () => {
+    const rect = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+    };
+    return {
+      views: [...elements.values()]
+        .filter((e) => e.root.isConnected)
+        .map((e) => ({
+          id: e.model.id,
+          name: e.model.info.name ?? "",
+          rect: rect(e.root),
+          focused: e.root.classList.contains("nm-focused"),
+          modeline: e.snapshot()["modeline"],
+          inPanel: e.root.closest(".nm-panel")?.getAttribute("data-name") ?? null,
+          inline: e.root.closest(".nm-inline-minibuffer") !== null,
+          // The text of its lines, without the gutter.
+          text: [...e.root.querySelectorAll(":scope > .nm-scroller > .nm-lines > .nm-line > .nm-content")].map((c) => c.textContent).join("\n"),
+        })),
+      panels: [...document.querySelectorAll<HTMLElement>(".nm-panel")].map((p) => ({
+        id: Number(p.dataset["panel"]),
+        name: p.dataset["name"],
+        floating: p.classList.contains("nm-floating"),
+        rect: rect(p),
+        tabs: [...p.querySelectorAll(".nm-tab-title")].map((t) => t.textContent),
+        active: p.querySelector(".nm-tab-active .nm-tab-title")?.textContent ?? null,
+      })),
+      dividers: [...document.querySelectorAll(".nm-divider")].map(rect),
+      workspace: rect(workspace.root),
+    };
+  },
+  /** The view showing the buffer of this name, as `snapshot().view` describes the main one. */
+  viewNamed: (name: string) => {
+    for (const element of elements.values()) if (element.model.info.name === name && element.root.isConnected) return element.snapshot();
+    return null;
+  },
+  /** Where a position is on screen, in client coordinates: for aiming the mouse in tests. */
+  pointAt: (view: number, line: number, offset: number) => {
+    const model = frame.views.get(view);
+    const caret = model ? elements.get(model)?.geometry.caret(line, offset) : null;
+    return caret ? { x: caret.left + 1, y: (caret.top + caret.bottom) / 2, width: caret.width } : null;
+  },
+  images: () =>
+    [...document.querySelectorAll<HTMLImageElement>("img.nm-image, img.nm-gutter-image")].map((img) => ({
+      src: img.src,
+      complete: img.complete,
+      naturalWidth: img.naturalWidth,
+      width: Math.round(img.getBoundingClientRect().width),
+      alt: img.alt,
+    })),
   metrics: () => mainElement?.metrics() ?? null,
   coverage: () => mainElement?.coverage() ?? null,
   lineY: (line: number) => mainElement?.lineY(line) ?? null,

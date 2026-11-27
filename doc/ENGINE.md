@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 25, 2026-11-27. Stages 0 to 6 are implemented; see
+Status: draft 26, 2026-11-27. Stages 0 to 6 are implemented; see
 IMPLEMENTATION.md for what exists. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
@@ -180,8 +180,8 @@ timestamp, to a file for debugging.
 | `ui.resync()` | request | Ask for the full state again on this connection (4.6). |
 | `ui.detach()` | notification | Stop redraw and delete the frame. |
 | `view.viewport(win, first_line, last_line, page_lines)` | notification | The lines now visible in a window, after the UI scrolled, resized or re-wrapped. The engine makes sure the UI holds those lines plus a margin. |
-| `view.split_resized(split, ratios)` | notification | The user dragged a divider. |
-| `ui.panel(panel, action, arg)` | notification | The user acted on a panel in the frontend (4.3). |
+| `view.split_resized(split, ratios)` | notification or request | The user dragged a divider: the children of that split now share its space in these ratios. The engine normalises them and answers with a new `layout`. Sent as a request, bad ratios or an unknown split come back as an error. |
+| `ui.panel(panel, action, arg)` | request | The user acted on a panel in the frontend: `activate_tab` or `close_tab` (`arg` is the tab's view), `hide`, `dock` (a side), `float`, or `resize` (the fraction of the frame it should take). The engine stays the authority and answers with a new `layout`. |
 | `view.ack(seq)` | notification | The batch whose `flush` carried `seq` has been applied (4.8). |
 | `input.key(key)` | notification | One key in canonical notation (4.7). |
 | `input.text(text)` | notification | Committed text from an input method. |

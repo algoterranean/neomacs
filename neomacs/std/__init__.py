@@ -102,6 +102,7 @@ _BINDINGS = {
     "<f1> k": "describe_key", "<f1> x": "describe_command", "<f1> v": "describe_option",
     "<f1> a": "apropos",
     # mouse
+    "<mouse-2>": "mouse.set_cursor",  # a middle click: here, then the paste the frontend sends
     "<mouse-1>": "mouse.set_cursor", "<drag-mouse-1>": "mouse.drag",
     "M-<mouse-1>": "mouse.add_cursor",
     "<double-mouse-1>": "mouse.select_word", "<triple-mouse-1>": "mouse.select_line",

@@ -8,7 +8,7 @@ from typing import Any
 from neomacs.errors import RpcError
 from neomacs.rpc.api import CAPABILITIES, PROTOCOL, method
 from neomacs.rpc.protocol import Connection
-from neomacs.window import Frame
+from neomacs.window import Frame, Split
 
 PROTOCOL_MISMATCH = -32001
 NO_SUCH_FRAME = -32002
@@ -198,7 +198,8 @@ def interrupt(conn: Connection) -> None:
 @method("ui.panel")
 def panel(conn: Connection, panel: int, action: str, arg: Any = None) -> None:
     """The user acted on a panel in the frontend: `activate_tab` or `close_tab`
-    (ARG is the tab's view), `hide`, `dock` (ARG is a side) or `float`.  The
+    (ARG is the tab's view), `hide`, `dock` (ARG is a side), `float`, or
+    `resize` (ARG is the fraction of the frame it should take).  The
     engine stays the authority and answers with a new `layout`."""
     frame = _frame(conn)
     target = next((p for p in frame.panels.values() if p.id == panel), None)
@@ -219,9 +220,46 @@ def panel(conn: Connection, panel: int, action: str, arg: Any = None) -> None:
         target.dock(str(arg))
     elif action == "float":
         target.float(arg or "center")
+    elif action == "resize":
+        try:
+            target.size = max(0.08, min(0.9, float(arg)))
+        except TypeError, ValueError:
+            raise RpcError(f"not a size: {arg!r}") from None
+        frame.schedule_update()
     else:
         raise RpcError(f"unknown panel action: {action}")
     conn.editor.last_frame = frame
+
+
+@method("view.split_resized")
+def split_resized(conn: Connection, split: int, ratios: list[float]) -> None:
+    """The user dragged a divider: the children of SPLIT now share its space
+    in RATIOS.  The engine answers with a new `layout`."""
+    frame = _frame(conn)
+
+    def find(node: Any) -> Any:
+        if not isinstance(node, Split):
+            return None
+        if node.id == split:
+            return node
+        for child in node.children:
+            found = find(child)
+            if found is not None:
+                return found
+        return None
+
+    target = find(frame.root)
+    if target is None:
+        raise RpcError(f"no such split: {split}")
+    try:
+        values = [float(r) for r in ratios]
+    except TypeError, ValueError:
+        raise RpcError("ratios must be numbers") from None
+    if len(values) != len(target.children) or any(v <= 0 for v in values):
+        raise RpcError(f"split {split} needs {len(target.children)} positive ratios")
+    total = sum(values)
+    target.ratios = [v / total for v in values]
+    frame.schedule_update()
 
 
 class IdleRequest:
