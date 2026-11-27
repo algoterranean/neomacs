@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, cast
 
+from neomacs.clipboard import Entry
 from neomacs.commands import KeyText, Prefix, command
 from neomacs.editor import ed
 from neomacs.selection import Selection
@@ -96,7 +97,7 @@ def transpose_chars(sel: Selection) -> None:
 def _kill(ranges: list[tuple[Selection, int, int]], *, delete: bool = True) -> None:
     """Put the text of RANGES on the kill ring as one entry, and delete it if asked."""
     pieces = [sel.buffer[start:end] for sel, start, end in ranges]
-    ed.kill_ring.push(pieces, ed.frame)
+    ed.kill_ring.push(pieces, ed.frame, source="kill" if delete else "copy")
     if delete:
         # Select everything first: the ranges are positions, and stop being
         # right as soon as the first one is deleted.
@@ -165,6 +166,36 @@ def backward_kill_word(n: Annotated[int, Prefix()] = 1) -> None:
     _kill(ranges)
 
 
+def insert_entry(view: Any, entry: Entry, replace: list[tuple[int, int]] | None = None) -> None:
+    """Insert ENTRY at every selection of VIEW, or in place of REPLACE, the
+    ranges a yank just made.  What is inserted is remembered, for a
+    `yank_from_ring` that follows to replace in its turn."""
+    if replace is not None:
+        view.selections.set(replace)
+    selections = list(view.selections)
+    texts = ed.kill_ring.distribute(entry, len(selections))
+    for sel, text in zip(selections, texts, strict=True):
+        sel.replace(text)
+    made = [
+        (sel.head.pos - len(text), sel.head.pos)
+        for sel, text in zip(selections, texts, strict=True)
+    ]
+    view.buffer.locals["_last_yank"] = (view.id, view.buffer.tick, made)
+
+
+def last_yank(view: Any) -> list[tuple[int, int]] | None:
+    """The ranges the last yank in VIEW inserted, if nothing has changed the
+    buffer since and no other command has run (KILLRING K4)."""
+    found: Any = view.buffer.locals.get("_last_yank")
+    last: Any = view.frame.last_command
+    if found is None or last is None or last[0] not in ("yank", "yank_from_ring"):
+        return None
+    view_id, tick, made = found
+    if view_id != view.id or tick != view.buffer.tick:
+        return None
+    return list(made)
+
+
 @command
 async def yank() -> None:
     """Insert the most recently killed text, or the system clipboard if it is newer."""
@@ -173,9 +204,7 @@ async def yank() -> None:
     if entry is None:
         ed.message("The kill ring is empty")
         return
-    selections = list(view.selections)
-    for sel, text in zip(selections, ed.kill_ring.distribute(entry, len(selections)), strict=True):
-        sel.replace(text)
+    insert_entry(view, entry)
 
 
 @command

@@ -215,7 +215,7 @@ decides how it looks on screen.
 | `["reveal", win, line, offset, align]` | Scroll so the position, normally the primary cursor, is visible. `align` is `nearest`, `center`, `top` or `bottom`. |
 | `["modeline", win, runs, right]` | The window's status line. `right`, which may be left out, is runs drawn at its right-hand end; where the two do not both fit, `runs` is cut short. |
 | `["popup_show", items, selected, win, line, offset]`, `["popup_hide"]` | A completion or menu popup anchored to a buffer position. The UI draws and places it. |
-| `["minibuffer_show", view, host, options]`, `["minibuffer_hide", view]` | Display or remove a minibuffer that is not inline. `host` is `{"kind": "prompt"}` for the frame's prompt area, or `{"kind": "place", "name": ...}` for a named part of the UI. `options` has `label` (runs), `multiline`, `min_lines`, `max_lines`, `placeholder`, `masked`. Its text arrives through `lines` like any view's. |
+| `["minibuffer_show", view, host, options]`, `["minibuffer_hide", view]` | Display or remove a minibuffer that is not inline. `host` is `{"kind": "prompt"}` for the frame's prompt area, or `{"kind": "place", "name": ...}` for a named part of the UI. `options` has `label` (runs), `multiline`, `min_lines`, `max_lines`, `placeholder`, `masked`, and optionally `preview`: the id of a view to draw beside the minibuffer's candidates, showing the whole of the highlighted one (the place `chooser`; KILLRING.md 7.2). Its text arrives through `lines` like any view's. |
 | `["menu", items]` | The application menu (8.6): a tree of `{"label", "command", "key", "enabled", "children"}`. Choosing an item sends `engine.call` with its command. Sent on attach and whenever it changes. |
 | `["focus", view]` | Which view has keyboard focus. |
 | `["message", runs, kind]` | A transient message for the user. `kind` is `info`, `warning`, `error`, or `keys` for a pending key sequence or prefix argument. The UI chooses where to show it. |
@@ -388,10 +388,11 @@ hands it back, and never interprets it.
 `content` and the reply are `{"text": ...}`. The shape leaves room for
 `html` and `image` entries later; `formats` is `["text"]` for now.
 
-The engine never caches the system clipboard. It asks at the moment of a
-yank, which is one awaited round trip, because a frontend cannot reliably
-learn that another application has copied something. Section 5.7 says how
-this meets the kill ring.
+The engine never caches the system clipboard. It asks when it needs to
+know, which is one awaited round trip, because a frontend cannot reliably
+learn that another application has copied something: at a yank, when the
+frontend's window regains focus, and when the kill ring's chooser opens.
+Section 5.7 and KILLRING.md say how this meets the kill ring.
 
 ### 4.6 Resync and reattach
 
@@ -677,7 +678,9 @@ class SelectionSet:  # win.selections
 **Kill ring and clipboard.** The kill ring is global to the engine and shared
 by all frames. Killing or copying with several selections pushes one entry
 holding one piece per selection, and sends the pieces joined by newlines to
-the invoking frame's frontend with `clipboard.set`.
+the invoking frame's frontend with `clipboard.set`. KILLRING.md is the full
+design: every kill is its own entry, an entry killed again moves to the top,
+and `yank_from_ring` (`M-y`) shows the ring to choose from.
 
 `yank` first awaits `clipboard.get` from the invoking frame. If the text
 differs from what the engine last sent to that frontend, another application

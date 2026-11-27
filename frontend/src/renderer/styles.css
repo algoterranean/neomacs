@@ -247,6 +247,50 @@ body {
   overflow: hidden;
 }
 
+/* A chooser: the prompt and its list on the left, a preview on the right. */
+.nm-palette.nm-chooser {
+  width: min(1100px, 92%);
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  height: min(26em, 70%);
+}
+
+.nm-palette.nm-chooser[hidden] {
+  display: none;
+}
+
+.nm-chooser .nm-palette-row {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.nm-chooser .nm-popup {
+  grid-column: 1;
+  grid-row: 2;
+  max-height: none;
+}
+
+.nm-chooser-preview {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--nm-border, #454545);
+  background: var(--nm-bg, #1e1e1e);
+  color: var(--nm-fg, #d4d4d4);
+  padding: 0.4em 0 0 0.7em;
+}
+
+.nm-chooser-preview[hidden] {
+  display: none;
+}
+
+.nm-chooser .nm-popup-item {
+  overflow: hidden;
+}
+
 .nm-palette-row {
   display: flex;
   align-items: flex-start;
