@@ -68,6 +68,7 @@ def test_a_linked_worktree(tmp_path: Path) -> None:
     assert vcs.branch(root / "a") == "main"
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no named pipes to make here")
 def test_a_head_that_is_not_a_file_is_not_waited_on(tmp_path: Path) -> None:
     # Reading a named pipe that nothing writes to would never return.
     root = tmp_path / "project"
