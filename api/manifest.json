@@ -1,0 +1,502 @@
+{
+ "format": 1,
+ "names": [
+  {
+   "name": "neomacs.hooks.Hook",
+   "kind": "class",
+   "signature": "(name: 'str', doc: 'str' = '') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.hooks.Hook.add",
+   "kind": "method",
+   "signature": "(self, fn: 'F', *, buffer: 'Any' = None) -> 'F'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.hooks.Hook.functions",
+   "kind": "method",
+   "signature": "(self, buffer: 'Any' = None) -> 'list[HookFn]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.hooks.Hook.remove",
+   "kind": "method",
+   "signature": "(self, fn: 'HookFn', *, buffer: 'Any' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.hooks.Hook.run",
+   "kind": "method",
+   "signature": "(self, *args: 'Any', buffer: 'Any' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer",
+   "kind": "class",
+   "signature": "(name: 'str', text: 'str' = '', *, file: 'Path | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.clamp",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.clusters",
+   "kind": "method",
+   "signature": "(self, start: 'int', end: 'int') -> 'Iterator[tuple[int, int]]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.cursor",
+   "kind": "method",
+   "signature": "(self, pos: 'int' = 0) -> 'Cursor'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.delete",
+   "kind": "method",
+   "signature": "(self, start: 'int', end: 'int') -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.insert",
+   "kind": "method",
+   "signature": "(self, pos: 'int', text: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.invalidate",
+   "kind": "method",
+   "signature": "(self, start: 'int', end: 'int') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.is_boundary",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.layer",
+   "kind": "method",
+   "signature": "(self, name: 'str') -> 'SpanLayer'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.line_count",
+   "kind": "property",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.line_end",
+   "kind": "method",
+   "signature": "(self, line: 'int') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.line_of",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.line_offset",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'tuple[int, int]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.line_start",
+   "kind": "method",
+   "signature": "(self, line: 'int') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.line_text",
+   "kind": "method",
+   "signature": "(self, line: 'int') -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.marker",
+   "kind": "method",
+   "signature": "(self, pos: 'int', *, advance: 'bool' = False) -> 'Marker'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.modified",
+   "kind": "property",
+   "signature": "(self) -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.next_boundary",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.position",
+   "kind": "method",
+   "signature": "(self, line: 'int', offset: 'int' = 0) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.prev_boundary",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.replace",
+   "kind": "method",
+   "signature": "(self, start: 'int', end: 'int', text: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.save",
+   "kind": "method",
+   "signature": "(self, path: 'Path | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.search",
+   "kind": "method",
+   "signature": "(self, pattern: 'str | re.Pattern[str]', start: 'int' = 0, end: 'int | None' = None, *, backward: 'bool' = False) -> 're.Match[str] | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.Buffer.text",
+   "kind": "property",
+   "signature": "(self) -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.BufferList",
+   "kind": "class",
+   "signature": "(editor: 'Editor | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.BufferList.find_file",
+   "kind": "method",
+   "signature": "(self, path: 'Path | str') -> 'Buffer | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.BufferList.get",
+   "kind": "method",
+   "signature": "(self, name: 'str') -> 'Buffer | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.BufferList.kill",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.BufferList.new",
+   "kind": "method",
+   "signature": "(self, name: 'str', text: 'str' = '') -> 'Buffer'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.buffer.BufferList.visit",
+   "kind": "method",
+   "signature": "(self, path: 'Path | str') -> 'Buffer'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor",
+   "kind": "class",
+   "signature": "(buffer: 'Buffer', pos: 'int' = 0) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.backward_char",
+   "kind": "method",
+   "signature": "(self, n: 'int' = 1) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.column",
+   "kind": "property",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.delete_backward_char",
+   "kind": "method",
+   "signature": "(self, n: 'int' = 1) -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.delete_char",
+   "kind": "method",
+   "signature": "(self, n: 'int' = 1) -> 'str'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.end_of_line",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.forward_char",
+   "kind": "method",
+   "signature": "(self, n: 'int' = 1) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.forward_line",
+   "kind": "method",
+   "signature": "(self, n: 'int' = 1) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.insert",
+   "kind": "method",
+   "signature": "(self, text: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.line",
+   "kind": "property",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.move_to",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.offset",
+   "kind": "property",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Cursor.start_of_line",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Marker",
+   "kind": "class",
+   "signature": "(buffer: 'Buffer', pos: 'int' = 0, *, advance: 'bool' = False) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Marker.detach",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.marker.Marker.pos",
+   "kind": "property",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.Span",
+   "kind": "class",
+   "signature": "(layer: 'SpanLayer', start: 'int', end: 'int', priority: 'int', props: 'dict[str, Any]') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.Span.end",
+   "kind": "property",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.Span.get",
+   "kind": "method",
+   "signature": "(self, name: 'str', default: 'Any' = None) -> 'Any'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.Span.move",
+   "kind": "method",
+   "signature": "(self, start: 'int', end: 'int') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.Span.remove",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.Span.set",
+   "kind": "method",
+   "signature": "(self, **props: 'Any') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.Span.start",
+   "kind": "property",
+   "signature": "(self) -> 'int'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.SpanLayer",
+   "kind": "class",
+   "signature": "(buffer: 'Buffer', name: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.SpanLayer.add",
+   "kind": "method",
+   "signature": "(self, start: 'int', end: 'int', *, priority: 'int' = 0, **props: 'Any') -> 'Span'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.SpanLayer.at",
+   "kind": "method",
+   "signature": "(self, pos: 'int') -> 'list[Span]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.SpanLayer.clear",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.SpanLayer.overlapping",
+   "kind": "method",
+   "signature": "(self, start: 'int', end: 'int') -> 'list[Span]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.spans.SpanLayer.remove",
+   "kind": "method",
+   "signature": "(self, span: 'Span') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.undo.UndoLog",
+   "kind": "class",
+   "signature": "(buffer: 'Buffer') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.undo.UndoLog.can_redo",
+   "kind": "property",
+   "signature": "(self) -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.undo.UndoLog.can_undo",
+   "kind": "property",
+   "signature": "(self) -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.undo.UndoLog.clear",
+   "kind": "method",
+   "signature": "(self) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.undo.UndoLog.group",
+   "kind": "method",
+   "signature": "(self) -> 'Generator[None]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.undo.UndoLog.redo",
+   "kind": "method",
+   "signature": "(self) -> 'UndoGroup | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.text.undo.UndoLog.undo",
+   "kind": "method",
+   "signature": "(self) -> 'UndoGroup | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  }
+ ]
+}

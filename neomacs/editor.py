@@ -39,6 +39,9 @@ class Editor:
 
     def _init_state(self) -> None:
         """Create the registries.  Extended as subsystems are added."""
+        from neomacs.text.buffer import BufferList
+
+        self.buffers = BufferList(self)
         self.frames: dict[int, Any] = {}
 
     # -- messages and errors ------------------------------------------------

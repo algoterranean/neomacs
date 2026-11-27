@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: plan written 2026-11-27. Step 1 done; see the progress log (section 9).
+Status: plan written 2026-11-27. Steps 1 and 2 done; see the progress log (section 9).
 
 This is the working checklist for building Neomacs. It puts the stages of the
 five design documents into one order and says, for each step, what to read,
@@ -149,25 +149,25 @@ repository if CI is to run.
 
 **Build:**
 
-- [ ] `TextStore` protocol and the chunked implementation, including the
+- [x] `TextStore` protocol and the chunked implementation, including the
       per-chunk UTF-8 byte lengths and `byte_of` / `pos_of_byte` (needed in
       step 9, cheap to do now).
-- [ ] `Buffer`, with every mutation going through `replace` in the order
+- [x] `Buffer`, with every mutation going through `replace` in the order
       ENGINE 5.2 gives.
-- [ ] `Marker` with insertion gravity, weakly held; `Cursor`.
-- [ ] Grapheme boundary functions on `Buffer`, built on
+- [x] `Marker` with insertion gravity, weakly held; `Cursor`.
+- [x] Grapheme boundary functions on `Buffer`, built on
       `unicodedata.iter_graphemes`, with the ASCII fast path and the
       one-line cache.
-- [ ] `buf.search`, on the cached snapshot.
-- [ ] Undo log with groups tagged by an invocation id (a counter for now;
+- [x] `buf.search`, on the cached snapshot.
+- [x] Undo log with groups tagged by an invocation id (a counter for now;
       the dispatcher supplies real ids in step 5), linear undo and redo.
-- [ ] A minimal `Hook`, enough for `before_change` and `after_change`.
-- [ ] File read and write: decoding, line endings, write to temporary and
+- [x] A minimal `Hook`, enough for `before_change` and `after_change`.
+- [x] File read and write: decoding, line endings, write to temporary and
       rename, `before_save` and `after_save`.
-- [ ] Span layers: storage, tracking through edits, the property dict.
+- [x] Span layers: storage, tracking through edits, the property dict.
       Decoration providers wait for step 9.
-- [ ] The owner-thread assertion in every mutator, on in tests.
-- [ ] T0: `@stable` and `@provisional` markers; the manifest generator; the
+- [x] The owner-thread assertion in every mutator, on in tests.
+- [x] T0: `@stable` and `@provisional` markers; the manifest generator; the
       committed `api/manifest.json`; the CI check that regenerating it
       changes nothing.
 
@@ -679,4 +679,5 @@ Add a row when a step or gate is finished, or when the design changed.
 |---|---|---|---|
 | 2026-11-27 | Planning | | Plan written. Five corrections made to the design documents (section 8). |
 | 2026-11-27 | Step 1 | this commit | Done except CI, which is written but has never run (no remote). PyPI name not registered (needs the user). Differences from the design: `wcwidth` dropped in favour of `unicodedata`, since its current release ships compiled wheels (ENGINE 12, DISTRIBUTION 3.1 updated); `engine.exit` notification, the `NEOMACS-LISTENING` readiness line and `--exit-with-parent` added (ENGINE 4.1, 4.2). Verified by hand: `1 + 1` over a socket and over stdio; an exception returns an error and the engine keeps running; a built wheel installs into a clean free-threaded 3.15 environment and starts with the GIL disabled. |
+| 2026-11-27 | Step 2 | this commit | Done. No differences from the design. `GraphemeBreakTest.txt` for Unicode 17.0 is vendored under `tests/data/` (Unicode licence) so the test needs no network; it is skipped if the library's Unicode version has no matching file. The type checker's stubs do not know `unicodedata.iter_graphemes` yet, so that one call is typed as `Any`. Verified by hand over `engine.eval`: open a file, edit, undo, save. |
 | | | | |

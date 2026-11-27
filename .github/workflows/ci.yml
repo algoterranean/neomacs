@@ -35,6 +35,8 @@ jobs:
         run: npx --yes pyright
       - name: Test
         run: uv run --python .venv python -m pytest
+      - name: API manifest is up to date
+        run: uv run --python .venv python -m neomacs.tools.manifest --check
 
   wheel:
     name: wheel installs and starts
