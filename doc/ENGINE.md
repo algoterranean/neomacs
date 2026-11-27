@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 15, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 16, 2026-11-27. Nothing is implemented. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
 This describes the backend ("engine") of Neomacs, a new, Python-native
@@ -1569,7 +1569,10 @@ worker threads, and reports the fact in `*messages*`.
 
 ## 13. Implementation stages
 
-Each stage ends with something that can be run and checked.
+The engine has eight stages, 0 to 7. Each ends with something that can be
+run and checked using only the terminal frontend, so the engine can be built
+and used to completion without any Electron work. The Electron frontend is a
+parallel track, described after the stages.
 
 **Stage 0: skeleton and RPC.** Package, `Editor`, reader thread, JSON-RPC
 framing, `engine.api_info`, `engine.eval`, the error wrapper, a Python test
@@ -1600,7 +1603,9 @@ selection sets with per-selection
 dispatch, the jump list, and the standard commands for movement, selecting,
 adding and removing cursors, killing and yanking, files, buffers and running
 a command by name. `ed.show` with roles, every role placed in the main area
-until panels arrive in stage 6. The context rules of 7.7.
+until panels arrive in stage 6. The context rules of 7.7. The remaining
+input messages (`input.text`, `input.paste`, `input.mouse`, `input.drop`),
+the menu registry and `menu` event, and `new_frame` with `ui.open_frame`.
 *Runnable:* a usable minimal editor in which a deliberately slow command
 leaves the display live, keeps typed-ahead keys in order, and is cancelled by
 `C-g`; typing with three cursors edits three places and undoes in one step.
@@ -1623,7 +1628,8 @@ tables, span layers, decoration providers, scanner-based highlighting for
 every mode, the tree-sitter layer and Python queries where the binding
 loads, the expression, selection-expanding, comment and indentation
 commands, incremental search with `add_next_match` and `select_all_matches`, window splits, and panels: docked
-and floating, with tabs, and the default placement table. *Runnable:* highlighted Python with
+and floating, with tabs, and the default placement table. Paragraph
+attributes on lines, and resources with inline images. *Runnable:* highlighted Python with
 structural selection and search, a cursor on every match of a word, and the
 same session with tree-sitter uninstalled.
 
@@ -1631,9 +1637,28 @@ same session with tree-sitter uninstalled.
 crash-recovery journal for unsaved buffers. *Runnable:* a shell command's
 output streamed into a buffer; configuration that survives restart.
 
-**Stage 8: Electron frontend.** Separate design document. The engine side
-adds resources (images), paragraph attributes and input method handling as
-the frontend needs them.
+### 13.1 Parallel tracks
+
+The other four documents have stages of their own. Each can start once the
+engine stage it needs is done, and none of them holds up the next engine
+stage.
+
+| After engine stage | Electron frontend (FRONTEND.md) | Other tracks |
+|---|---|---|
+| 0 | F0: shell and connection | P0: the wheel (DISTRIBUTION.md); then P1, the unsigned app, once F0 exists |
+| 1 | | T0: markers and manifest (STABILITY.md) |
+| 2 | F1: one view | T1: protocol version |
+| 3 | F2: input and geometry | T2: deprecation machinery |
+| 6 | F3: frame chrome; F4: the rest of the protocol | |
+| 7 | F5: finish | X0 to X4: extensions (EXTENSIONS.md); then T4 |
+
+The remaining distribution stages (P2 to P5) and the release checks and 1.0
+freeze (T3, T5) follow once there is something to release.
+
+There is no engine stage for "the Electron frontend". Everything the engine
+does for a rich frontend is protocol work that the terminal frontend and the
+headless test client also exercise, and it is assigned to stages 2, 3 and 6
+above.
 
 ## 14. Verification
 

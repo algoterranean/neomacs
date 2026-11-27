@@ -1,6 +1,6 @@
 # Electron frontend design
 
-Status: draft 3, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 4, 2026-11-27. Nothing is implemented. The decisions in
 section 2 are confirmed.
 
 This describes the Electron frontend of `neomacs`. It is the client side of the
@@ -389,6 +389,9 @@ moving the cursor does not re-lay-out lines.
 ## 13. Implementation stages
 
 Each depends on the engine stage named and ends with something runnable.
+The frontend is a track parallel to the engine's stages, not a stage after
+them (ENGINE.md 13.1): a frontend stage can start as soon as its engine
+stage is done.
 
 **F0: shell and connection** (engine stage 0). Main process, engine
 discovery, relay, preload, sandbox and policy; the renderer shows a log of
@@ -410,12 +413,12 @@ gutter, margins and tab stops, panels docked and floating with tabs, inline
 minibuffers. *Runnable:* the debugger's layout, with source, a bottom panel
 and breakpoints in the gutter.
 
-**F4: the rest of the protocol.** Images and the resource protocol,
-clipboard, mouse with click counts, file drop, several windows, reconnect
-with reattach. *Runnable:* an image in a buffer; a second window on the same
+**F4: the rest of the protocol** (engine stages 3 and 6). Images and the
+resource protocol, clipboard, mouse with click counts, file drop, the
+application menu, several windows, reconnect with reattach. *Runnable:* an image in a buffer; a second window on the same
 buffer; kill the socket and recover.
 
-**F5: finish.** Performance budgets enforced, themes, basic accessibility
+**F5: finish** (engine stage 7). Performance budgets enforced, themes, basic accessibility
 (section 1), packaging hooks for DISTRIBUTION.md.
 
 ## 14. Open questions
