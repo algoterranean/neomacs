@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: plan written 2026-11-27. No step has been started.
+Status: plan written 2026-11-27. Step 1 done; see the progress log (section 9).
 
 This is the working checklist for building Neomacs. It puts the stages of the
 five design documents into one order and says, for each step, what to read,
@@ -26,8 +26,8 @@ on. The design documents remain the specification:
 - When what was built differs from the design, change the design document in
   the same commit and add a line to the progress log (section 9). A design
   document that no longer describes the code is a bug.
-- Commit at least once per ticked item, and make one commit that closes each
-  step.
+- Make one commit at the end of each step, containing the code, the ticked
+  boxes and the progress log row.
 - If something in a design document turns out to be wrong or missing, stop
   and fix the document first. Section 8 records the cases found so far.
 
@@ -107,30 +107,32 @@ blocks"), 12, 13 (Stage 0). DISTRIBUTION 3.1, 5, 13 (P0).
 
 **Build:**
 
-- [ ] `pyproject.toml`: name `neomacs`, `requires-python >= 3.15`, MIT, the
+- [x] `pyproject.toml`: name `neomacs`, `requires-python >= 3.15`, MIT, the
       `neomacs` console entry point; `LICENSE`; a short `README`.
-- [ ] Package skeleton following ENGINE 12, empty modules where needed.
-- [ ] `Editor`, and `ed` as a proxy to the current editor through a context
+- [x] Package skeleton following ENGINE 12, empty modules where needed.
+- [x] `Editor`, and `ed` as a proxy to the current editor through a context
       variable, so tests can make their own.
-- [ ] Transport: listen on a Unix socket (directory 0700, socket 0600) and on
+- [x] Transport: listen on a Unix socket (directory 0700, socket 0600) and on
       stdio; newline-delimited JSON; a reader thread that posts to the loop;
       a writer queue so the main loop never blocks on the socket.
-- [ ] Socket path length check with the `/tmp/neomacs-<uid>/` fallback
+- [x] Socket path length check with the `/tmp/neomacs-<uid>/` fallback
       (DISTRIBUTION 5).
-- [ ] JSON-RPC layer: requests, responses and notifications in both
+- [x] JSON-RPC layer: requests, responses and notifications in both
       directions, each side numbering its own ids; errors carry the Python
       exception type and traceback.
-- [ ] `engine.api_info`, generated from signatures and docstrings.
-- [ ] `engine.eval` into a scratch module. A plain `compile` and `exec` is
+- [x] `engine.api_info`, generated from signatures and docstrings.
+- [x] `engine.eval` into a scratch module. A plain `compile` and `exec` is
       enough here; the real pipeline is step 7.
-- [ ] `engine.call`, returning "no such command" until step 5.
-- [ ] The error wrapper (ENGINE 3): nothing evaluated can kill the engine.
-- [ ] `NEOMACS_RPC_LOG`.
-- [ ] A Python client for tests: connect, call, collect notifications. This
+- [x] `engine.call`, returning "no such command" until step 5.
+- [x] The error wrapper (ENGINE 3): nothing evaluated can kill the engine.
+- [x] `NEOMACS_RPC_LOG`.
+- [x] A Python client for tests: connect, call, collect notifications. This
       is the seed of `neomacs.testing`.
 - [ ] CI: Linux and macOS on free-threaded 3.15, plus Windows as a
       non-blocking job; tests, type check, lint, the GIL check; build the
-      wheel and install it into a clean environment.
+      wheel and install it into a clean environment. *Workflow written
+      (`.github/workflows/ci.yml`) but never run: the repository has no
+      remote. The same checks were run locally.*
 
 **Done when:** start the engine on a socket, connect from a script, evaluate
 `1 + 1`, and see an exception come back as an error with the engine still
@@ -676,4 +678,5 @@ Add a row when a step or gate is finished, or when the design changed.
 | Date | Step or gate | Commit | Notes: what differed from the design, what was verified |
 |---|---|---|---|
 | 2026-11-27 | Planning | | Plan written. Five corrections made to the design documents (section 8). |
+| 2026-11-27 | Step 1 | this commit | Done except CI, which is written but has never run (no remote). PyPI name not registered (needs the user). Differences from the design: `wcwidth` dropped in favour of `unicodedata`, since its current release ships compiled wheels (ENGINE 12, DISTRIBUTION 3.1 updated); `engine.exit` notification, the `NEOMACS-LISTENING` readiness line and `--exit-with-parent` added (ENGINE 4.1, 4.2). Verified by hand: `1 + 1` over a socket and over stdio; an exception returns an error and the engine keeps running; a built wheel installs into a clean free-threaded 3.15 environment and starts with the GIL disabled. |
 | | | | |

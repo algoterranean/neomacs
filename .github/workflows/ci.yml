@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, experimental: false }
+          - { os: macos-latest, experimental: false }
+          # Windows is built and tested from the start but not released yet
+          # (DISTRIBUTION P4), so its failures do not block.
+          - { os: windows-latest, experimental: true }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install free-threaded Python
+        run: uv python install 3.15t
+      - name: Create environment
+        run: |
+          uv venv --python 3.15t .venv
+          uv pip install --python .venv -e ".[dev]"
+      - name: Lint
+        run: |
+          uv run --python .venv ruff check .
+          uv run --python .venv ruff format --check .
+      - name: Type check
+        run: npx --yes pyright
+      - name: Test
+        run: uv run --python .venv python -m pytest
+
+  wheel:
+    name: wheel installs and starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv python install 3.15t
+      - run: uv build --wheel
+      - name: Install into a clean environment and start
+        run: |
+          uv venv --python 3.15t /tmp/clean
+          uv pip install --python /tmp/clean dist/*.whl
+          /tmp/clean/bin/neomacs --version
+          /tmp/clean/bin/python - <<'PY'
+          import json, subprocess, sys
+          p = subprocess.Popen(["/tmp/clean/bin/neomacs", "--stdio"],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+          p.stdin.write(b'{"jsonrpc":"2.0","id":1,"method":"engine.eval","params":["1 + 1"]}\n')
+          p.stdin.flush()
+          assert json.loads(p.stdout.readline())["result"] == "2"
+          p.stdin.write(b'{"jsonrpc":"2.0","method":"engine.exit","params":[]}\n')
+          p.stdin.flush()
+          sys.exit(p.wait(timeout=10))
+          PY

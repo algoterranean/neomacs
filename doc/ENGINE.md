@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 17, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 18, 2026-11-27. Nothing is implemented. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
 This describes the backend ("engine") of Neomacs, a new, Python-native
@@ -147,6 +147,12 @@ socket created with mode 0600 (`python -m neomacs --listen PATH`), which lets a
 frontend, a test client or a script attach to a running engine. There is no
 TCP listener by default, because the protocol can evaluate arbitrary code.
 
+When it starts with `--listen` the engine prints one line,
+`NEOMACS-LISTENING <path>`, on standard output once the socket is ready; a
+parent process waits for that line before connecting. With
+`--exit-with-parent` the engine exits when the process that started it goes
+away.
+
 Setting `NEOMACS_RPC_LOG=path` copies every message, with a direction and a
 timestamp, to a file for debugging.
 
@@ -157,6 +163,7 @@ timestamp, to a file for debugging.
 | `engine.api_info()` | request | Protocol version and the list of methods, generated from the Python signatures and docstrings. |
 | `engine.eval(source, mode="auto")` | request | Evaluate Python in the scratch module; returns `repr` or an error. Used by scripts and tests. |
 | `engine.call(command, args)` | request | Run a named command. |
+| `engine.exit()` | notification | Ask the engine to exit. Sent by the app when it quits (DISTRIBUTION.md section 7). |
 | `ui.attach(options)` | request | Carries the frontend's protocol version and capabilities, which must be compatible (STABILITY.md section 5). Create a frame for this connection and start receiving `redraw` for it. Options name the UI's capabilities, e.g. `{"rich_text": true, "images": true}`. Returns the frame id and a reattach token. With `{"frame": id, "token": ...}` it reattaches to an existing frame instead (4.6). |
 | `ui.resync()` | request | Ask for the full state again on this connection (4.6). |
 | `ui.detach()` | notification | Stop redraw and delete the frame. |
@@ -423,14 +430,14 @@ acknowledged like any other.
 
 ```python
 class TextStore(Protocol):
-    def __len__(self) -> int: ...                 # code points
+    def __len__(self) -> int: ...  # code points
     def slice(self, start: int, end: int) -> str: ...
     def replace(self, start: int, end: int, text: str) -> None: ...
     def line_count(self) -> int: ...
-    def line_start(self, line: int) -> int: ...   # 1-based line -> position
+    def line_start(self, line: int) -> int: ...  # 1-based line -> position
     def line_of(self, pos: int) -> int: ...
-    def snapshot(self) -> str: ...                # whole text, cached until next edit
-    def byte_of(self, pos: int) -> int: ...       # UTF-8 byte offset, for tree-sitter
+    def snapshot(self) -> str: ...  # whole text, cached until next edit
+    def byte_of(self, pos: int) -> int: ...  # UTF-8 byte offset, for tree-sitter
     def pos_of_byte(self, byte: int) -> int: ...
 ```
 
@@ -452,24 +459,30 @@ class Buffer:
     name: str
     file: Path | None
     store: TextStore
-    tick: int                    # incremented on every change
-    saved_tick: int              # tick at last save; modified = tick != saved_tick
+    tick: int  # incremented on every change
+    saved_tick: int  # tick at last save; modified = tick != saved_tick
     read_only: bool
-    mode: Mode                   # major mode instance
+    mode: Mode  # major mode instance
     minor_modes: list[Mode]
-    options: OptionView          # buffer-local option values (section 6)
-    locals: dict[str, Any]       # free-form per-buffer state for extensions
+    options: OptionView  # buffer-local option values (section 6)
+    locals: dict[str, Any]  # free-form per-buffer state for extensions
     undo: UndoLog
 
     def __len__(self) -> int: ...
-    def __getitem__(self, s: slice) -> str: ...          # buf[a:b]
+    def __getitem__(self, s: slice) -> str: ...  # buf[a:b]
     def insert(self, pos: int, text: str) -> None: ...
     def delete(self, start: int, end: int) -> str: ...
     def replace(self, start: int, end: int, text: str) -> None: ...
     def marker(self, pos: int, *, advance: bool = False) -> Marker: ...
     def cursor(self, pos: int = 0) -> Cursor: ...
-    def search(self, pattern: str | re.Pattern, start: int = 0,
-               end: int | None = None, *, backward: bool = False) -> re.Match | None: ...
+    def search(
+        self,
+        pattern: str | re.Pattern,
+        start: int = 0,
+        end: int | None = None,
+        *,
+        backward: bool = False,
+    ) -> re.Match | None: ...
 ```
 
 All mutation funnels through `replace`, which, in order: checks `read_only`,
@@ -491,10 +504,10 @@ Emacs idea of point:
 ```python
 cur = buf.cursor(0)
 cur.forward_word()
-cur.forward_char()          # one grapheme cluster (5.8), not one code point
-cur.insert("hello ")        # inserts at the cursor and moves past it
-cur.line, cur.column        # derived; column counts clusters from the line start
-cur.offset                  # code points from the line start, as in the protocol
+cur.forward_char()  # one grapheme cluster (5.8), not one code point
+cur.insert("hello ")  # inserts at the cursor and moves past it
+cur.line, cur.column  # derived; column counts clusters from the line start
+cur.offset  # code points from the line start, as in the protocol
 ```
 
 A `Cursor` is the low-level tool for code that works on a buffer directly.
@@ -547,24 +560,26 @@ point, mark and region.
 
 ```python
 class Selection:
-    anchor: Marker            # the fixed end
-    head: Marker              # the moving end; the cursor is drawn here
-    goal_x: float | None      # horizontal goal for vertical motion, from layout
+    anchor: Marker  # the fixed end
+    head: Marker  # the moving end; the cursor is drawn here
+    goal_x: float | None  # horizontal goal for vertical motion, from layout
 
-    start, end, empty, text   # derived; start <= end whichever way it faces
+    start, end, empty, text  # derived; start <= end whichever way it faces
 
-    def move_to(self, pos: int) -> None: ...     # move the head (see "Extending")
-    def forward_word(self, n: int = 1) -> None: ...   # and the other Cursor motions
+    def move_to(self, pos: int) -> None: ...  # move the head (see "Extending")
+    def forward_word(self, n: int = 1) -> None: ...  # and the other Cursor motions
     def select(self, anchor: int, head: int) -> None: ...
-    def collapse(self) -> None: ...              # anchor := head
-    def replace(self, text: str) -> None: ...    # replace selected text, collapse after it
-    def insert(self, text: str) -> None: ...     # same as replace
+    def collapse(self) -> None: ...  # anchor := head
+    def replace(self, text: str) -> None: ...  # replace selected text, collapse after it
+    def insert(self, text: str) -> None: ...  # same as replace
     def delete(self) -> str: ...
 
-class SelectionSet:           # win.selections
+
+class SelectionSet:  # win.selections
     primary: Selection
     extending: bool
-    def __iter__(self) -> Iterator[Selection]: ...    # in buffer order
+
+    def __iter__(self) -> Iterator[Selection]: ...  # in buffer order
     def __len__(self) -> int: ...
     def add(self, head: int, anchor: int | None = None) -> Selection: ...
     def remove(self, sel: Selection) -> None: ...
@@ -680,19 +695,19 @@ mode has and that needs no parser.
 ```python
 @dataclass(frozen=True)
 class Syntax:
-    word_chars: str = "_"          # word characters besides Unicode letters and digits
-    symbol_chars: str = ""         # further characters allowed in an identifier, e.g. "-"
+    word_chars: str = "_"  # word characters besides Unicode letters and digits
+    symbol_chars: str = ""  # further characters allowed in an identifier, e.g. "-"
     brackets: tuple[tuple[str, str], ...] = (("(", ")"), ("[", "]"), ("{", "}"))
-    quotes: tuple[str, ...] = ('"', "'")       # string delimiters, longest first
+    quotes: tuple[str, ...] = ('"', "'")  # string delimiters, longest first
     escape: str | None = "\\"
-    line_comment: str | None = None            # e.g. "#"
-    block_comment: tuple[str, str] | None = None   # e.g. ("/*", "*/")
+    line_comment: str | None = None  # e.g. "#"
+    block_comment: tuple[str, str] | None = None  # e.g. ("/*", "*/")
     comment_padding: str = " "
-    auto_pairs: tuple[tuple[str, str], ...] | None = None   # default: brackets and quotes
+    auto_pairs: tuple[tuple[str, str], ...] | None = None  # default: brackets and quotes
+
 
 class PythonMode(ProgMode):
-    syntax = replace(ProgMode.syntax, line_comment="#",
-                     quotes=('"""', "'''", '"', "'"))
+    syntax = replace(ProgMode.syntax, line_comment="#", quotes=('"""', "'''", '"', "'"))
 ```
 
 A code point is a word character if `str.isalnum()` says so or it is in
@@ -730,7 +745,7 @@ a parse tree:
 **The interface.**
 
 ```python
-class BufferSyntax:                # buf.syntax
+class BufferSyntax:  # buf.syntax
     table: Syntax
     tree: Tree | None
 
@@ -788,12 +803,13 @@ Typed, documented, optionally buffer-local settings, replacing Emacs's
 
 ```python
 fill_column = Option("fill_column", int, 80, "Column beyond which lines wrap.")
-tab_width   = Option("tab_width", int, 8, "Width of a tab stop.", validate=lambda n: n > 0,
-                     project=True)        # may be set by a project file
+tab_width = Option(
+    "tab_width", int, 8, "Width of a tab stop.", validate=lambda n: n > 0, project=True
+)  # may be set by a project file
 
-buf.options.fill_column            # lookup: buffer -> project -> major mode default -> global
-buf.options.fill_column = 100      # sets the buffer-local value
-ed.options.fill_column = 72        # sets the global value
+buf.options.fill_column  # lookup: buffer -> project -> major mode default -> global
+buf.options.fill_column = 100  # sets the buffer-local value
+ed.options.fill_column = 72  # sets the global value
 ```
 
 The project layer holds values from the nearest `.neomacs/settings.toml`
@@ -820,15 +836,18 @@ async def find_file(path: Annotated[Path, Ask.file("Find file: ")]) -> None:
     buf = await ed.buffers.visit(path)
     ed.window.show(buf)
 
+
 @command
 def forward_word(sel: Selection, n: Annotated[int, Prefix(default=1)]) -> None:
     """Move forward N words."""
     sel.forward_word(n)
 
+
 @command
 def self_insert(sel: Selection, text: Annotated[str, KeyText]) -> None:
     """Insert the character that was typed."""
     sel.replace(text)
+
 
 @command(background=True)
 async def grep(pattern: Annotated[str, Ask.string("Grep for: ")]) -> None:
@@ -911,12 +930,13 @@ printable keys to `self_insert` through a default binding.
 ```python
 class PythonMode(ProgMode):
     """Major mode for Python source."""
+
     name = "python"
     patterns = ["*.py", "*.pyi"]
     keymap = Keymap()
     defaults = {"tab_width": 4, "indent_with_tabs": False}
-    syntax = replace(ProgMode.syntax, line_comment="#")   # see 5.9
-    grammar = "python"                                     # optional tree-sitter grammar
+    syntax = replace(ProgMode.syntax, line_comment="#")  # see 5.9
+    grammar = "python"  # optional tree-sitter grammar
 
     def enable(self, buf: Buffer) -> None: ...
     def disable(self, buf: Buffer) -> None: ...
@@ -934,10 +954,12 @@ a file is chosen from `patterns`, then from the interpreter line.
 ```python
 after_save = Hook("after_save", "Run after a buffer is written to its file.")
 
+
 @after_save.add
 def _refresh_git_status(buf: Buffer) -> None: ...
 
-after_save.add(fn, buffer=buf)      # buffer-local
+
+after_save.add(fn, buffer=buf)  # buffer-local
 after_save.run(buf)
 ```
 
@@ -977,21 +999,22 @@ both without knowing which it has.
 
 ```python
 class Minibuffer:
-    buffer: Buffer                 # private; not in ed.buffers
+    buffer: Buffer  # private; not in ed.buffers
     view: View
     label: str
     multiline: bool
     min_lines: int
     max_lines: int
     placeholder: str
-    masked: bool                   # for passwords
+    masked: bool  # for passwords
     completer: Completer | None
-    history: str | None            # name of a history list
-    text: str                      # the current contents
+    history: str | None  # name of a history list
+    text: str  # the current contents
 
     def submit(self) -> None: ...
     def cancel(self) -> None: ...
-    async def result(self) -> str: ...     # the next submitted text; raises Cancelled
+    async def result(self) -> str: ...  # the next submitted text; raises Cancelled
+
     on_submit: Hook
     on_change: Hook
 ```
@@ -1062,9 +1085,9 @@ the command.
 ```python
 @dataclass(frozen=True)
 class PrefixArg:
-    value: int          # 4 per bare universal argument (4, 16, ...), -1 for a bare minus
-    explicit: bool      # digits were typed
-    universal: int      # how many bare universal arguments were typed
+    value: int  # 4 per bare universal argument (4, 16, ...), -1 for a bare minus
+    explicit: bool  # digits were typed
+    universal: int  # how many bare universal arguments were typed
 ```
 
 - **Declaring.** `Annotated[int, Prefix(default=1)]` receives `value`, or the
@@ -1225,15 +1248,17 @@ when focus leaves it.
 class Panel:
     name: str
     mode: Literal["docked", "floating"]
-    side: Literal["left", "right", "top", "bottom"]      # when docked
-    anchor: Anchor                                       # when floating
+    side: Literal["left", "right", "top", "bottom"]  # when docked
+    anchor: Anchor  # when floating
     transient: bool
     visible: bool
     tabs: list[View]
     active: View | None
 
-    def show(self, buf: Buffer, *, focus: bool = False) -> View: ...   # reuses a tab already showing buf
-    def close(self, view: View) -> None: ...      # closes the tab; the buffer survives
+    def show(
+        self, buf: Buffer, *, focus: bool = False
+    ) -> View: ...  # reuses a tab already showing buf
+    def close(self, view: View) -> None: ...  # closes the tab; the buffer survives
     def dock(self, side: str) -> None: ...
     def float(self, anchor: Anchor = "center") -> None: ...
     def hide(self) -> None: ...
@@ -1249,14 +1274,14 @@ The `placement` option maps each role to a place:
 
 ```python
 placement = {
-    "document":  Main(),
-    "help":      InPanel("side", dock="right"),
+    "document": Main(),
+    "help": InPanel("side", dock="right"),
     "traceback": InPanel("bottom", dock="bottom"),
-    "debug":     InPanel("bottom", dock="bottom"),
-    "messages":  InPanel("bottom", dock="bottom"),
-    "search":    InPanel("bottom", dock="bottom"),
-    "repl":      InPanel("bottom", dock="bottom"),
-    "peek":      InPanel("peek", floating="cursor", transient=True),
+    "debug": InPanel("bottom", dock="bottom"),
+    "messages": InPanel("bottom", dock="bottom"),
+    "search": InPanel("bottom", dock="bottom"),
+    "repl": InPanel("bottom", dock="bottom"),
+    "peek": InPanel("peek", floating="cursor", transient=True),
 }
 ```
 
@@ -1367,7 +1392,7 @@ Evaluating a buffer re-runs its module-level assignments. State that must
 survive is declared explicitly:
 
 ```python
-history = keep("search.history", list)     # created once, returned thereafter
+history = keep("search.history", list)  # created once, returned thereafter
 ```
 
 `keep` is a keyed registry on the editor; `forget("search.history")` resets
@@ -1559,8 +1584,9 @@ frontend/                the Electron application (FRONTEND.md)
 packaging/               build and signing scripts (DISTRIBUTION.md)
 ```
 
-Dependencies: none for the protocol (standard library `json`); `wcwidth` for
-the terminal frontend; `tree-sitter`, optionally, from stage 6; `hypothesis`
+Dependencies: none at run time. The protocol uses the standard library's
+`json`, and the terminal frontend takes character widths from `unicodedata`.
+`tree-sitter`, optionally, from stage 6; `hypothesis`
 and `pytest` for tests. Typed throughout and checked in strict mode.
 
 The terminal frontend and its layout module are inside the package because

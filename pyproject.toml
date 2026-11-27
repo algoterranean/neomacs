@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neomacs"
+version = "0.0.1"
+description = "A Python-native editor: a live Python engine with frontends over JSON-RPC"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.15"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "hypothesis", "ruff"]
+
+[project.scripts]
+neomacs = "neomacs.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["neomacs"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pyright]
+include = ["neomacs"]
+typeCheckingMode = "strict"
+pythonVersion = "3.14"
+venvPath = "."
+venv = ".venv"

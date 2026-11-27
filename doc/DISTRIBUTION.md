@@ -49,8 +49,9 @@ Non-goals:
 - A pure-Python wheel (`py3-none-any`) that requires Python 3.15 or newer.
 - Contents: the engine, the standard commands and modes, the terminal
   frontend, `neomacs.testing`.
-- Required dependencies: none with compiled code. `wcwidth` for the terminal
-  frontend. `tree-sitter` is an optional extra.
+- Required dependencies: none. Character widths for the terminal frontend
+  come from the standard library's `unicodedata`. `tree-sitter` is an
+  optional extra.
 - Entry point: a `neomacs` command.
 - It runs on a build with the GIL as well as a free-threaded one; on a GIL
   build worker threads do not run in parallel, and the engine says so once at
