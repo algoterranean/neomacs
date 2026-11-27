@@ -736,6 +736,37 @@ export async function runSmoke(
     const mouseSent = (await js<{ mouse: { sent: number } }>("window.neomacsDebug.snapshot()")).mouse.sent;
     check("f4.mouse_events_sent", mouseSent >= 8, mouseSent);
 
+    // -- search: a box of its own over the corner of the window, not the message strip --
+    await control.eval(`_k.replace(0, len(_k), 'alpha beta gamma\\nsecond line here\\nthird beta'); ${win}.selections.set([(0, 0)])`);
+    await settle();
+    press("s", ["control"]);
+    await settle();
+    type("beta");
+    await settle();
+    interface SearchBox { label: string; text: string; rect: number[] }
+    const searching = (await js<{ chrome: { search: SearchBox | null; prompt: string | null; keys: string } }>("window.neomacsDebug.snapshot()")).chrome;
+    await shot("7-search");
+    const wsNow = (await arrangement()).workspace;
+    check(
+      "f4.search_box",
+      searching.search !== null && searching.search.label === "Search [1/2]: " && searching.search.text === "beta" && searching.prompt === null &&
+        searching.keys === "" && (searching.search.rect[0] as number) > (wsNow[2] as number) / 2 && (searching.search.rect[1] as number) < 40 &&
+        (await pyText(`${win}.selections.primary.text`)) === "'beta'" && (await ui()).focus !== mainId,
+      { searching, selected: await pyText(`${win}.selections.primary.text`) },
+    );
+    press("s", ["control"]);
+    await settle();
+    const second2 = (await js<{ chrome: { search: SearchBox | null } }>("window.neomacsDebug.snapshot()")).chrome.search;
+    press("Return");
+    await settle();
+    const afterSearch = (await js<{ chrome: { search: SearchBox | null } }>("window.neomacsDebug.snapshot()")).chrome.search;
+    check(
+      "f4.search_box_closes",
+      second2?.label === "Search [2/2]: " && afterSearch === null && (await ui()).focus === mainId &&
+        (await pyText(`${win}.buffer.line_of(${win}.cursor.pos)`)) === "3",
+      { second2, afterSearch },
+    );
+
     // -- splits: two windows, a divider that drags, a click that changes focus --
     press("x", ["control"]);
     press("2");

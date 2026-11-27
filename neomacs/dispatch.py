@@ -476,6 +476,8 @@ class Dispatcher:
             initial=ask.initial,
             submit_selects=ask.kind in ("buffer", "command", "choice"),
         )
+        if ask.kind == "file" and not text.strip():
+            raise NeomacsError("No file name given")
         if ask.kind == "file" or convert is Path:
             return Path(text).expanduser()
         if ask.kind == "integer" or convert is int:

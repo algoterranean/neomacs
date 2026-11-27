@@ -39,6 +39,8 @@ export class ViewModel {
   primary = 0;
   shape = "block";
   modeline: Run[] | null = null;
+  /** Runs for the right-hand end of the modeline. */
+  modelineRight: Run[] = [];
   // Scroll position, kept on the same text across splices: the first visible
   // line, and how far into it (in pixels) the viewport starts.
   topLine = 1;
@@ -243,7 +245,9 @@ export class FrameModel {
           break;
         }
         case "modeline":
-          this.view(a[0] as number).modeline = a[1] as Run[];
+          const view = this.view(a[0] as number);
+          view.modeline = a[1] as Run[];
+          view.modelineRight = (a[2] as Run[] | undefined) ?? [];
           break;
         case "minibuffer_show":
           this.minibuffers.set(a[0] as number, { host: a[1] as Record<string, unknown>, options: a[2] as Record<string, unknown> });

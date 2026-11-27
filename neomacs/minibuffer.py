@@ -146,10 +146,18 @@ class Minibuffer:
     @provisional("0.1")
     def submit(self) -> None:
         text = self.text
-        if self.submit_selects and self.candidates:
-            exact = any(c.text == text for c in self.candidates)
+        if self.candidates and self.selected >= 0:
+            # A candidate is highlighted: because this prompt always has one
+            # (commands, buffers), or because the user moved to it.  It is what
+            # Return means, unless what was typed is itself a candidate.
+            chosen = self.candidates[min(self.selected, len(self.candidates) - 1)]
+            exact = self.submit_selects and any(c.text == text for c in self.candidates)
             if not exact:
-                text = self.candidates[min(self.selected, len(self.candidates) - 1)].text
+                if chosen.annotation == "directory" and not self.submit_selects:
+                    # A directory is somewhere to go on from, not an answer.
+                    self.text = chosen.text
+                    return
+                text = chosen.text
         if self.history is not None and text:
             entries = self.frame.editor.histories.setdefault(self.history, [])
             if not entries or entries[-1] != text:
@@ -250,19 +258,26 @@ class Minibuffer:
         if self.closed or self.text != text:
             return
         self.candidates = list(found)[:MAX_CANDIDATES]
-        self.selected = 0
+        # Where Return takes the highlighted candidate, one always is.  Where
+        # it takes what was typed (a file name may be a new one), none is
+        # until the user moves to one: the highlight says what Return will do.
+        self.selected = 0 if self.submit_selects else -1
         self.frame.popup_changed()
 
     def select(self, delta: int) -> None:
-        if self.candidates:
+        if not self.candidates:
+            return
+        if self.selected < 0:
+            self.selected = 0 if delta > 0 else len(self.candidates) - 1
+        else:
             self.selected = (self.selected + delta) % len(self.candidates)
-            self.frame.popup_changed()
+        self.frame.popup_changed()
 
     def accept_candidate(self) -> bool:
         """Put the highlighted candidate in the minibuffer.  False if there is none."""
         if not self.candidates:
             return False
-        self.text = self.candidates[min(self.selected, len(self.candidates) - 1)].text
+        self.text = self.candidates[max(0, min(self.selected, len(self.candidates) - 1))].text
         return True
 
 

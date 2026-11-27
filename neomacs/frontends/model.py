@@ -25,6 +25,7 @@ class ViewModel:
         self.primary = 0
         self.shape = "block"
         self.modeline: list[Any] | None = None
+        self.modeline_right: list[Any] = []  # runs for its right-hand end
         # Scroll position, kept on the same text across splices.
         self.top_line = 1
         self.top_row = 0
@@ -205,7 +206,9 @@ class FrameModel:
                 view = self.view(args[0])
                 view.primary, view.selections, view.shape = args[1], args[2], args[3]
             elif name == "modeline":
-                self.view(args[0]).modeline = args[1]
+                view = self.view(args[0])
+                view.modeline = args[1]
+                view.modeline_right = args[2] if len(args) > 2 else []
             elif name == "reveal":
                 self.view(args[0]).pending_reveal = (args[1], args[2], args[3])
             elif name == "minibuffer_show":

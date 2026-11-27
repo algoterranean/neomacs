@@ -231,7 +231,8 @@ trackpad scrolling is already continuous, because the frontend owns it.
 - **Messages.** A status strip along the bottom shows the latest `info`
   message and, at its right end, any `keys` message. `warning` and `error`
   also appear as a dismissible toast.
-- **Modeline.** One strip per window, drawn from runs like a line.
+- **Modeline.** One strip per window, drawn from runs like a line, with a
+  second list of runs, when the engine sends one, held at its right-hand end.
 - **Title, bell, busy.** Window title; a brief visual flash and the system
   beep; a progress indicator in the status strip.
 

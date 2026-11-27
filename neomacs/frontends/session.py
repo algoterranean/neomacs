@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from neomacs.frontends.model import FrameModel, ViewModel
-from neomacs.frontends.monolayout import MonoView
+from neomacs.frontends.monolayout import MonoView, text_cells
 from neomacs.frontends.screen import MIN_ROWS, Arrangement, Rect, arrange, tab_line
 from neomacs.rpc.api import PROTOCOL
 from neomacs.testing.client import Client, NotReady
@@ -244,9 +244,28 @@ class Session:
             for view_id, x, y, width in arrangement.modelines:
                 view = self.model.views.get(view_id)
                 runs = (view.modeline if view is not None else None) or []
-                text = "".join(str(run[1]) for run in runs)[:width].ljust(width)
                 face = runs[0][2] if runs else self.model.ui_faces.get("modeline", 0)
-                put(x, y, text, face, x + width)
+                # Measured in terminal columns: a name may have wide characters in it.
+                left = text_cells("".join(str(run[1]) for run in runs))
+                right = text_cells(
+                    "".join(str(run[1]) for run in view.modeline_right) if view else ""
+                )
+                right_width = sum(w for _, w in right)
+                if right_width >= width:
+                    right, right_width = [], 0  # no room: the left-hand text matters more
+                room = width - right_width
+                shown: list[tuple[str, int]] = []
+                for cell in left:
+                    if cell[1] > room:
+                        break
+                    shown.append(cell)
+                    room -= cell[1]
+                for text, cell_width in (*shown, *([(" ", 1)] * room), *right):
+                    if 0 <= y < rows and x + cell_width <= cols:
+                        grid[y][x] = (text, face)
+                        for extra in range(1, cell_width):
+                            grid[y][x + extra] = ("", face)
+                    x += cell_width
             for x, y, height in arrangement.rules:
                 for dy in range(height):
                     put(x, y + dy, "│", -2, x + 1)

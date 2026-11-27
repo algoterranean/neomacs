@@ -69,6 +69,8 @@ def test_typing_and_motion(ui: HeadlessUI) -> None:
     assert text(ui) == ""
     ui.keys("C-y", "C-a", "M-d", "M->", "M-<backspace>")
     assert text(ui) == " brave new "
+    ui.keys("C-<backspace>")  # the same command as M-<backspace>
+    assert text(ui) == " brave "
     ui.keys("C-x", "C-q")
     assert ui.message == "C-x C-q is undefined"
 
@@ -882,3 +884,51 @@ def test_benchmark_runs() -> None:
     for name in ("self_insert", "three_cursors", "with_simulated_highlighting"):
         assert results[name]["engine"]["n"] == 40 and results[name]["engine"]["p50"] > 0
     assert results["burst"]["batches"] <= 40
+
+
+def test_choosing_a_file_from_the_list(ui: HeadlessUI, tmp_path: Path) -> None:
+    (tmp_path / "alpha.txt").write_text("first file")
+    (tmp_path / "beta.txt").write_text("second file")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "inner.txt").write_text("inside")
+    ui.keys("C-x", "C-f")
+    ui.type(f"{tmp_path}/")
+    assert ui.candidates() == [f"{tmp_path}/alpha.txt", f"{tmp_path}/beta.txt", f"{tmp_path}/sub/"]
+    assert (
+        ui.model.popup is not None and ui.model.popup["selected"] == -1
+    )  # nothing is highlighted yet
+    # Move to an entry and press Return: that file, not what was typed (a directory).
+    ui.keys("<down>", "<down>")
+    assert ui.model.popup["selected"] == 1
+    ui.keys("<return>")
+    assert ui.prompt is None and ui.view.info["name"] == "beta.txt" and ui.message == ""
+    # Return on a directory goes into it instead of answering.
+    ui.keys("C-x", "C-f")
+    ui.type(f"{tmp_path}/")
+    ui.keys("<up>")  # from nothing, up is the last entry
+    assert ui.model.popup["selected"] == 2
+    ui.keys("<return>")
+    typed = eval(ui.client.eval(f"ed.frames[{ui.frame_id}].prompts[-1].text"))  # noqa: S307
+    assert typed == f"{tmp_path}/sub/" and ui.candidates() == [f"{tmp_path}/sub/inner.txt"]
+    ui.keys("<down>", "<return>")
+    assert ui.view.info["name"] == "inner.txt"
+    # With nothing highlighted, Return takes what was typed: a new file can be named.
+    ui.keys("C-x", "C-f")
+    ui.type(f"{tmp_path}/al")
+    assert ui.candidates() == [f"{tmp_path}/alpha.txt"]
+    ui.keys("<return>")
+    assert ui.view.info["name"] == "al"
+    # Nothing typed, or a directory, is refused in words, not with a traceback.
+    ui.keys("C-x", "C-f", "<return>")
+    assert ui.message == "No file name given" and ui.view.info["name"] == "al"
+    ui.keys("C-x", "C-f")
+    ui.type(str(tmp_path))
+    ui.keys("<return>")
+    assert ui.message == f"{tmp_path} is a directory"
+    # Where Return always takes the highlighted candidate, one always is.
+    ui.keys("M-x")
+    assert ui.model.popup is not None and ui.model.popup["selected"] == 0
+    ui.keys("C-g")
+    ui.eval(
+        "[ed.buffers.kill(b) for b in list(ed.buffers) if b.name in ('beta.txt', 'inner.txt', 'al')]"
+    )

@@ -13,6 +13,9 @@ export class Chrome {
   private keysEl: HTMLSpanElement;
   private toasts: HTMLDivElement;
   private popupKey = "";
+  private searchBox: HTMLDivElement;
+  private searchLabel: HTMLSpanElement;
+  private searchSlot: HTMLDivElement;
 
   constructor(root: HTMLElement) {
     const div = (className: string) => {
@@ -38,7 +41,14 @@ export class Chrome {
     this.keysEl.className = "nm-keys";
     this.strip.append(this.messageEl, this.keysEl);
     this.toasts = div("nm-toasts");
-    this.main.append(this.palette, this.toasts);
+    // The search box: a small window over the top right corner of the main area.
+    this.searchBox = div("nm-searchbox");
+    this.searchBox.hidden = true;
+    this.searchLabel = document.createElement("span");
+    this.searchLabel.className = "nm-searchbox-label";
+    this.searchSlot = div("nm-searchbox-input");
+    this.searchBox.append(this.searchLabel, this.searchSlot);
+    this.main.append(this.palette, this.searchBox, this.toasts);
     root.replaceChildren(this.main, this.strip);
   }
 
@@ -52,6 +62,19 @@ export class Chrome {
     }
     if (this.label.textContent !== label) this.label.textContent = label;
     if (this.promptSlot.firstChild !== view) this.promptSlot.replaceChildren(view);
+  }
+
+  /** Show the search box with this label around the given minibuffer view, or hide it. */
+  setSearch(label: string | null, view: HTMLElement | null): void {
+    const shown = label !== null && view !== null;
+    this.searchBox.hidden = !shown;
+    if (!shown) {
+      this.searchSlot.replaceChildren();
+      return;
+    }
+    if (this.searchLabel.textContent !== label) this.searchLabel.textContent = label;
+    this.searchBox.classList.toggle("nm-searchbox-failing", label.startsWith("No match"));
+    if (this.searchSlot.firstChild !== view) this.searchSlot.replaceChildren(view);
   }
 
   get promptShown(): boolean {
@@ -113,6 +136,16 @@ export class Chrome {
       messageKind: this.messageEl.dataset["kind"] ?? null,
       keys: this.keysEl.textContent,
       toasts: this.toasts.childElementCount,
+      search: this.searchBox.hidden
+        ? null
+        : {
+            label: this.searchLabel.textContent,
+            text: this.searchSlot.querySelector(".nm-content")?.textContent ?? "",
+            rect: (() => {
+              const r = this.searchBox.getBoundingClientRect();
+              return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+            })(),
+          },
     };
   }
 }

@@ -22,3 +22,14 @@ Run the engine and the terminal frontend:
 ```
 .venv/bin/python -m neomacs --tui FILE
 ```
+
+Run the engine and the Electron frontend:
+
+```
+cd frontend
+npm ci
+npm start -- FILE
+```
+
+`FILE` is optional in both. The Electron frontend runs the engine with
+`.venv/bin/python`, or with the interpreter named by `NEOMACS_PYTHON`.

@@ -57,6 +57,7 @@ _BINDINGS = {
     "<backspace>": "delete_backward_char", "<delete>": "delete_char", "C-d": "delete_char",
     "C-t": "transpose_chars",
     "C-k": "kill_line", "M-d": "kill_word", "M-<backspace>": "backward_kill_word",
+    "C-<backspace>": "backward_kill_word",
     "C-w": "kill_selection", "M-w": "copy_selection", "C-y": "yank",
     "s-x": "kill_selection", "s-c": "copy_selection", "s-v": "yank", "s-z": "undo", "s-Z": "redo",
     "C-/": "undo", "C-_": "undo", "M-/": "redo", "C-?": "redo",

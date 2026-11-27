@@ -29,6 +29,18 @@ def cluster_width(cluster: str) -> int:
     return 1
 
 
+def text_cells(text: str) -> list[tuple[str, int]]:
+    """TEXT as what is drawn in each place, with the columns each takes.
+    Clusters that take no column are left out."""
+    cells: list[tuple[str, int]] = []
+    for g in _iter_graphemes(text):
+        cluster = text[g.start : g.end]
+        width = cluster_width(cluster)
+        if width > 0:
+            cells.append((cluster, width))
+    return cells
+
+
 @dataclass(slots=True)
 class Cell:
     offset: int | None  # code point offset in the line; None for virtual text

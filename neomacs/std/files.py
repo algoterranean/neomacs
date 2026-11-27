@@ -13,6 +13,8 @@ from neomacs.errors import NeomacsError
 @command(name="files.find")
 def find_file(path: Annotated[Path, Ask.file("Find file: ")]) -> None:
     """Visit PATH in a buffer."""
+    if Path(path).expanduser().is_dir():
+        raise NeomacsError(f"{path} is a directory")
     ed.show(ed.buffers.visit(path), focus=True)
 
 

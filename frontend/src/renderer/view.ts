@@ -715,10 +715,18 @@ export class ViewElement {
     const runs = this.model.modeline ?? [];
     // A view in a panel has no modeline: its tab says what it is.
     this.modelineEl.hidden = this.model.modeline === null;
-    const key = JSON.stringify(runs);
+    const rightRuns = this.model.modelineRight;
+    const key = JSON.stringify([runs, rightRuns]);
     if (this.modelineEl.dataset["key"] === key) return;
     this.modelineEl.dataset["key"] = key;
-    this.modelineEl.replaceChildren(...runs.map((run) => runSpan(run)));
+    // Two parts: the right-hand one keeps its width and the other is cut short.
+    const left = document.createElement("span");
+    left.className = "nm-modeline-left";
+    left.append(...runs.map((run) => runSpan(run)));
+    const right = document.createElement("span");
+    right.className = "nm-modeline-right";
+    right.append(...rightRuns.map((run) => runSpan(run)));
+    this.modelineEl.replaceChildren(left, right);
     const face = runs[0]?.[2] ?? 0;
     this.modelineEl.className = `nm-modeline f${face}`;
   }
@@ -794,7 +802,8 @@ export class ViewElement {
       estimate: this.heights.estimate,
       firstVisibleText: firstEl?.querySelector(".nm-content")?.textContent ?? null,
       firstVisibleY: firstEl ? firstEl.getBoundingClientRect().top - scrollerTop : null,
-      modeline: this.modelineEl.textContent,
+      modeline: this.modelineEl.querySelector(".nm-modeline-left")?.textContent ?? "",
+      modelineRight: this.modelineEl.querySelector(".nm-modeline-right")?.textContent ?? "",
       cursors: this.cursorEls.length,
       selections: this.selectionLayer.childElementCount,
       cursorAnimated: !this.cursorLayer.classList.contains("nm-no-anim"),

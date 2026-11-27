@@ -364,14 +364,18 @@ def test_pairs(ui: HeadlessUI) -> None:
 def test_incremental_search(ui: HeadlessUI) -> None:
     at(ui, "import")
     ui.keys("C-s")
+    assert (
+        ui.prompt == "Search: "
+    )  # a box to type in; this frontend has no place for it but the prompt
+    assert value(ui, "_w.frame.focus is not _w") is True
     ui.type("name")
-    assert ui.message == "Search: name  [1/2]" or ui.model.keys == "Search: name  [1/2]"
+    assert ui.prompt == "Search [1/2]: name"
     assert value(ui, "(_b.line_of(_w.cursor.pos), _w.selections.primary.text)") == (3, "name")
     assert value(ui, "sorted((s.get('face'), _b.line_of(s.start)) for s in _b.layer('search'))") == [
         ("match", 6), ("match-current", 3),
     ]  # fmt: skip
     ui.keys("C-s")
-    assert value(ui, "_b.line_of(_w.cursor.pos)") == 6
+    assert value(ui, "_b.line_of(_w.cursor.pos)") == 6 and ui.prompt == "Search [2/2]: name"
     ui.keys("C-s")  # wraps
     assert value(ui, "_b.line_of(_w.cursor.pos)") == 3
     ui.keys("C-r")
@@ -379,27 +383,63 @@ def test_incremental_search(ui: HeadlessUI) -> None:
     ui.keys("<backspace>", "<backspace>")
     assert value(ui, "_w.selections.primary.text") == "na"
     ui.type("zz")
-    assert (ui.model.keys or ui.message).startswith("Failing search: nazz")
+    assert ui.prompt == "No match: nazz"
     ui.keys("C-g")  # back where it began
+    assert ui.prompt is None and value(ui, "_w.frame.focus is _w") is True
     assert value(ui, "(_b.line_of(_w.cursor.pos), len(_b.layer('search')))") == (1, 0)
-    # Another key ends the search and then does what it does.
+    # The pattern is real text: it can be edited in the middle like any other.
     ui.keys("C-s")
-    ui.type("times")
-    ui.keys("C-e")
-    assert value(ui, "(_b.line_of(_w.cursor.pos), _w.cursor.pos == _b.line_end(3))") == (3, True)
-    ui.keys("M-,")  # the search left a place to come back to
+    ui.type("tmes")
+    assert ui.prompt == "No match: tmes"
+    ui.keys("C-a", "C-f")
+    ui.type("i")
+    assert ui.prompt == "Search [1/2]: times"
+    ui.keys("<return>")
+    assert ui.prompt is None and value(ui, "_w.frame.focus is _w") is True
+    assert value(ui, "(_b.line_of(_w.cursor.pos), _w.selections.primary.text)") == (3, "times")
+    assert value(ui, "len(_b.layer('search'))") == 0
+    ui.keys("C-g", "M-,")  # the search left a place to come back to
     assert value(ui, "_b.line_of(_w.cursor.pos)") == 1
     # Case is ignored until a capital is typed.
     ui.keys("C-s")
     ui.type("thing")
     assert value(ui, "_w.selections.primary.text") == "Thing"
     ui.type("X")
-    assert (ui.model.keys or ui.message).startswith("Failing search")
+    assert ui.prompt == "No match: thingX"
     ui.keys("C-g")
     # C-s C-s searches again for the last thing found.
     ui.keys("C-s", "C-s")
-    assert value(ui, "_w.selections.primary.text") == "times"
-    ui.keys("<return>")
+    assert ui.prompt == "Search [1/2]: times" and value(ui, "_w.selections.primary.text") == "times"
+    ui.keys("C-w")  # and C-w takes in the rest of the word after the match
+    at_word = value(ui, "_w.selections.primary.text")
+    assert at_word == "times=2" or at_word.startswith("times")
+    ui.keys("C-g")
+    ui.keys("C-r")
+    assert ui.prompt == "Search backward: "
+    ui.keys("C-g")
+
+
+def test_the_search_box_goes_where_the_frontend_has_a_place_for_it(
+    engine: tuple[Path, bool],
+) -> None:
+    with HeadlessUI(
+        engine[0], rows=12, cols=60, attach={"capabilities": ["panels"], "places": ["search"]}
+    ) as ui:
+        ui.eval(
+            f"_pf = ed.frames[{ui.frame_id}]; _pb = ed.buffers.new('place', 'one two one'); _pf.window.show(_pb)"
+        )
+        ui.keys("C-s")
+        ui.type("one")
+        assert ui.prompt is None  # not in the prompt area
+        shown = [(host, options["label"][0][1]) for host, options in ui.model.minibuffers.values()]
+        assert shown == [({"kind": "place", "name": "search"}, "Search [1/2]: ")]
+        box = next(iter(ui.model.minibuffers))
+        assert ui.model.focus == box and ui.lines_of(ui.model.view(box)) == ["one"]
+        ui.keys("C-s", "<return>")
+        assert ui.model.minibuffers == {} and ui.model.focus == ui.view.id
+        assert value(ui, "_pf.window.selections.ranges()") == [(8, 11)]
+        ui.eval("ed.buffers.kill(_pb)")
+        ui.client.notify("ui.detach")
 
 
 def test_a_cursor_on_every_match_of_a_word(ui: HeadlessUI) -> None:
@@ -516,9 +556,9 @@ def test_adding_matches_during_a_search_keeps_the_earlier_ones(ui: HeadlessUI) -
     ui.eval("_b.replace(0, len(_b), 'foo bar foo baz foo'); _w.selections.set([(0, 0)])")
     ui.keys("C-s")
     ui.type("foo")
-    ui.keys("M-n")
+    ui.keys("M-m")
     assert value(ui, "_w.selections.ranges()") == [(0, 3), (8, 11)]
-    ui.keys("M-n")
+    ui.keys("M-m")
     assert value(ui, "_w.selections.ranges()") == [(0, 3), (8, 11), (16, 19)]
     ui.keys("<return>")
     ui.type("X")
@@ -591,7 +631,7 @@ def test_extending_the_pattern_by_a_word_forgets_matches_kept_for_the_old_one(
     ui.eval("_b.replace(0, len(_b), 'foo bar foo baz'); _w.selections.set([(0, 0)])")
     ui.keys("C-s")
     ui.type("foo")
-    ui.keys("M-n")
+    ui.keys("M-m")
     assert value(ui, "_w.selections.ranges()") == [(0, 3), (8, 11)]
     ui.keys("C-w")  # the pattern is now "foo baz": the first "foo" no longer matches it
     assert value(ui, "[s.text for s in _w.selections]") == ["foo baz"]
@@ -599,3 +639,69 @@ def test_extending_the_pattern_by_a_word_forgets_matches_kept_for_the_old_one(
     ui.type("X")
     assert value(ui, "_b.text") == "foo bar X"
     ui.keys("C-g", "C-/")
+
+
+def test_a_search_follows_edits_made_to_the_text_while_it_is_open(ui: HeadlessUI) -> None:
+    # The box can be left for the text and come back to (a click, in Electron).
+    ui.eval("_b.replace(0, len(_b), 'foo bar foo baz foo'); _w.selections.set([(0, 0)])")
+    ui.keys("C-s")
+    ui.type("foo")
+    assert ui.prompt == "Search [1/3]: foo"
+    ui.eval("_b.insert(4, 'wider ')")  # before the second and third matches
+    ui.idle()
+    faced = "sorted((s.start, s.end) for s in _b.layer('search'))"
+    assert value(ui, faced) == [(0, 3), (14, 17), (22, 25)]  # shown where they are now
+    ui.keys("C-s")
+    assert value(ui, "(_w.selections.ranges(), _w.selections.primary.text)") == ([(14, 17)], "foo")
+    ui.keys("M-m")  # kept, and on to the third
+    ui.eval("_b.replace(0, 3, 'no')")  # the first is a match no longer
+    ui.idle()
+    assert ui.prompt == "Search [2/2]: foo"
+    assert value(ui, "[s.text for s in _w.selections]") == ["foo", "foo"]
+    ui.keys("M-a")  # ends the search, with a selection on each
+    ui.type("X")
+    assert value(ui, "_b.text") == "no wider bar X baz X"
+    ui.keys("C-g", "C-/")
+
+
+def test_a_search_that_is_given_up_after_the_text_shrank_goes_back_inside_it(
+    ui: HeadlessUI,
+) -> None:
+    ui.eval("_b.replace(0, len(_b), 'short text, then a long tail'); _w.selections.set([(28, 28)])")
+    ui.keys("C-r")
+    ui.type("short")
+    ui.eval("_b.delete(10, len(_b))")
+    ui.keys("C-g")
+    assert value(ui, "(_b.text, _w.selections.ranges())") == ("short text", [(10, 10)])
+
+
+def test_the_search_box_goes_back_and_forward_through_its_history(ui: HeadlessUI) -> None:
+    ui.eval("_b.replace(0, len(_b), 'one two three'); _w.selections.set([(0, 0)])")
+    for pattern in ("one", "two"):
+        ui.keys("C-s")
+        ui.type(pattern)
+        ui.keys("<return>")
+    ui.keys("C-s", "M-p", "M-p")
+    assert ui.prompt.endswith(": one") and value(ui, "_w.selections.primary.text") == "one"
+    ui.keys("M-n")  # forward again, not a selection kept
+    assert ui.prompt.endswith(": two")
+    assert value(ui, "[s.text for s in _w.selections]") == ["two"]
+    ui.keys("C-g")
+
+
+def test_a_search_ended_with_another_buffer_in_its_window_lets_go_of_the_first(
+    ui: HeadlessUI,
+) -> None:
+    ui.eval("_b.replace(0, len(_b), 'foo bar foo'); _w.selections.set([(0, 0)])")
+    before = value(ui, "len(_b.display_preparers)")
+    ui.keys("C-s")
+    ui.type("foo")
+    assert value(ui, "len(_b.display_preparers)") == before + 1
+    ui.eval("_other = ed.buffers.new('elsewhere'); _w.show(_other)")
+    ui.keys("C-g")
+    assert value(ui, "len(_b.display_preparers)") == before
+    # Back in the first buffer, an edit does not bring the search's faces back.
+    ui.eval("_w.show(_b); _b.insert(0, 'foo ')")
+    ui.idle()
+    assert value(ui, "len(_b.layer('search'))") == 0
+    ui.eval("ed.buffers.kill(_other)")
