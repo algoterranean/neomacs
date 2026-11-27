@@ -92,6 +92,8 @@ class Minibuffer:
         self.submit_selects = submit_selects
         self.host: tuple[Any, ...] = ()
         self.candidates: list[Candidate] = []
+        # How many candidates are kept of those the completer finds.
+        self.max_candidates: int | None = MAX_CANDIDATES
         self.selected = 0
         # The candidate that the last submit took, if it took one.
         self.chosen: Candidate | None = None
@@ -276,7 +278,7 @@ class Minibuffer:
             found = []
         if self.closed or self.text != text:
             return
-        self.candidates = list(found)[:MAX_CANDIDATES]
+        self.candidates = list(found)[: self.max_candidates]
         # Where Return takes the highlighted candidate, one always is.  Where
         # it takes what was typed (a file name may be a new one), none is
         # until the user moves to one: the highlight says what Return will do.

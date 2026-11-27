@@ -11,6 +11,7 @@ from neomacs.editor import ed
 from neomacs.errors import NeomacsError, Quit
 from neomacs.keymap import Keymap
 from neomacs.minibuffer import Minibuffer, MinibufferMode
+from neomacs.panels import InPanel
 from neomacs.std.editing import insert_entry, last_yank
 from neomacs.text.buffer import Buffer
 from neomacs.window import View
@@ -91,7 +92,9 @@ class Chooser:
     def __init__(self, box: Minibuffer, origin: Buffer) -> None:
         self.box = box
         frame = box.frame
-        self.buffer = ed.buffers.get(PREVIEW) or ed.buffers.new(PREVIEW)
+        # A buffer of its own: two choosers open in two frames each show what
+        # their own highlight is on.  It goes when the chooser does.
+        self.buffer = ed.buffers.new(PREVIEW)
         self.buffer.locals["no_journal"] = True
         self.buffer.option_values["gutter_columns"] = []  # text to look at, not lines to count
         # Shown as the text will look where it is going.
@@ -104,8 +107,11 @@ class Chooser:
             # The frontend draws it beside the list.
             self.view = View(frame, self.buffer)
             box.preview = self.view
-        elif frame.draws_panels:
-            # No place of its own: a panel under the text, for as long as this is open.
+        elif frame.draws_panels and isinstance(ed.options.placement.get("preview"), InPanel):
+            # No place of its own: a panel under the text, for as long as this
+            # is open.  Only a panel: were the user's placement table to send
+            # the preview to the main area, it would take over the window the
+            # text is to go into.
             self.view = ed.show(self.buffer, "preview")
             self._panel = getattr(self.view, "panel", None)
         box.on_select.add(self.show)
@@ -139,12 +145,12 @@ class Chooser:
     def close(self) -> None:
         self.box.on_select.remove(self.show)
         view, self.view = self.view, None
-        if view is None or view.id not in view.frame.views:
-            return
-        if self._panel is not None:
-            self._panel.close(view)
-        else:
-            view.close()
+        if view is not None and view.id in view.frame.views:
+            if self._panel is not None:
+                self._panel.close(view)
+            else:
+                view.close()
+        ed.buffers.kill(self.buffer)
 
 
 def _chooser() -> Chooser:
@@ -169,12 +175,14 @@ async def yank_from_ring() -> None:
     if Minibuffer.of(view) is not None:
         raise NeomacsError("Cannot yank from the ring into a prompt")
     replace = last_yank(view)
+    origin, tick = view.buffer, view.buffer.tick
     ring = ed.kill_ring
     await ring.capture(frame)  # what another program has copied since (KILLRING 5.2)
     if not ring.entries:
         ed.message("The kill ring is empty")
         return
     box = Minibuffer(frame, "Yank: ", completer=_Ring(), submit_selects=True)
+    box.max_candidates = None  # the whole ring can be walked, however long it is
     box.buffer.set_mode(KillRingMode)
     chooser = Chooser(box, view.buffer)
     box.buffer.locals["chooser"] = chooser
@@ -198,6 +206,10 @@ async def yank_from_ring() -> None:
     entry: Any = chosen.value if chosen is not None else None
     if not isinstance(entry, Entry) or view.id not in frame.views:
         return
+    if view.buffer is not origin or origin.tick != tick:
+        # The text changed while the chooser was open (another frame, a
+        # timer): the ranges that were yanked are not where they were.
+        replace = None
     ring.take(entry, frame)
     with ed.using(view):
         insert_entry(view, entry, replace)

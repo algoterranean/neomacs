@@ -280,12 +280,24 @@ Everything above was built as described, with these differences and details.
 - **The row for an entry of nothing but line breaks** shows a mark for each
   (`⏎`), up to eight.
 - **The preview buffer** is `*kill ring*`. It has no line numbers, is never
-  marked modified, and is left out of the recovery journal. It stays in the
-  buffer list between uses.
+  marked modified, and is left out of the recovery journal. Each chooser
+  has its own, made when it opens and killed when it closes, so two
+  choosers open in two frames each show their own highlight.
+- **The preview panel is only ever a panel.** If the user's `placement`
+  table sends the role `preview` to the main area, a frontend without the
+  chooser's place gets no preview: shown there it would take over the
+  window the text is going into.
+- **Text too long to keep** stays what `C-y` pastes for as long as the
+  clipboard holds it, whichever of the three moments first saw it.
+- **Replace-after-yank is checked twice:** when `M-y` is pressed, and again
+  when a choice is made. If the buffer changed while the chooser was open,
+  the choice is inserted at the cursor.
+- **The chooser lists the whole ring.** Other prompts keep the first fifty
+  candidates; this one keeps them all.
 - **In Electron** the chooser is the prompt's own box, made wider and given
   a second column: no new element kinds, and the popup is the same popup.
   The preview is an ordinary view, so it scrolls and wraps like any other.
-- **Verified:** 14 tests through the reference frontend, covering every
+- **Verified:** 19 tests through the reference frontend, covering every
   item of section 9 but the property test of the ring against a model
   (the ring's rules are tested by example instead). One check in
   `npm run smoke` with real keys in the Electron window: the list, the

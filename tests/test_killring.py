@@ -125,6 +125,27 @@ def test_a_frontend_that_does_not_answer_holds_nothing_up_on_focus(ui: HeadlessU
     assert value(ui, "_b.text") == "typed at once" and time.monotonic() - began < 0.4
 
 
+def test_text_too_long_to_keep_is_still_pasted_after_the_window_was_focused(
+    ui: HeadlessUI,
+) -> None:
+    ui.eval("ed.options.kill_ring_entry_limit = 10")
+    try:
+        kills(ui, "small")
+        ui.clipboard = "far too long to keep in the ring"
+        # Seen first when the window regains focus, and not kept.
+        ui.client.notify("input.focus", True)
+        wait_for(lambda: value(ui, "_w.frame.last_clipboard") == ui.clipboard)
+        assert ring(ui) == ["small"]
+        ui.keys("C-y", "C-y")  # it is what the clipboard holds, each time it is asked for
+        assert value(ui, "_b.text") == "far too long to keep in the ring" * 2
+        # Until something else is copied, here or elsewhere.
+        kills(ui, "newer")
+        ui.keys("C-y")
+        assert value(ui, "_b.text").endswith("ringnewer")
+    finally:
+        ui.eval("ed.options.unset('kill_ring_entry_limit')")
+
+
 # -- M-y ----------------------------------------------------------------------------------------
 
 
@@ -221,6 +242,72 @@ def test_straight_after_a_yank_the_choice_replaces_what_was_yanked(ui: HeadlessU
     assert value(ui, "_b.text") == ">[third]secondsecondthird"
 
 
+def test_an_edit_made_while_the_chooser_is_open_is_not_overwritten(ui: HeadlessUI) -> None:
+    kills(ui, "first", "second")
+    ui.eval("_b.insert(0, 'keep this []'); _w.selections.set([(11, 11)])")
+    ui.keys("C-y")
+    assert value(ui, "_b.text") == "keep this [second]"
+    ui.keys("M-y", "<down>")
+    # Something else edits the buffer meanwhile: the yanked text is no longer where it was.
+    ui.eval("_b.insert(0, 'ADDED ')")
+    ui.keys("<return>")
+    # Inserted at the cursor, as after any other change; nothing unrelated is replaced.
+    assert value(ui, "_b.text") == "ADDED keep this [secondfirst]"
+
+
+def test_the_whole_ring_can_be_walked(ui: HeadlessUI) -> None:
+    kills(ui, *[f"entry {i:02d}" for i in range(60)])
+    ui.keys("M-y")
+    assert len(rows(ui)) == 60 and rows(ui)[-1][0] == "entry 00"
+    ui.keys("<up>")  # round to the oldest
+    assert preview(ui) == "entry 00"
+    ui.keys("<return>")
+    assert value(ui, "_b.text") == "entry 00"
+
+
+def test_two_frames_each_preview_their_own_choice(ui: HeadlessUI, engine_path: Path) -> None:
+    kills(ui, "older", "newer")
+    with HeadlessUI(engine_path, rows=16, cols=70) as second:
+        second.eval(
+            f"_w2 = ed.frames[{second.frame_id}].window; _b2 = ed.buffers.new('other'); "
+            "_b2.set_mode('python'); _w2.show(_b2)"
+        )
+        ui.keys("M-y")
+        second.keys("M-y", "<down>")
+        shown = [
+            value(ui, f"ed.buffers.get({name!r}).text")
+            for name in ("*kill ring*", "*kill ring*<2>")
+        ]
+        assert shown == ["newer", "older"]
+        # Each in the mode of the buffer its text is going into: `work` has none.
+        modes = value(
+            ui,
+            "[getattr(ed.buffers.get(n).mode, 'name', None) for n in ('*kill ring*', '*kill ring*<2>')]",
+        )
+        assert modes == [None, "python"]
+        second.keys("<return>")
+        ui.keys("<return>")
+        assert value(ui, "(_b.text, _b2.text)") == ("newer", "older")
+        assert value(ui, "[b.name for b in ed.buffers if b.name.startswith('*kill ring')]") == []
+        second.client.notify("ui.detach")
+
+
+def test_a_preview_sent_to_the_main_area_by_the_user_is_not_shown_there(ui: HeadlessUI) -> None:
+    kills(ui, "first", "second")
+    ui.eval(
+        "from neomacs.panels import Main\n"
+        "_p = dict(ed.options.placement); _p['preview'] = Main(); ed.options.placement = _p"
+    )
+    try:
+        ui.keys("M-y", "<down>")
+        # The window keeps the buffer the text is going into; there is no preview on show.
+        assert value(ui, "_w.buffer is _b") is True and ui.view_showing("*kill ring*") is None
+        ui.keys("<return>")
+        assert value(ui, "(_b.text, _w.id in ed.frame.views)") == ("first", True)
+    finally:
+        ui.eval("ed.options.unset('placement')")
+
+
 def test_cancelling_changes_nothing(ui: HeadlessUI) -> None:
     kills(ui, "first", "second")
     before = ring(ui)
@@ -269,11 +356,12 @@ def test_the_preview_takes_the_mode_of_where_the_text_is_going_and_scrolls(
     assert value(ui, top) > 1
     ui.keys("M-v")
     assert value(ui, top) == 1
-    ui.keys("C-g")
     # It is not something to be recovered after a crash, or to be saved.
     assert value(ui, "(ed.buffers.get('*kill ring*').modified, ed.journal.wanted(ed.buffers.get('*kill ring*')))") == (
         False, False,
     )  # fmt: skip
+    ui.keys("C-g")
+    assert value(ui, "ed.buffers.get('*kill ring*')") is None  # and it goes with the chooser
 
 
 def test_not_into_a_prompt(ui: HeadlessUI) -> None:

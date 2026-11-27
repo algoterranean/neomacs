@@ -57,6 +57,10 @@ class KillRing:
 
     def __init__(self) -> None:
         self.entries: list[Entry] = []
+        # Text on the system clipboard that is too long to keep.  It is not in
+        # the ring, and is still what a yank pastes for as long as the
+        # clipboard holds it.
+        self._unkept: Entry | None = None
 
     def _limit(self, name: str, default: int) -> int:
         options = _options()
@@ -127,8 +131,10 @@ class KillRing:
         if not isinstance(text, str) or not text or text == frame.last_clipboard:
             return None
         frame.last_clipboard = text
+        self._unkept = None
         if len(text) > self._limit("kill_ring_entry_limit", 1_000_000):
-            return Entry([text], "system")
+            self._unkept = Entry([text], "system")
+            return self._unkept
         # Not put back on the clipboard it came from.
         return self.push([text], source="system")
 
@@ -136,7 +142,15 @@ class KillRing:
     async def current(self, frame: Frame | None) -> Entry | None:
         """The entry to yank: what another program has put on the system
         clipboard since the engine last looked, otherwise the top of the ring."""
-        return await self.capture(frame) or self.top
+        found = await self.capture(frame)
+        if found is not None:
+            return found
+        # Seen before, by a yank or when the window regained focus, and too
+        # long to have been kept: it is still what the clipboard holds.
+        unkept = self._unkept
+        if unkept is not None and frame is not None and frame.last_clipboard == unkept.text:
+            return unkept
+        return self.top
 
     @provisional("0.1")
     def distribute(self, entry: Entry, count: int) -> list[str]:
