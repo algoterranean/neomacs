@@ -74,10 +74,20 @@ def extension_files(directory: Path) -> list[Path]:
 
 
 async def load_user_code(editor: Editor) -> None:
-    """Load the single-file extensions and then the init file, unless started with `--safe`."""
+    """Load what the user has added, in the order of EXTENSIONS 6.1: installed
+    extensions, single-file extensions, then the init file.  With `--safe`, none of it."""
     if editor.safe:
         editor.message("Started with --safe: no extensions and no init file", kind="log")
         return
+    from neomacs.ext.environment import Environment
+    from neomacs.ext.registry import Extension
+
+    extensions = editor.extensions
+    try:
+        extensions.start(Environment().site_packages())
+    except Exception as exc:
+        editor.report_exception("finding the installed extensions", exc)
+        editor.startup_problems.append(f"the installed extensions could not be read: {exc}")
     directory = paths.extensions_dir()
     files = extension_files(directory)
     if files:
@@ -86,7 +96,15 @@ async def load_user_code(editor: Editor) -> None:
         name = f"{USER_PACKAGE}.{path.stem}"
         if name in sys.modules:
             continue  # another extension imported it already
-        await load_module(editor, path, name, f"extension {path.stem}")
+        extension = Extension(path.stem, name, kind="file", file=str(path))
+        if extension.name in extensions.known:
+            editor.startup_problems.append(
+                f"extension {path.stem}: an installed extension has that name, so "
+                f"{path.name} was not loaded"
+            )
+            continue
+        extensions.known[extension.name] = extension
+        await extensions.load_file(extension)
     init = paths.init_file()
     if init.is_file():
         await load_module(editor, init, INIT_MODULE, "init.py")

@@ -113,6 +113,9 @@ support when the first build is packaged, and raised if either needs it.
   the resulting path is still too long the engine falls back to
   `/tmp/neomacs-<uid>/`, created with mode 0700.
 - The application directory is never written to after installation.
+- The extensions environment is `ext-env/` in the data directory: the
+  resolver's working files, the wheels that stand for the engine's own
+  packages, and the virtual environment itself (EXTENSIONS 11.1).
 - **Overrides.** `NEOMACS_CONFIG_DIR`, `NEOMACS_DATA_DIR` and
   `NEOMACS_CACHE_DIR` each put one of these directories somewhere else. The
   test suite and the Electron smoke test use them, so that an engine under

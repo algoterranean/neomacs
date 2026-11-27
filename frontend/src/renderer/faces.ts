@@ -5,7 +5,7 @@ import type { FaceAttrs } from "./model.ts";
 
 const COLOUR = /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+)$/;
 
-function colour(value: unknown): string | null {
+export function colour(value: unknown): string | null {
   return typeof value === "string" && COLOUR.test(value) ? value : null;
 }
 

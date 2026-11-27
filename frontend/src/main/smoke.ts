@@ -1063,6 +1063,102 @@ export async function runSmoke(
     for (let i = 0; i < 60 && (await pyText("len(ed.frames)")) !== "1"; i++) await new Promise((resolve) => setTimeout(resolve, 50));
     check("f4.closing_a_window_removes_its_frame", (await pyText("len(ed.frames)")) === "1" && shell.windows.size === windowsBefore);
 
+    // -- step 12, F5: themes, labels, and the performance budgets --
+    {
+      await control.eval(
+        `_sel12 = ${win}.selections.ranges()\n` +
+          `ed.faces.own.pop('default', None)\n` + // the tests above gave the default face colours of their own
+          `ed.options.theme = 'dark'\n` +
+          `_perf = ed.buffers.new('perf.py')\n_perf.set_mode('python')\n` +
+          `_perf.insert(0, ''.join(f'def function_{i}(a, b):\\n    return a + b * {i}  # the {i}th\\n\\n' for i in range(120)))\n` +
+          `${win}.show(_perf)\n${win}.selections.set([(0, 0)])\n${win}.reveal(0, 'top')`,
+      );
+      await settle();
+      const look = () =>
+        js<{ bg: string; fg: string; surface: string; scheme: string; keyword: string }>(
+          `(() => { const f = getComputedStyle(document.querySelector('.nm-frame')); const r = getComputedStyle(document.documentElement);
+            const k = [...document.querySelectorAll('.nm-content span')].find((e) => e.textContent === 'def');
+            return { bg: f.backgroundColor, fg: f.color, surface: r.getPropertyValue('--nm-surface').trim(), scheme: r.getPropertyValue('color-scheme').trim(), keyword: k ? getComputedStyle(k).color : '' }; })()`,
+        );
+      const dark = await look();
+      const before12 = await js<{ resets: number; layoutRebuilds: number }>("window.neomacsDebug.snapshot()");
+      await control.eval("ed.options.theme = 'light'");
+      await settle();
+      const light = await look();
+      const after12 = await js<{ resets: number; layoutRebuilds: number }>("window.neomacsDebug.snapshot()");
+      check(
+        "f5.theme_changes_text_and_chrome_without_redrawing",
+        dark.bg === "rgb(30, 30, 30)" && dark.surface === "#252526" && dark.scheme === "dark" && dark.keyword === "rgb(197, 134, 192)" &&
+          light.bg === "rgb(255, 255, 255)" && light.fg === "rgb(31, 35, 40)" && light.surface === "#f6f8fa" && light.scheme === "light" &&
+          light.keyword === "rgb(166, 38, 164)" && after12.resets === before12.resets && after12.layoutRebuilds === before12.layoutRebuilds,
+        { dark, light, before12, after12 },
+      );
+      await shot("12-light-theme");
+      await control.eval("ed.options.theme = 'dark'");
+      await settle();
+      check("f5.theme_goes_back", (await look()).bg === "rgb(30, 30, 30)", await look());
+
+      // Labels on views and regions; messages announced.
+      await control.eval("ed.message('something went wrong', kind='error')");
+      await settle();
+      press("x", ["alt"]);
+      await settle();
+      const labels = await js<Record<string, unknown>>(
+        `(() => { const a = (sel, name) => document.querySelector(sel)?.getAttribute(name) ?? null;
+          return { root: [a('#root', 'role'), a('#root', 'aria-label')],
+            view: [a('.nm-window .nm-view', 'role'), a('.nm-window .nm-view', 'aria-label')],
+            modeline: a('.nm-window .nm-modeline', 'aria-label'),
+            message: [a('.nm-message', 'role'), a('.nm-message', 'aria-live'), document.querySelector('.nm-message')?.textContent],
+            toast: [...document.querySelectorAll('.nm-toast-error')].map((t) => t.getAttribute('role')).slice(-1),
+            palette: [a('.nm-palette', 'role'), a('.nm-palette', 'aria-label')],
+            popup: [a('.nm-popup', 'role'), document.querySelectorAll('.nm-popup-item[role=option]').length > 5,
+              document.querySelectorAll('.nm-popup-item[aria-selected=true]').length],
+            prompt: a('.nm-palette .nm-view', 'aria-label') }; })()`,
+      );
+      press("g", ["control"]);
+      await settle();
+      check(
+        "f5.views_and_regions_are_labelled_and_messages_announced",
+        JSON.stringify(labels) ===
+          JSON.stringify({
+            root: ["application", "Neomacs"],
+            view: ["group", "Buffer perf.py"],
+            modeline: "Status line",
+            message: ["status", "polite", "something went wrong"],
+            toast: ["alert"],
+            palette: ["dialog", "M-x"],
+            popup: ["listbox", true, 1],
+            prompt: "Input",
+          }),
+        labels,
+      );
+
+      // The budgets of FRONTEND 11.  A shared CI machine is allowed a multiple.
+      const scale = Number(process.env["NEOMACS_BUDGET_SCALE"] ?? "1") || 1;
+      await js<void>("window.neomacsDebug.perfReset()");
+      for (const ch of "value = function_3(1, 2) + function_4(3, 4)  # typed one key at a time, as a person would") {
+        type(ch);
+        await settle();
+      }
+      for (let i = 0; i < 40; i++) {
+        press(i < 20 ? "Down" : "Up"); // each is one `layout.move` for one position
+        await settle();
+      }
+      await js<unknown>("window.neomacsDebug.scrollRun(40, 60)");
+      await settle();
+      interface PerfReport { summary: Record<string, { n: number; p50: number; p90: number; max: number }>; over: Record<string, [number, number]> }
+      const report = await js<PerfReport>(`window.neomacsDebug.perf(${scale})`);
+      const counted = (name: string) => report.summary[name]?.n ?? 0;
+      check(
+        "f5.performance_budgets",
+        Object.keys(report.over).length === 0 && counted("apply") >= 80 && counted("render") >= 80 && counted("total") >= 80 &&
+          counted("move") >= 30 && counted("scroll") >= 30,
+        { scale, ...report },
+      );
+      await control.eval(`${win}.show(_k)\n${win}.selections.set(_sel12)\ned.buffers.kill(_perf)`);
+      await settle();
+    }
+
     // -- the socket is killed: reconnect and reattach to the same frame --
     const beforeDrop = await js<{ attaches: number; resets: number }>("window.neomacsDebug.snapshot()");
     (state as unknown as { socket: { destroy(): void } }).socket.destroy();

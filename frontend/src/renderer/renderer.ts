@@ -3,6 +3,8 @@
 
 import { Chrome } from "./chrome.ts";
 import { FaceSheet } from "./faces.ts";
+import { overBudget, Perf } from "./perf.ts";
+import { applyTheme, themeVariables } from "./theme.ts";
 import type { Position } from "./geometry.ts";
 import { Input } from "./input.ts";
 import { type Layout, Workspace } from "./layout.ts";
@@ -47,7 +49,13 @@ const host = window.neomacsHost;
 const root = document.getElementById("root") as HTMLDivElement;
 const rpc = new Rpc((line) => host.send(line));
 const faces = new FaceSheet(document);
+const perf = new Perf();
 const chrome = new Chrome(root);
+// Views and regions are labelled, and messages announced (FRONTEND 1): enough
+// to find one's way with a screen reader, not a full treatment.
+root.setAttribute("role", "application");
+root.setAttribute("aria-label", "Neomacs");
+let batchSinceRender = false;
 let frame = new FrameModel();
 // The element for each view the frame has, by the model object it draws.
 const elements = new Map<ViewModel, ViewElement>();
@@ -68,7 +76,7 @@ let statusEl: HTMLDivElement | null = null;
 let shownMessage: { text: string; kind: string } | null = null;
 
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
-const input = new Input(root, rpc, { mac, optionIsMeta: true }, () => focusedElement());
+const input = new Input(root, rpc, { mac, optionIsMeta: true }, () => focusedElement(), (ms) => perf.key(ms));
 
 const workspace = new Workspace({
   viewRoot: (id) => {
@@ -91,6 +99,9 @@ const workspace = new Workspace({
 });
 chrome.main.prepend(workspace.root, workspace.floatingLayer);
 
+ViewElement.onUserScroll = () => {
+  perf.scrolled = true;
+};
 ViewElement.host = {
   resourceUrl: (id) => {
     const resource = frame.resources.get(id);
@@ -233,6 +244,9 @@ function syncViews(): void {
 }
 
 function render(): void {
+  const began = performance.now();
+  const hadBatch = batchSinceRender;
+  batchSinceRender = false;
   renderQueued = false;
   renders += 1;
   syncViews();
@@ -263,6 +277,10 @@ function render(): void {
   chrome.setKeys(frame.keys);
   input.cursorMoved();
   if (document.title !== frame.title && frame.title) document.title = frame.title;
+  // Have the style and layout work done now, so that it is counted here and
+  // not in whatever script happens to ask a question next.
+  void root.offsetHeight;
+  perf.rendered(performance.now() - began, hadBatch);
   const acks = pendingAcks;
   pendingAcks = [];
   if (acks.length === 0) return;
@@ -282,16 +300,22 @@ function queueRender(): void {
 }
 
 rpc.onNotification("redraw", (events) => {
+  const began = performance.now();
   batches += 1;
   const before = frame.resets;
+  let restyled = false;
   // Faces go to the stylesheet as they are defined.
   for (const event of events as unknown as RedrawEvent[]) {
     if (event[0] === "reset") {
       faces.clear();
       ViewElement.styleVersion += 1;
+      restyled = true;
     } else if (event[0] === "face_define") {
       faces.define(event[1] as number, event[2] as Record<string, unknown>);
       ViewElement.styleVersion += 1; // sizes may have changed: views measure again
+      restyled = true;
+    } else if (event[0] === "ui_faces") {
+      restyled = true;
     }
   }
   try {
@@ -307,6 +331,10 @@ rpc.onNotification("redraw", (events) => {
     dropElements();
   }
   for (const element of elements.values()) element.batchApplied();
+  // What is drawn around the text takes its colours from the theme too.
+  if (restyled) applyTheme(document.documentElement, themeVariables(frame.faces, frame.uiFaces));
+  batchSinceRender = true;
+  perf.applied(performance.now() - began);
   queueRender();
 });
 
@@ -328,9 +356,13 @@ async function withView<T>(id: Json, body: (view: ViewElement) => Promise<T>): P
   }
 }
 
-rpc.onRequest("layout.move", (view, positions, unit, count) =>
-  withView(view, (v) => v.geometry.move(positions as unknown as Position[], unit as string, count as number)),
-);
+rpc.onRequest("layout.move", async (view, positions, unit, count) => {
+  const began = performance.now();
+  const places = positions as unknown as Position[];
+  const answer = await withView(view, (v) => v.geometry.move(places, unit as string, count as number));
+  perf.add("move", (performance.now() - began) / Math.max(1, places.length));
+  return answer;
+});
 rpc.onRequest("layout.line_edge", (view, line, offset, which) =>
   withView(view, (v) => v.geometry.lineEdge(line as number, offset as number, which as string)),
 );
@@ -418,6 +450,9 @@ const frames = (count = 2) =>
   });
 
 window.neomacsDebug = {
+  /** Timings of the renderer's work since `perfReset`, and which are over budget. */
+  perf: (scale = 1) => ({ summary: perf.summary(), over: overBudget(perf.summary(), scale as number) }),
+  perfReset: () => perf.reset(),
   snapshot: () => ({
     frame: attachedFrame,
     batches,

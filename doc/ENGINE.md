@@ -221,7 +221,7 @@ decides how it looks on screen.
 | `["message", runs, kind]` | A transient message for the user. `kind` is `info`, `warning`, `error`, or `keys` for a pending key sequence or prefix argument. The UI chooses where to show it. |
 | `["title", text]`, `["bell"]`, `["busy", bool]` | Window title, alert, busy indicator. |
 | `["reset"]` | Discard everything held for this frame: faces, resources, layout, lines. First event of a full state sync (4.6). |
-| `["ui_faces", names]` | The face ids for what the frontend draws on its own account: `selection`, `cursor`, `gutter`, `placeholder`, `modeline`. Sent on attach and when the theme changes. |
+| `["ui_faces", names]` | The face ids for what the frontend draws on its own account: `selection`, `cursor`, `gutter`, `placeholder`, `modeline`, and for what a graphical frontend draws around the text: `popup`, `popup-selected`, `toast`, `chrome-border`, `divider`, `accent`, `scrollbar`, `error`, `warning`. Sent on attach and when the theme changes. A frontend uses the ones it has a use for. |
 | `["flush", seq]` | End of batch. `seq` increases by one per batch, per frame. |
 
 A line is `[attrs, runs]`. `attrs` holds paragraph-level properties
@@ -1312,6 +1312,15 @@ defined by the active theme with the attributes listed in 4.3. The view
 builder resolves a merged face to an id and sends `face_define` the first
 time an id is used or when the theme changes.
 
+A theme is a name and the attributes of every named face. `dark` and `light`
+come with the editor. The `theme` option selects one, for every frame at
+once; `theme.select` asks for one by name. Changing it sends `face_define`
+for the ids in use and `ui_faces`, and no text: the lines a frontend holds
+refer to faces by id. `define_theme(name, faces, base="dark")` in
+`neomacs.display.faces` makes another, from an existing one and what
+differs. A face the user gave attributes with `ed.faces.define` keeps them
+whatever the theme.
+
 ### 8.4 Frames
 
 Each attached frontend has a frame (D11). A frame owns a window tree, its
@@ -1943,6 +1952,11 @@ neomacs/
   paths.py               where things are on disk (DISTRIBUTION 5)
   safeio.py              reading small files a project supplies, without waiting
   vcs.py                 the git branch a file is on
+  ext/                   extensions (EXTENSIONS.md)
+    manifest.py  lock.py   extensions.toml and extensions.lock
+    environment.py         the extensions environment; resolving and installing with uv
+    registry.py            what is installed; lazy loading, disabling, reloading
+    wheel.py  cli.py       writing a wheel by hand; `neomacs ext`
   std/                   standard commands, written only against the public API
     movement.py  editing.py  cursors.py  files.py  windows.py  help.py
     evalcmds.py

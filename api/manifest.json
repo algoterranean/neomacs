@@ -156,6 +156,20 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.display.faces.FaceTable.load_theme",
+   "kind": "method",
+   "signature": "(self, name: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.display.faces.define_theme",
+   "kind": "function",
+   "signature": "(name: 'str', faces: 'dict[str, Attrs]', *, base: 'str' = 'dark') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.display.resources.Resources",
    "kind": "class",
    "signature": "() -> 'None'",
@@ -256,7 +270,7 @@
   {
    "name": "neomacs.editor.Editor.start_task",
    "kind": "method",
-   "signature": "(self, coro: 'Coroutine[Any, Any, Any]', *, name: 'str | None' = None, frame: 'Frame | None' = None) -> 'TaskInfo'",
+   "signature": "(self, coro: 'Coroutine[Any, Any, Any]', *, name: 'str | None' = None, frame: 'Frame | None' = None, owner: 'str | None' = None) -> 'TaskInfo'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -298,7 +312,210 @@
   {
    "name": "neomacs.editor.TaskInfo",
    "kind": "class",
-   "signature": "(name: 'str', task: 'asyncio.Task[Any]', progress: 'str' = '') -> None",
+   "signature": "(name: 'str', task: 'asyncio.Task[Any]', progress: 'str' = '', owner: 'str' = '') -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.environment.Environment",
+   "kind": "class",
+   "signature": "(*, config: 'Path | None' = None, data: 'Path | None' = None, cache: 'Path | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.environment.Environment.apply",
+   "kind": "method",
+   "signature": "(self, plan: 'Plan', *, add: 'Wanted | None' = None, remove: 'str | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.environment.Environment.lock",
+   "kind": "method",
+   "signature": "(self) -> 'Lock | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.environment.Environment.manifest",
+   "kind": "method",
+   "signature": "(self) -> 'Manifest'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.environment.Environment.plan",
+   "kind": "method",
+   "signature": "(self, manifest: 'Manifest | None' = None, *, upgrade: 'bool | Sequence[str]' = False) -> 'Plan'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.environment.Environment.resolve",
+   "kind": "method",
+   "signature": "(self, manifest: 'Manifest', *, upgrade: 'bool | Sequence[str]' = False) -> 'Lock'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.environment.Environment.site_packages",
+   "kind": "method",
+   "signature": "(self) -> 'Path | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.environment.Environment.sync",
+   "kind": "method",
+   "signature": "(self, lock: 'Lock | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.environment.ExtensionError",
+   "kind": "class",
+   "signature": "",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.lock.Lock",
+   "kind": "class",
+   "signature": "(distributions: 'dict[str, Locked]' = <factory>) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.lock.LockError",
+   "kind": "class",
+   "signature": "",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.lock.Locked",
+   "kind": "class",
+   "signature": "(name: 'str', version: 'str', source: 'str' = 'registry', location: 'str' = '', revision: 'str' = '', hashes: 'tuple[str, ...]' = (), wheel: 'bool | None' = None) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.lock.Plan",
+   "kind": "class",
+   "signature": "(lock: 'Lock', added: 'list[Locked]' = <factory>, changed: 'list[tuple[Locked, Locked]]' = <factory>, removed: 'list[Locked]' = <factory>) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.lock.read",
+   "kind": "function",
+   "signature": "(path: 'Path') -> 'Lock | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.manifest.Manifest",
+   "kind": "class",
+   "signature": "(path: 'Path', wanted: 'dict[str, Wanted]' = <factory>, resolver: 'Resolver' = <factory>) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.manifest.ManifestError",
+   "kind": "class",
+   "signature": "",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.manifest.Resolver",
+   "kind": "class",
+   "signature": "(index: 'str' = '', extra_index: 'list[str]' = <factory>, find_links: 'list[str]' = <factory>, no_index: 'bool' = False, offline: 'bool' = False) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.manifest.Wanted",
+   "kind": "class",
+   "signature": "(name: 'str', version: 'str' = '', git: 'str' = '', rev: 'str' = '', path: 'str' = '', editable: 'bool' = False) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.manifest.edit",
+   "kind": "function",
+   "signature": "(path: 'Path', *, add: 'Wanted | None' = None, remove: 'str | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.manifest.parse_request",
+   "kind": "function",
+   "signature": "(text: 'str', *, base: 'Path | None' = None) -> 'Wanted'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.manifest.read",
+   "kind": "function",
+   "signature": "(path: 'Path') -> 'Manifest'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.registry.Extension",
+   "kind": "class",
+   "signature": "(name: 'str', module: 'str', kind: 'str' = 'package', distribution: 'str' = '', version: 'str' = '', summary: 'str' = '', file: 'str' = '', commands: 'list[list[str]]' = <factory>, modes: 'list[dict[str, Any]]' = <factory>, requires_restart: 'bool' = False, needs: 'list[str]' = <factory>, state: 'str' = 'known', error: 'str' = '', gil: 'bool' = False) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.registry.Extensions",
+   "kind": "class",
+   "signature": "(editor: 'Editor') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.registry.Extensions.disable",
+   "kind": "method",
+   "signature": "(self, name: 'str') -> 'Extension'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.registry.Extensions.enable",
+   "kind": "method",
+   "signature": "(self, name: 'str') -> 'Extension'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.registry.Extensions.get",
+   "kind": "method",
+   "signature": "(self, name: 'str') -> 'Extension'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.registry.Extensions.load",
+   "kind": "method",
+   "signature": "(self, extension: 'Extension') -> 'bool'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.registry.Extensions.reload",
+   "kind": "method",
+   "signature": "(self, name: 'str') -> 'Extension'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.ext.wheel.write_wheel",
+   "kind": "function",
+   "signature": "(directory: 'Path', name: 'str', version: 'str', *, requires: 'Sequence[str]' = (), files: 'Mapping[str, str] | None' = None, entry_points: 'Mapping[str, Mapping[str, str]] | None' = None, summary: 'str' = '') -> 'Path'",
    "tier": "provisional",
    "since": "0.1"
   },

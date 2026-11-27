@@ -63,7 +63,16 @@ def _tui(attach: str | None, file: str | None, safe: bool = False) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="neomacs", description="The Neomacs engine.")
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments[:1] == ["ext"]:
+        from neomacs.ext import cli
+
+        return cli.main(arguments[1:])
+    parser = argparse.ArgumentParser(
+        prog="neomacs",
+        description="The Neomacs engine.",
+        epilog="`neomacs ext ...` manages extensions; see `neomacs ext --help`.",
+    )
     parser.add_argument("--version", action="store_true", help="print versions and exit")
     parser.add_argument("--listen", metavar="PATH", help="listen on a Unix socket at PATH")
     parser.add_argument("--stdio", action="store_true", help="serve one client on stdio")

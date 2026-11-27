@@ -175,6 +175,7 @@ class Process:
         self.returncode: int | None = None
         # Why it could not be started, if it could not.
         self.error: BaseException | None = None
+        self.owner = ""  # the module that started it
         self._process: asyncio.subprocess.Process | None = None
         self._done: asyncio.Event = asyncio.Event()
         self._unsent: list[bytes] = []
@@ -353,9 +354,15 @@ def spawn(
     cwd: str | Path | None = None,
     env: Mapping[str, str] | None = None,
     input: bool = False,
+    owner: str = "",
 ) -> Process:
     args = _argv(argv)
     process = Process(editor, args, on_output=on_output, on_exit=on_exit, buffer=buffer)
+    process.owner = owner
     editor.processes.add(process)
-    editor.start_task(process._serve(cwd, env, input), name=f"process {args[0]}")  # pyright: ignore[reportPrivateUsage]
+    editor.start_task(
+        process._serve(cwd, env, input),  # pyright: ignore[reportPrivateUsage]
+        name=f"process {args[0]}",
+        owner=owner,
+    )
     return process

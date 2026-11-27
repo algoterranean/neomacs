@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from neomacs.keymap import Keymap
@@ -25,6 +26,11 @@ if TYPE_CHECKING:
 modes: dict[str, type[Mode]] = globals().get("modes", {})
 
 
+# Modes that extensions not yet loaded say they define (EXTENSIONS 6.2): the
+# name of each, the file name patterns it is chosen for, and what loads it.
+autoload: dict[str, tuple[list[str], Callable[[], None]]] = globals().get("autoload", {})
+
+
 @provisional("0.1")
 def lookup(name: str) -> type[Mode] | None:
     """The mode called NAME.
@@ -36,6 +42,11 @@ def lookup(name: str) -> type[Mode] | None:
     from neomacs.live.patch import kept
 
     found = modes.get(name)
+    if found is None and name in autoload:
+        # An extension that has not been loaded yet says it defines this mode.
+        _, load = autoload.pop(name)
+        load()
+        found = modes.get(name)
     return kept(found) if found is not None else None
 
 
@@ -174,6 +185,10 @@ def mode_for(filename: str | None, first_line: str = "") -> type[Mode]:
     """The major mode for a file: by its name, then by its interpreter line."""
     if filename:
         base = filename.rsplit("/", 1)[-1]
+        for name, (patterns, load) in list(autoload.items()):
+            if any(fnmatch.fnmatchcase(base, pattern) for pattern in patterns):
+                autoload.pop(name, None)
+                load()  # its mode is now among the others, to be chosen or not
         best: tuple[int, type[Mode]] | None = None
         for mode in _all():
             if mode.minor:

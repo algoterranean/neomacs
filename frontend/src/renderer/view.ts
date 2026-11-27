@@ -140,6 +140,7 @@ export class ViewElement {
     this.requestRender = requestRender;
     this.root = document.createElement("div");
     this.root.className = mini ? "nm-view nm-mini" : "nm-view";
+    this.root.setAttribute("role", "group");
     this.scroller = document.createElement("div");
     this.scroller.className = "nm-scroller";
     this.spacer = document.createElement("div");
@@ -148,8 +149,10 @@ export class ViewElement {
     this.linesEl.className = "nm-lines";
     this.modelineEl = document.createElement("div");
     this.modelineEl.className = "nm-modeline";
+    this.modelineEl.setAttribute("aria-label", "Status line");
     this.selectionLayer = document.createElement("div");
     this.selectionLayer.className = "nm-layer nm-selections";
+    this.selectionLayer.setAttribute("aria-hidden", "true");
     this.cursorLayer = document.createElement("div");
     this.cursorLayer.className = "nm-layer nm-cursors";
     this.preeditEl = document.createElement("span");
@@ -168,6 +171,9 @@ export class ViewElement {
 
   /** Bumped whenever a face is defined or the faces are cleared. */
   static styleVersion = 0;
+
+  /** Called when the user scrolls a view, before the frame that shows it. */
+  static onUserScroll: () => void = () => {};
 
   /** The page's services to every view: image URLs and embedded minibuffers. */
   static host: ViewHost | null = null;
@@ -219,7 +225,10 @@ export class ViewElement {
 
   private scrolled(): void {
     if (this.settingScroll) return;
-    if (this.adoptScroll()) this.requestRender();
+    if (this.adoptScroll()) {
+      ViewElement.onUserScroll();
+      this.requestRender();
+    }
   }
 
   /**
@@ -359,6 +368,10 @@ export class ViewElement {
     const info = model.info;
     this.root.classList.toggle("nm-nowrap", !info.wrap);
     this.root.classList.toggle("nm-focused", this.focused);
+    // What this view is, for someone who cannot see where it is.
+    const label = this.mini ? "Input" : `Buffer ${info.name ?? ""}`;
+    if (this.root.getAttribute("aria-label") !== label) this.root.setAttribute("aria-label", label);
+    this.root.setAttribute("aria-current", this.focused ? "true" : "false");
     this.linesEl.style.tabSize = String(Math.max(1, info.tab_width));
     this.applyPresentation();
 

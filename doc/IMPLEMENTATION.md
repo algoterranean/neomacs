@@ -1,6 +1,8 @@
 # Implementation plan
 
-Status: plan written 2026-11-27. Steps 1 to 10 and Gates A to D done; step 11 is next. See the progress log (section 9).
+Status: plan written 2026-11-27. Steps 1 to 11 and Gates A to D done; step 12
+is in hand. Steps 13, 14 and 15 are deferred (decided 2026-11-27): they are not
+to be started until the user says so. See the progress log (section 9).
 
 This is the working checklist for building Neomacs. It puts the stages of the
 five design documents into one order and says, for each step, what to read,
@@ -94,9 +96,9 @@ strict mode for types, `ruff` for linting and formatting.
 | 10 | F3, F4 | The full Electron interface |
 | 11 | Stage 7, X0 | Processes, timers, the init file, project settings |
 | 12 | X1 to X3, F5 | Installable extensions; frontend performance and themes |
-| 13 | P1 to P3 | A signed desktop app |
-| 14 | X4, T4, T3, P4 | Extension developer tools, release checks, updates |
-| 15 | T5, P5 | 1.0, then Windows |
+| 13 | P1 to P3 | **Deferred.** A signed desktop app |
+| 14 | X4, T4, T3, P4 | **Deferred.** Extension developer tools, release checks, updates |
+| 15 | T5, P5 | **Deferred.** 1.0, then Windows |
 
 ## 3. Steps
 
@@ -525,38 +527,41 @@ offers the unsaved text back.
 
 **Build, X1:**
 
-- [ ] Disable an extension by ownership; reload with removal of stale
+- [x] Disable an extension by ownership; reload with removal of stale
       registrations; `requires_restart`.
 
 **Build, X2:**
 
-- [ ] Entry point discovery in the group `neomacs.extensions`.
-- [ ] `extensions.toml` and `extensions.lock`.
-- [ ] The extensions environment, on `sys.path` after the engine's own
+- [x] Entry point discovery in the group `neomacs.extensions`.
+- [x] `extensions.toml` and `extensions.lock`.
+- [x] The extensions environment, on `sys.path` after the engine's own
       packages, with the engine's versions passed to the resolver as
       constraints.
-- [ ] `uv`, pinned; add, remove, upgrade, sync, list, in the editor and as
+- [x] `uv`, pinned; add, remove, upgrade, sync, list, in the editor and as
       `neomacs ext`, running as background tasks.
-- [ ] Before installing: show every distribution to be added or changed, and
+- [x] Before installing: show every distribution to be added or changed, and
       which have no free-threaded wheel.
-- [ ] After each import: record which extension re-enabled the GIL.
-- [ ] The warning for global key bindings made on load.
+- [x] After each import: record which extension re-enabled the GIL.
+- [x] The warning for global key bindings made on load.
 
 **Build, X3:**
 
-- [ ] The autoload index, compiled at install time; command and mode stubs.
+- [x] The autoload index, compiled at install time; command and mode stubs.
 
 **Build, F5:**
 
-- [ ] The performance budgets of FRONTEND 11, enforced in CI.
-- [ ] Themes.
-- [ ] Labels on views and regions; messages announced.
+- [x] The performance budgets of FRONTEND 11, enforced in CI.
+- [x] Themes.
+- [x] Labels on views and regions; messages announced.
 
 **Done when:** two extensions with a shared dependency install; a third
 that conflicts is refused with both requirements named; fifty installed
 extensions add no measurable startup time.
 
 ### Step 13: the desktop app (P1 to P3)
+
+**Deferred** (2026-11-27, by the user). Not to be started until the user
+says so. What follows is kept as the plan for when it is taken up.
 
 **Read first:** DISTRIBUTION 3.2, 4, 7, 8.1, 8.2, 9, 10, 13, 14.
 
@@ -581,6 +586,9 @@ and no security warnings.
 
 ### Step 14: developer tools, release checks, updates (X4, T4, T3, P4)
 
+**Deferred** (2026-11-27, by the user). Not to be started until the user
+says so. What follows is kept as the plan for when it is taken up.
+
 **Read first:** EXTENSIONS 9. STABILITY 3.4, 4, 7, 9, 10. DISTRIBUTION 8.3.
 
 **Build:**
@@ -598,6 +606,9 @@ and no security warnings.
 request that removes a provisional name without a version bump fails CI.
 
 ### Step 15: 1.0, then Windows (T5, P5)
+
+**Deferred** (2026-11-27, by the user). Not to be started until the user
+says so. What follows is kept as the plan for when it is taken up.
 
 **Read first:** STABILITY 3.2, 6, 11. DISTRIBUTION 6, 13 (P5).
 
@@ -653,6 +664,11 @@ Deferred by decision. Each is described where it is listed.
 - EXTENSIONS 8.1: running code from a project directory.
 - DISTRIBUTION 2: Windows before step 15.
 - STABILITY S9: maintenance of older major versions.
+- Steps 13, 14 and 15 of this plan, deferred by the user on 2026-11-27: the
+  desktop app and signing (P1 to P3), extension developer tools, release
+  checks and updates (X4, T4, T3, P4), and 1.0 and Windows (T5, P5). With
+  them go the facts in section 5 marked for steps 13 and 15, and the items
+  in section 6 that those steps need from the user.
 
 ## 8. Corrections made to the design documents
 
@@ -670,6 +686,12 @@ Found while writing this plan, and fixed in the design documents on
 4. **Project settings were given a stage:** engine Stage 7 and X0.
 5. **Development tooling and the top-level directories were named** in
    ENGINE 12, FRONTEND 13 and DISTRIBUTION 10.
+6. **An extension's declarations moved out of `pyproject.toml`** (found in
+   step 12). EXTENSIONS 3.1 put the autoload table and `requires_restart` in
+   `[tool.neomacs]`, but a wheel does not carry `pyproject.toml`, so an
+   installed extension would have had none of it. They are in
+   `neomacs_extension.toml` inside the package, and the summary is the
+   distribution's own.
 
 ## 9. Progress log
 
@@ -695,4 +717,6 @@ Add a row when a step or gate is finished, or when the design changed.
 | 2026-11-27 | Step 10 | this commit | Done, with the limits below. The Electron frontend now draws the whole interface: window splits with draggable dividers, panels docked and floating with tab strips, embedded minibuffers, margins and a maximum width, images, and it has the mouse, the clipboard, the application menu, several windows, reconnection and restarting a dead engine. **Done when,** all in `npm run smoke` with real key and mouse events: the debugger's layout (source with the current-line and breakpoint marks in the gutter, the stack in a bottom panel that follows each step); an image from a file and one from bytes both load; a second window shows the same buffer and sees an edit typed in the first; the socket is destroyed and the window reattaches to the same frame; and the engine is killed, a new one started, and the window attaches afresh. 78 smoke checks pass in four consecutive runs; 25 frontend unit tests; 291 Python tests. Pictures of the page at six points were saved and looked at, which is how a white scroll bar and a misplaced line number beside an image were found and fixed. The resource scheme refuses an undefined id, a path chosen by the page, another frame's id and a `file:` URL. **Limits:** everything ran off screen; nobody has used the window by hand. Dropping files is written but cannot be exercised from the smoke test. The engine-gone dialog is answered in code there, so the native dialog itself was never shown. The clipboard check uses the real system clipboard and puts back what was on it. The Linux primary selection is untested. A popup anchored in a buffer, `bell`, `busy` and named minibuffer places are not drawn. Details in FRONTEND 13.1. |
 | 2026-11-27 | Step 11 | this commit | Done. **Built:** timers (`ed.after`, `ed.every`, `ed.when_idle`), `ed.run`, `ed.spawn`, `ed.in_thread`, and the command `shell_command` (`M-!`); directory overrides and helpers in `paths.py`; `init.py` as the module `neomacs_init` and single-file extensions as `neomacs_user.<name>`, both through the evaluation pipeline, with `--safe`; project settings; the recovery journal with `recover`. **Done when,** each a test through the reference frontend: a shell command's first line is on show while the program is still waiting to be told to go on; an init file's option, command and key binding work in two engines started one after the other with nothing shared but the file; an engine killed with SIGKILL leaves the typed text, and the next engine tells its first frame, lists it, and puts it back in the file's buffer unsaved. The last is also checked in Electron by `npm run smoke`, and all three were run by hand in the terminal frontend under a pseudo-terminal. 60 new tests; the suite, strict type checking, Gate D over 17 modules and the latency benchmark pass (engine 99th percentile 1.5 to 2.2 ms with the journal on, limit 5). **Differences from the design, now in the documents:** `Editor.run`, which started the engine, is `Editor.serve_forever`, because ENGINE 11 gives `ed.run` to processes; the journal's design was not written down before and is ENGINE 11.1; unsaved text is kept at a clean exit too and offered back, which answers part of what ENGINE 16 left open; an idle timer counts from when it is set; a repeating timer set again for the same function replaces the earlier one; project mode sections follow the mode's ancestry, and an undeclared option in a project file is skipped (EXTENSIONS 8.1); environment variables can move each directory (DISTRIBUTION 5); a failure in the user's code is shown to the first frame (EXTENSIONS 6.1); the placement table has an `output` role. **Limits:** a buffer does not become unmodified by undoing back to its saved text (that was so before), so its journal entry stays until it is saved or killed; timers, processes and the journal wait while the debugger has a command paused; a process cannot be given a terminal, so programs that need one do not work in `shell_command`; the terminal frontend does not know the keys F5 and above, found while running this by hand. **Not verified:** anything on Windows; the Electron app with a visible window, by a person. |
 | 2026-11-27 | Step 11, review | this commit | Four faults found in review, fixed with a test each. (1) Journal: a write on its way in the worker thread could land after a newer write or a removal; steps are now numbered and locked (ENGINE 11.1). (2) `process_output_limit` did nothing for output with no line breaks. (3) Signals stopped at a shell that had exited and left a background program holding the output. (4) The listener and the stdio connection were opened before the user's code was loaded, so a stdio client could be served by an engine half configured; they are opened after. Also: every engine the tests start, not only those from `running_engine`, now has directories of its own. One CI run on macOS failed `test_an_engine_that_is_paused_still_exits_when_told` (the engine took 5 s to exit); it passed in the other run of the same commit and 30 times out of 30 locally, six at a time, so the cause is not known. |
+| 2026-11-27 | Step 12 | this commit | Done, with the limits below. **X2:** `extensions.toml` and `extensions.lock`; the extensions environment, resolved and installed by `uv` with the engine standing in the resolution as a pinned distribution; add, remove, upgrade, sync and list as commands and as `neomacs ext`; what would be installed is shown, with what has no free-threaded wheel, and a yes asked for. **X1:** disable, enable and reload by ownership, `requires_restart`. **X3:** the autoload index, command stand-ins and mode patterns; the GIL culprit; the global-key message. **F5:** `dark` and `light` themes with the `theme` option, the chrome following the theme; labels and announced messages; the budgets of FRONTEND 11 measured by the renderer and failed on in `npm run smoke`, with a CI job that runs it. **Done when,** each a test with real `uv`, offline, from wheels written by hand: two extensions sharing a dependency install; a third that conflicts is refused, the message naming `neomacs-b==0.1 depends on shared>=2` and `neomacs-c==0.1 depends on shared<2`, with nothing changed; fifty extensions that each take 50 ms to import leave startup within 50 ms of none (medians of nine starts), none of them imported, and one is usable on first call. The same through `neomacs ext`, and through the commands in a running editor without a restart. 39 new Python tests, 6 new frontend tests, 4 new smoke checks; the suite, strict type checking, Gate D over 19 modules and the latency benchmark pass (engine 99th percentile 1.6 to 2.2 ms). Renderer, off screen on an Apple M3 Max, 90th percentiles against budgets: apply 0.1 of 1 ms, layout 2.7 of 6, a keystroke's total 2.9 of 8, `layout.move` 0.5 of 2, scroll frame 2.1 of 8. **Differences from the design, now in the documents:** correction 6 in section 8; `[resolver]` in `extensions.toml`; what "renderer total" and "layout and paint" measure (FRONTEND 11); a disabled extension stays disabled only until restart; `ui_faces` names nine more faces; tasks and processes record their owner. **Limits and not verified:** only wheels from a local directory were installed; git, path and editable sources are covered by tests of the files written for `uv`, not by an install; nothing was fetched from PyPI; an extension with a compiled module could not be made, so "restart to finish upgrading" for one is untested; the CI smoke job is new and had not run when this was written; themes and labels were checked by reading computed styles and attributes off screen, not by eye or with a screen reader. X4 (`ext check`, `ext new`) is step 14, deferred. |
+| 2026-11-27 | Steps 13 to 15 | | Deferred by the user. Marked in the status line, section 2, each step's heading and section 7. Nothing in them has been built. |
 | | | | |

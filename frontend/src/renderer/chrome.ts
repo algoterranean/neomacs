@@ -25,6 +25,7 @@ export class Chrome {
     };
     this.main = div("nm-main");
     this.palette = div("nm-palette");
+    this.palette.setAttribute("role", "dialog");
     this.palette.hidden = true;
     const row = div("nm-palette-row");
     this.label = document.createElement("span");
@@ -32,17 +33,25 @@ export class Chrome {
     this.promptSlot = div("nm-palette-input");
     row.append(this.label, this.promptSlot);
     this.popup = div("nm-popup");
+    this.popup.setAttribute("role", "listbox");
+    this.popup.setAttribute("aria-label", "Completions");
     this.popup.hidden = true;
     this.palette.append(row, this.popup);
     this.strip = div("nm-strip");
     this.messageEl = document.createElement("span");
     this.messageEl.className = "nm-message";
+    // Messages are announced: politely, so that typing is not talked over.
+    this.messageEl.setAttribute("role", "status");
+    this.messageEl.setAttribute("aria-live", "polite");
+    this.strip.setAttribute("aria-label", "Messages");
     this.keysEl = document.createElement("span");
     this.keysEl.className = "nm-keys";
+    this.keysEl.setAttribute("aria-label", "Keys typed so far");
     this.strip.append(this.messageEl, this.keysEl);
     this.toasts = div("nm-toasts");
     // The search box: a small window over the top right corner of the main area.
     this.searchBox = div("nm-searchbox");
+    this.searchBox.setAttribute("role", "search");
     this.searchBox.hidden = true;
     this.searchLabel = document.createElement("span");
     this.searchLabel.className = "nm-searchbox-label";
@@ -60,7 +69,10 @@ export class Chrome {
       this.promptSlot.replaceChildren();
       return;
     }
-    if (this.label.textContent !== label) this.label.textContent = label;
+    if (this.label.textContent !== label) {
+      this.label.textContent = label;
+      this.palette.setAttribute("aria-label", label.replace(/[:\s]+$/, "") || "Prompt");
+    }
     if (this.promptSlot.firstChild !== view) this.promptSlot.replaceChildren(view);
   }
 
@@ -72,7 +84,10 @@ export class Chrome {
       this.searchSlot.replaceChildren();
       return;
     }
-    if (this.searchLabel.textContent !== label) this.searchLabel.textContent = label;
+    if (this.searchLabel.textContent !== label) {
+      this.searchLabel.textContent = label;
+      this.searchBox.setAttribute("aria-label", label.replace(/[:\s]+$/, "") || "Search");
+    }
     this.searchBox.classList.toggle("nm-searchbox-failing", label.startsWith("No match"));
     if (this.searchSlot.firstChild !== view) this.searchSlot.replaceChildren(view);
   }
@@ -94,6 +109,8 @@ export class Chrome {
     const rows = items.map(([text, annotation], index) => {
       const row = document.createElement("div");
       row.className = index === selected ? "nm-popup-item nm-selected" : "nm-popup-item";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", index === selected ? "true" : "false");
       const name = document.createElement("span");
       name.className = "nm-popup-text";
       name.textContent = text;
@@ -114,6 +131,9 @@ export class Chrome {
     if (kind === "warning" || kind === "error") {
       const toast = document.createElement("div");
       toast.className = `nm-toast nm-toast-${kind}`;
+      // Shown as well as the message strip, which is what is read out; an
+      // error is said at once.
+      toast.setAttribute("role", kind === "error" ? "alert" : "note");
       toast.textContent = text;
       this.toasts.append(toast);
       setTimeout(() => toast.remove(), 6000);
