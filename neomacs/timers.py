@@ -185,7 +185,7 @@ class Timers:
         where = f"in timer {timer.name}"
         result = editor.guard(where, timer.fn)
         if inspect.iscoroutine(result):
-            editor.start_task(result, name=f"timer {timer.name}")
+            editor.start_task(result, name=f"timer {timer.name}", owner=timer.owner)
         editor.update_frames()
 
     def activity(self) -> None:

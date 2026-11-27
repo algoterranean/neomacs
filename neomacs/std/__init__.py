@@ -5,9 +5,11 @@ Everything here is written against the public API, as an extension would be.
 
 from neomacs.keymap import global_map
 from neomacs.std import (
+    appearance,
     cursors,
     editing,
     evaluation,
+    extensions,
     files,
     help,  # noqa: A004
     mouse,
@@ -22,9 +24,11 @@ from neomacs.std import (
 )
 
 __all__ = [
+    "appearance",
     "cursors",
     "editing",
     "evaluation",
+    "extensions",
     "files",
     "search",
     "structure",
@@ -139,6 +143,7 @@ MENU = [
     ("Tools/Evaluate Definition", "eval_definition"),
     ("Tools/Python REPL", "repl"),
     ("Tools/Shell Command…", "shell_command"),
+    ("Tools/Extensions", "extensions.list"),
     ("Tools/Toggle Breakpoint", "debug.toggle_breakpoint"),
     ("Tools/Inspect Last Error", "debug.inspect"),
     ("View/Split Below", "split_window_below"),
@@ -147,6 +152,7 @@ MENU = [
     ("View/Next Window or Panel", "other_view"),
     ("View/Toggle Panel", "panel.toggle"),
     ("View/Messages", "show_messages"),
+    ("View/Theme…", "theme.select"),
     ("Help/Describe Key…", "describe_key"),
     ("Help/Describe Command…", "describe_command"),
     ("Help/Search Commands…", "apropos"),

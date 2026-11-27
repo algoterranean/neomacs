@@ -70,6 +70,11 @@ class Ownership:
         return self._owners.get((kind, key))
 
     @provisional("0.1")
+    def owners(self) -> list[str]:
+        """Every module that has something registered."""
+        return [owner for owner, records in self._records.items() if records]
+
+    @provisional("0.1")
     def owned(self, owner: str) -> list[tuple[str, Any]]:
         """Everything OWNER has registered, as (kind, key) pairs."""
         return list(self._records.get(owner, {}))

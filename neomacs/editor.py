@@ -47,6 +47,7 @@ class TaskInfo:
     name: str
     task: asyncio.Task[Any]
     progress: str = ""
+    owner: str = ""  # the module that started it (ENGINE D30)
 
     def cancel(self) -> None:
         self.task.cancel()
@@ -140,6 +141,9 @@ class Editor:
         self.timers = Timers(self)
         self.processes: set[Process] = set()  # started with `spawn` and still running
         self.projects = Projects(self)
+        from neomacs.ext.registry import Extensions
+
+        self.extensions = Extensions(self)
         # How many module evaluations `neomacs.tools.reevaluate` has done here.
         self.reevaluated = 0
 
@@ -356,19 +360,22 @@ class Editor:
         *,
         name: str | None = None,
         frame: Frame | None = None,
+        owner: str | None = None,
     ) -> TaskInfo:
         """Run COROUTINE in the background, listed in `ed.tasks`.
 
         It inherits the current frame and nothing else: its view, window and
-        buffer are looked up each time they are read.
+        buffer are looked up each time they are read.  The module that
+        started it is recorded, and its tasks are cancelled if it is disabled.
         """
+        owner = owner if owner is not None else caller_module()
         assert self.loop is not None
         context = contextvars.copy_context()
         context.run(pins_var.set, None)
         context.run(frame_var.set, frame if frame is not None else frame_var.get())
         label = name or getattr(coro, "__qualname__", "task")
         task = self.loop.create_task(self.aguard(f"in task {label}", coro), context=context)
-        info = TaskInfo(label, task)
+        info = TaskInfo(label, task, owner=owner)
         self.tasks.append(info)
         self.keep_task(task)
 
@@ -454,7 +461,7 @@ class Editor:
 
         return proc.spawn(
             self, argv, on_output=on_output, on_exit=on_exit, buffer=buffer, cwd=cwd, env=env,
-            input=input,
+            input=input, owner=caller_module(),
         )  # fmt: skip
 
     @provisional("0.1")

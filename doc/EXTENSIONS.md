@@ -1,7 +1,8 @@
 # Extensions and packaging design
 
-Status: draft 4, 2026-11-27. Nothing is implemented. The decisions in
-section 2 are confirmed; section 13 lists what is still open.
+Status: draft 5, 2026-11-27. Stages X0 to X3 are implemented; section 11.1
+says how what was built differs from what is described before it. X4 is
+deferred. The decisions in section 2 are confirmed.
 
 This describes how `neomacs` is extended: what an extension is, how it is
 installed, how its dependencies coexist with everyone else's, and how it is
@@ -56,16 +57,23 @@ Non-goals:
 [project]
 name = "neomacs-git"
 version = "0.3.0"
+description = "Git status, staging and commit"
 dependencies = ["neomacs>=1.2,<2", "pygit2>=1.15"]
 
 [project.entry-points."neomacs.extensions"]
 git = "neomacs_git"
+```
 
-[tool.neomacs]
-summary = "Git status, staging and commit"
+```toml
+# neomacs_git/neomacs_extension.toml, shipped inside the package
+requires_restart = false
 
-[tool.neomacs.autoload]
-commands = ["git.status", "git.commit", "git.blame"]
+[autoload]
+commands = [
+    { name = "git.status", doc = "Show what has changed." },
+    "git.commit",
+    "git.blame",
+]
 modes = [{ name = "git-commit", patterns = ["COMMIT_EDITMSG"] }]
 ```
 
@@ -73,7 +81,14 @@ modes = [{ name = "git-commit", patterns = ["COMMIT_EDITMSG"] }]
   its `@command`, `Option`, `Hook.add` and mode definitions run and register.
 - The module may define `activate()` and `deactivate()` for anything the
   decorators do not cover.
-- `[tool.neomacs.autoload]` is optional and drives lazy loading (section 6).
+- What an extension declares about itself is in `neomacs_extension.toml`,
+  in its top-level package. It is optional. Its `[autoload]` table drives
+  lazy loading (section 6), and `requires_restart` is described in section 5.
+  It is not a `[tool.neomacs]` table in `pyproject.toml`, as earlier drafts
+  had it, because nothing in `pyproject.toml` but the standard metadata
+  reaches an installed distribution: a wheel does not carry the file.
+- The one line shown about an extension is its distribution's summary
+  (`description` in `pyproject.toml`).
 - The dependency on the engine is an ordinary requirement, with the version
   range STABILITY.md describes.
 
@@ -193,8 +208,8 @@ What cannot be done live:
 - A compiled module cannot be reloaded. If an upgrade changes one, the
   extension is marked "restart to finish upgrading" and keeps running the
   old code.
-- An extension may set `requires_restart = true` in `[tool.neomacs]` if it knows
-  it does not survive reloading.
+- An extension may set `requires_restart = true` in its
+  `neomacs_extension.toml` if it knows it does not survive reloading.
 - Objects an extension handed to other code (a completer stored somewhere, a
   callback passed to a third party) are beyond the ownership record. In-place
   patching usually keeps them working; it is not guaranteed.
@@ -373,6 +388,133 @@ conflicts and get a clear refusal.
 *Runnable:* fifty installed extensions add no measurable startup time.
 
 **X4: developer tools.** `neomacs.testing`, `neomacs ext check`, `neomacs ext new`.
+Deferred with step 14 of IMPLEMENTATION.md.
+
+### 11.1 As built: X1 to X3
+
+**The environment (section 4).**
+
+- It is a virtual environment at `ext-env/venv` in the data directory, made
+  by `uv venv` for the engine's own interpreter. Its `site-packages` is
+  added to `sys.path` with `site.addsitedir`, which appends, so the engine's
+  packages and the standard library come first, and which reads `.pth`
+  files, so an editable install finds its source.
+- **The engine as a constraint.** The resolver is given a distribution
+  called `neomacs`, at the engine's version and with no files, pinned and
+  pointed at a wheel written for the purpose. An extension that requires
+  `neomacs>=99` then fails to resolve, naming that requirement, and nothing
+  is fetched to stand for the engine. The engine has no dependencies of its
+  own; when it has, each gets the same treatment.
+- **Resolving** is `uv lock` on a generated project whose dependencies are
+  the extensions, restricted to this machine's platform and interpreter. The
+  project and uv's own lock stay in `ext-env/resolve`; uv's lock is what
+  keeps versions where they are from one resolution to the next.
+- **`extensions.lock`** is written from uv's answer in a format of its own:
+  for each distribution its name, version, where it came from, the hashes of
+  its files, and whether there is a wheel this interpreter can use as it
+  is. `sync` installs from it alone, with `uv pip sync`, which checks the
+  hashes. Building the environment on another machine needs the two files
+  and nothing else. A later `add` there has none of uv's memory to go on and
+  may move other versions; that is shown before anything is installed.
+- **A lock is for one engine and one manifest.** `sync` refuses a lock that
+  was resolved for another version of the engine: what is in it was chosen
+  to go with that one. The lock also carries a mark of the `extensions.toml`
+  it was resolved for, and when that file has been edited since, by hand,
+  `sync` resolves what it now asks for, shows the change and asks, before
+  installing. So editing the file and running `sync` works.
+- **One operation at a time.** Deciding what to install, asking, and
+  installing are done holding a lock on the environment. A second
+  operation, in the same editor or from `neomacs ext` in another process,
+  is refused until the first has finished; it is not queued, since the
+  first may be waiting for an answer. `list` is always allowed. The lock
+  is a file lock, which this is written for Unix only: on Windows nothing
+  is held yet, and two operations can overlap there. That goes with the
+  rest of Windows, which is deferred (IMPLEMENTATION step 15).
+- **Where distributions come from** can be said in `extensions.toml`:
+
+  ```toml
+  [resolver]
+  index = "https://pypi.org/simple"
+  extra-index = []
+  find-links = ["~/wheels"]
+  no-index = false
+  offline = false
+  ```
+
+  With none of it, uv's own configuration and PyPI apply. The tests install
+  from a directory of wheels with `no-index` and `offline`.
+- **`uv`** is the one named by `NEOMACS_UV`, otherwise the one on the path;
+  the desktop application will ship one (DISTRIBUTION 3.2). Version 0.5.3
+  or newer is required; 0.8.19 is what this was built with. Its cache is
+  `uv/` in the cache directory.
+- **Adding** takes `NAME`, `NAME>=1.0`, `NAME @ git+URL[@REV]`,
+  `NAME @ PATH`, or a directory with a `pyproject.toml` that names a project.
+  A relative path given to `neomacs ext add` is relative to where the
+  command was run. `extensions.toml` is edited in place: the user's comments
+  and other entries are left as they were, and an entry is found however it
+  was written (a line, dotted keys, or a table of its own). The result is
+  checked before it replaces the file.
+
+**Before installing (4.3, 8).** Every operation that would change the
+environment first shows what would be added, changed and removed, and which
+distributions have no wheel a free-threaded interpreter can use as it is: a
+wheel counts if its ABI tag is `none` or ends in `t`. Those are built from
+source. In the editor the list is shown in `*extensions*` and a yes is asked
+for; `neomacs ext` asks on a terminal and needs `--yes` otherwise. A refusal
+by the resolver is given in the resolver's own words, which name both
+requirements and what asks for each.
+
+**Commands (4.2)**, beyond the table there: `extensions.disable`,
+`extensions.enable`, `extensions.reload`. Installing runs as a task, listed
+in `ed.tasks` with "resolving" and then "installing" as its progress. When
+it finishes the running editor takes up the result: new extensions are made
+available, upgraded ones that are loaded are reloaded, removed ones are
+disabled before their files go. `neomacs ext` changes the files and the
+environment only; an editor that is running sees it when it next starts.
+
+**Lazy loading (6.2).**
+
+- The index is `autoload.json` in the cache directory. It lists every
+  extension in the order to load them, with what each declares. It is
+  written whenever the environment is installed into, and at startup if it
+  is missing or if a directory that distributions are installed into has
+  changed since it was written, which costs one `stat` each to find out.
+  Otherwise startup reads that one file.
+- An extension with an `[autoload]` table gets a stand-in for each command,
+  carrying the line about it from the index, and its modes' file patterns
+  are noted. Running a stand-in, visiting a matching file, or asking for the
+  mode by name imports the extension; its real commands replace the
+  stand-ins, and one it declared and does not define is an error that says
+  so. An extension with no table is imported at startup.
+- Extensions installed beside the engine itself, as when one is being
+  developed, are found the same way, by their entry point.
+- Measured: fifty extensions, each taking 50 ms to import, add less than
+  the variation between runs to startup, against 2.5 s if they were imported.
+
+**Disabling and reloading (5).**
+
+- Disabling calls `deactivate()`, cancels the extension's tasks and kills
+  its processes, turns its modes off in every buffer, releases everything
+  its modules registered, and takes the modules out of `sys.modules`.
+  Enabling imports it afresh. It applies to single-file extensions too. It
+  lasts until the editor is restarted: which extensions are disabled is not
+  recorded on disk.
+- Reloading evaluates each of the extension's modules again, in the order
+  they were first imported, through the live evaluation pipeline. All of
+  them are looked at first: if one is compiled, none is evaluated.
+- **An extension that fails while loading** is taken out whole: what its
+  modules registered before the failure is released.
+- **After an install,** an extension whose distribution was replaced is
+  reloaded even if its version did not change, as when a git source moves to
+  another commit. If a library a loaded extension depends on was replaced,
+  the extension is marked as needing a restart: the old library is what is
+  loaded. Only direct dependencies are known; for any other library that
+  changed the user is told to restart if something uses it.
+- **After each import** the engine checks whether the GIL is on and was not
+  before; the extension whose import did it is recorded, the user is told,
+  and `extensions.list` shows it.
+- **Global keys** bound while an extension loads are listed in one message
+  in `*messages*` (X9).
 
 ## 12. Risks
 

@@ -409,6 +409,29 @@ reference machine:
 Together with the engine's 5 ms (ENGINE 14), a keystroke is on screen within
 one 60 Hz frame.
 
+**What is measured.** The renderer times its own work on the main thread
+(`perf.ts`). "Layout and paint" is the time to bring the page up to date for
+a batch, with style and layout forced before the clock stops; painting
+itself happens in the compositor, where a page cannot time it. "Renderer
+total" is the work for one keystroke added up: handling the key event,
+applying the batch that answers it, and that render. It is not the time
+from the key to the acknowledgement on the wall clock, which includes
+waiting for the next frame and so cannot be under a frame. A scroll frame
+is a render that follows the user scrolling.
+
+**How it is enforced.** `npm run smoke` types a line of code one key at a
+time into a highlighted buffer, moves by visual line forty times, and
+scrolls, then fails if the 90th percentile of any phase is over its budget.
+CI runs it under a virtual display on every push, with the budgets
+multiplied by `NEOMACS_BUDGET_SCALE` (4 there), since a shared runner
+without a graphics card is not the reference machine. For the same reason
+Gate C's check of the engine's 5 ms for a vertical motion, which is held to
+the 99th percentile on a developer's machine, is held to the median there:
+the runner stalls for tens of milliseconds now and then, whatever is
+running. On an Apple M3 Max,
+off screen: apply 0.1 ms, layout 2.7 ms, total 2.9 ms, `layout.move`
+0.5 ms, scroll frame 2.1 ms.
+
 Means: line elements are reused across splices; face changes touch the
 stylesheet, not elements; reads of layout (rectangles) are batched before
 writes within a frame; selection and cursor layers are separate from text so
@@ -468,6 +491,33 @@ buffer; kill the socket and recover.
 
 **F5: finish** (engine stage 7). Performance budgets enforced, themes, basic accessibility
 (section 1), packaging hooks for DISTRIBUTION.md.
+
+### 13.2 As built: F5
+
+- **Budgets:** section 11.
+- **Themes.** A theme is the engine's (ENGINE 8.3): the text changes colour
+  because `face_define` rewrites rules. What the frontend draws around the
+  text follows the same way. The engine names a face for each part
+  (`ui_faces`), and the page sets a custom property from each on the root
+  element: `--nm-bg`, `--nm-fg`, `--nm-surface`, `--nm-selected`,
+  `--nm-raised`, `--nm-border`, `--nm-divider`, `--nm-accent`,
+  `--nm-scroll`, `--nm-error`, `--nm-warning`. The stylesheet has no colour
+  of its own left except as the fallback of one of these. `color-scheme` is
+  set to light or dark by how bright the background is, for what the
+  browser draws itself. A change of theme touches no element and rebuilds
+  nothing.
+- **Labels.** The root is an `application`. Each view is a `group` labelled
+  with its buffer's name; its modeline is labelled "Status line". Panels are
+  regions labelled with their names, tab strips are tab lists, dividers are
+  separators, and the buttons on a tab strip say what they do. The prompt is
+  a dialog labelled with its prompt, its candidates a list box of options
+  with the chosen one marked.
+- **Messages** are announced: the message strip is a polite live region,
+  and an error's toast is an alert.
+- **Not done:** the text of a buffer is not exposed as a text field, so a
+  screen reader cannot read or follow it (section 1 puts that out of scope).
+  The packaging hooks wait for the desktop application, which is deferred.
+  None of this has been tried with a screen reader.
 
 ### 13.1 As built: F3 and F4
 

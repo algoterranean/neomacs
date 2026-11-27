@@ -39,7 +39,13 @@ export class Input {
   keysSent = 0;
   textsSent = 0;
 
-  constructor(target: HTMLElement, rpc: Rpc, options: InputOptions, focusedView: () => ViewElement | null) {
+  constructor(
+    target: HTMLElement,
+    rpc: Rpc,
+    options: InputOptions,
+    focusedView: () => ViewElement | null,
+    onKey: (ms: number) => void = () => {},
+  ) {
     this.rpc = rpc;
     this.target = target;
     this.focusedView = focusedView;
@@ -47,6 +53,7 @@ export class Input {
     window.addEventListener(
       "keydown",
       (event) => {
+        const began = performance.now();
         const key = translateKey(event, options);
         if (key === null) return; // a bare modifier, or the input method's business
         event.preventDefault();
@@ -56,6 +63,7 @@ export class Input {
         this.keysSent += 1;
         rpc.notify("input.key", key);
         if (key === "C-g") rpc.notify("input.interrupt");
+        onKey(performance.now() - began);
       },
       true,
     );

@@ -141,6 +141,8 @@ export class Workspace {
   /** The bar between cells `index` and `index + 1`: drag it to share their space differently. */
   private divider(split: number, direction: string, cells: HTMLElement[], shares: number[], index: number): HTMLElement {
     const bar = div("nm-divider");
+    bar.setAttribute("role", "separator");
+    bar.setAttribute("aria-orientation", direction === "h" ? "vertical" : "horizontal");
     bar.addEventListener("pointerdown", (event) => {
       const a = cells[index] as HTMLElement;
       const b = cells[index + 1] as HTMLElement;
@@ -170,14 +172,19 @@ export class Workspace {
     const el = div(side ? `nm-panel nm-panel-${side}` : "nm-panel nm-floating");
     el.dataset["panel"] = String(panel.id);
     el.dataset["name"] = panel.name;
+    el.setAttribute("role", "region");
+    el.setAttribute("aria-label", `Panel ${panel.name}`);
     const size = Math.max(0.08, Math.min(0.9, panel.size));
     if (side) el.style.flex = `0 0 ${size * 100}%`;
     else el.style.height = `${Math.max(20, size * 100)}%`;
 
     const strip = div("nm-tabs");
+    strip.setAttribute("role", "tablist");
     for (const tab of panel.tabs) {
       const button = div(tab.view === panel.active ? "nm-tab nm-tab-active" : "nm-tab");
       button.dataset["view"] = String(tab.view);
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-selected", tab.view === panel.active ? "true" : "false");
       const title = document.createElement("span");
       title.className = "nm-tab-title";
       title.textContent = tab.title; // text, never markup
@@ -185,6 +192,8 @@ export class Workspace {
       close.className = "nm-tab-close";
       close.textContent = "×";
       close.title = "Close";
+      close.setAttribute("role", "button");
+      close.setAttribute("aria-label", `Close ${tab.title}`);
       close.addEventListener("pointerdown", (e) => e.stopPropagation());
       close.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -202,6 +211,8 @@ export class Workspace {
       b.dataset["action"] = action;
       b.textContent = label;
       b.title = title;
+      b.setAttribute("role", "button");
+      b.setAttribute("aria-label", title);
       b.addEventListener("pointerdown", (e) => e.stopPropagation());
       b.addEventListener("click", () => this.host.panelAction(panel.id, action, arg));
       tools.append(b);
