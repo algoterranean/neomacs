@@ -94,9 +94,13 @@ class Client:
                 if deadline is None:
                     deadline = time.monotonic() + self.defer_seconds
                 if time.monotonic() < deadline:
-                    self._deferred.append((msg, deadline))
-                    if len(self._deferred) == 1:
-                        threading.Timer(self.defer_seconds + 0.02, self.retry_deferred).start()
+                    with self._defer_lock:
+                        self._deferred.append((msg, deadline))
+                        first = len(self._deferred) == 1
+                    if first:
+                        timer = threading.Timer(self.defer_seconds + 0.02, self.retry_deferred)
+                        timer.daemon = True
+                        timer.start()
                     return
                 reply = {"error": {"code": -32000, "message": f"not available: {exc}"}}
             except Exception as exc:
@@ -104,11 +108,17 @@ class Client:
         self._send({"jsonrpc": "2.0", "id": msg["id"], **reply})
 
     def retry_deferred(self) -> None:
-        """Ask the handlers of deferred requests again."""
+        """Ask the handlers of deferred requests again.
+
+        The lock guards the list and nothing else.  It is not held while a
+        handler runs: a handler takes its own locks, and this is called both
+        by a timer and by whoever has just applied a batch, who may be holding
+        them already.
+        """
         with self._defer_lock:
             waiting, self._deferred = self._deferred, []
-            for msg, deadline in waiting:
-                self._answer(msg, deadline)
+        for msg, deadline in waiting:
+            self._answer(msg, deadline)
 
     def call(self, method: str, *params: Any, timeout: float | None = None) -> Any:
         """Send a request and return its result, raising RemoteError on an error reply."""
