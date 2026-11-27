@@ -69,11 +69,9 @@ class ScannerHighlighter:
         return [(start + a, start + b, face, PRIORITY) for a, b, face in found]
 
     def _decorate(self, text: str, state: State, line: int) -> list[tuple[int, int, str]]:
-        from neomacs.syntax.scan import scan_line
-
         buffer = self.buffer
         mode: Any = buffer.mode
-        scan = scan_line(text, state, buffer.syntax.table)
+        scan = buffer.syntax.scanner.line(line)  # the scanner has it already, or keeps it
         found: list[tuple[int, int, str]] = [(a, b, kind) for a, b, kind in scan.segments]
         keywords: frozenset[str] = getattr(mode, "keywords", frozenset[str]())
         constants: frozenset[str] = getattr(mode, "constants", frozenset[str]())

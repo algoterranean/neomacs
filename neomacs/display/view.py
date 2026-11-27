@@ -86,11 +86,16 @@ def build_line(buffer: Buffer, line: int, faces: FaceTable, providers: Iterable[
     starting: dict[int, list[tuple[int, int, int, dict[str, Any]]]] = {}
     ending: dict[int, list[tuple[int, int, int, dict[str, Any]]]] = {}
     virtual_at: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    hiding: set[int] = set()  # the pieces, by identity, that hide their text
     for piece in pieces:
         p_start, p_end, _, props = piece
         if p_start < p_end:
             starting.setdefault(p_start, []).append(piece)
             ending.setdefault(p_end, []).append(piece)
+        if len(props) == 1 and "face" in props:
+            continue  # a face and nothing else, as highlighting gives: the usual case
+        if props.get("invisible") or props.get("display"):
+            hiding.add(id(piece))
         if props.get("before_text"):
             virtual_at.setdefault((p_start, "before_text"), []).append(props)
         if props.get("after_text"):
@@ -103,7 +108,7 @@ def build_line(buffer: Buffer, line: int, faces: FaceTable, providers: Iterable[
     for i, seg_start in enumerate(ordered):
         for piece in ending.get(seg_start, ()):
             active.remove(piece)
-            if piece[3].get("invisible") or piece[3].get("display"):
+            if hiding and id(piece) in hiding:
                 hidden -= 1
         for key in ("after_text", "before_text"):
             for props in virtual_at.get((seg_start, key), ()):
@@ -117,7 +122,7 @@ def build_line(buffer: Buffer, line: int, faces: FaceTable, providers: Iterable[
             break
         for piece in starting.get(seg_start, ()):
             active.append(piece)
-            if piece[3].get("invisible") or piece[3].get("display"):
+            if hiding and id(piece) in hiding:
                 hidden += 1
         if hidden:
             continue
