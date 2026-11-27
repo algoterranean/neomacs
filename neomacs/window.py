@@ -28,6 +28,44 @@ STALL_SECONDS = 2.0
 GEOMETRY_TIMEOUT = 2.0
 
 
+MAX_DIRTY_RANGES = 32
+
+
+def merge_dirty(
+    ranges: list[tuple[int, int, int]], line: int, removed: int, inserted: int
+) -> list[tuple[int, int, int]]:
+    """Add an edit to a list of changed line ranges.
+
+    Each range is (first line now, lines there before, lines there now); they
+    are sorted and do not touch.  The edit replaced REMOVED lines at LINE, in
+    current numbering, with INSERTED lines.  Ranges it touches are merged with
+    it, taking in the untouched lines between; ranges below it move.
+    """
+    above: list[tuple[int, int, int]] = []
+    touched: list[tuple[int, int, int]] = []
+    below: list[tuple[int, int, int]] = []
+    for first, old, new in ranges:
+        if first + new < line:
+            above.append((first, old, new))
+        elif first > line + removed:
+            below.append((first + inserted - removed, old, new))
+        else:
+            touched.append((first, old, new))
+    start, end = line, line + removed
+    if touched:
+        start = min(start, touched[0][0])
+        end = max(end, touched[-1][0] + touched[-1][2])
+    now = end - start
+    before = now - sum(new - old for _, old, new in touched)
+    merged = [*above, (start, before, now + inserted - removed), *below]
+    merged = [r for r in merged if r[1] or r[2]]
+    if len(merged) > MAX_DIRTY_RANGES:  # too fragmented to be worth tracking separately
+        start = merged[0][0]
+        now = merged[-1][0] + merged[-1][2] - start
+        merged = [(start, now - sum(new - old for _, old, new in merged), now)]
+    return merged
+
+
 @provisional("0.1")
 class View:
     """A buffer as shown somewhere: selections, a viewport, and sync state for one frame."""
@@ -44,7 +82,9 @@ class View:
         self.cursor: Cursor = buffer.cursor(0)
         self.anchor: Marker = buffer.marker(0)
         self._held: tuple[int, int] | None = None  # lines the frontend holds, inclusive
-        self._dirty: tuple[int, int, int] | None = None  # (first, old count, new count)
+        # Changed line ranges not yet sent: (first line now, lines before, lines now),
+        # sorted and disjoint.
+        self._dirty: list[tuple[int, int, int]] = []
         self._drop_held = False
         self._sent_info: dict[str, Any] | None = None
         self._sent_selections: Any = None
@@ -73,7 +113,7 @@ class View:
             page = self.viewport[2]
             self.viewport = (1, page, page)
         self.goal_x = None
-        self._dirty = None
+        self._dirty = []
         self._drop_held = self._held is not None
         self._held = None
         self._reveal = (1, 0, "top")
@@ -98,18 +138,7 @@ class View:
         self.frame.views.pop(self.id, None)
 
     def _on_change(self, change: Change) -> None:
-        line, removed, inserted = change.line, change.old_newlines + 1, change.new_newlines + 1
-        if self._dirty is None:
-            self._dirty = (line, removed, inserted)
-        else:
-            first, old, new = self._dirty
-            if line < first:  # take in the untouched lines between
-                gap = first - line
-                first, old, new = line, old + gap, new + gap
-            if line + removed > first + new:
-                gap = line + removed - (first + new)
-                old, new = old + gap, new + gap
-            self._dirty = (first, old, new + inserted - removed)
+        self._dirty = merge_dirty(self._dirty, *change.lines)
         self.frame.schedule_update()
 
     # -- geometry -----------------------------------------------------------
@@ -172,7 +201,7 @@ class View:
         """Forget what the frontend has: it is about to be told everything again."""
         top = self.viewport[0] if self.viewport else 1
         self._held = None
-        self._dirty = None
+        self._dirty = []
         self._drop_held = False
         self._sent_info = None
         self._sent_selections = None
@@ -204,36 +233,13 @@ class View:
             events.append(["held", self.id, 1, 0])
             self._drop_held = False
 
-        if self._dirty is not None:
-            first, old, new = self._dirty
-            self._dirty = None
-            if self.viewport is not None and first + old <= self.viewport[0]:
-                # Lines came or went above what is on screen.  The frontend keeps
-                # the same text in view, so its viewport moves by the difference.
-                v1, v2, page = self.viewport
-                self.viewport = (v1 + new - old, v2 + new - old, page)
-            if self._held is not None:
-                h1, h2 = self._held
-                if first + old <= h1:  # wholly above what is held: just renumber
-                    events.append(["lines", self.id, first, old, new])
-                    self._held = (h1 + new - old, h2 + new - old)
-                elif first > h2:  # wholly below
-                    events.append(["lines", self.id, first, old, new])
-                elif new > SPLICE_LIMIT:
-                    # Too much to send unasked.  Keep only what is above it.
-                    self._held = (h1, first - 1) if first > h1 else None
-                    last = first - 1 if first > h1 else 0
-                    events.append(["held", self.id, h1 if first > h1 else 1, last])
-                    events.append(["lines", self.id, first, old, new])
-                else:
-                    events.append(
-                        ["lines", self.id, first, old, self._lines(first, first + new - 1)]
-                    )
-                    before = max(0, first - h1)
-                    after = max(0, h2 - (first + old) + 1)
-                    start = min(h1, first)
-                    total = before + new + after
-                    self._held = (start, start + total - 1) if total > 0 else None
+        # Send the changed ranges from the bottom up, so the line numbers of
+        # those still to come are the ones the frontend has.
+        ranges, self._dirty = self._dirty, []
+        shift = sum(new - old for _, old, new in ranges)
+        for now, old, new in reversed(ranges):
+            shift -= new - old
+            self._send_change(events, now - shift, old, new, now)
 
         self._fill(events, count)
 
@@ -252,6 +258,38 @@ class View:
             line, offset, align = self._reveal
             events.append(["reveal", self.id, min(line, count), offset, align])
             self._reveal = None
+
+    def _send_change(self, events: list[Any], first: int, old: int, new: int, now: int) -> None:
+        """OLD lines at FIRST, in the frontend's numbering, became NEW lines, which
+        are at NOW in the buffer."""
+        if self.viewport is not None and first + old <= self.viewport[0] and self.viewport[0] > 1:
+            # Lines came or went above what is on screen.  The frontend keeps
+            # the same text in view, so its viewport moves by the difference.
+            # (A viewport at the very top stays there instead.)
+            v1, v2, page = self.viewport
+            self.viewport = (v1 + new - old, v2 + new - old, page)
+        if self._held is None:
+            return
+        h1, h2 = self._held
+        if first + old <= h1:  # wholly above what is held: just renumber
+            events.append(["lines", self.id, first, old, new])
+            self._held = (h1 + new - old, h2 + new - old)
+        elif first > h2:  # wholly below
+            events.append(["lines", self.id, first, old, new])
+        elif new > SPLICE_LIMIT:
+            # Too much to send unasked.  Keep only what is above it.
+            self._held = (h1, first - 1) if first > h1 else None
+            events.append(
+                ["held", self.id, h1 if first > h1 else 1, first - 1 if first > h1 else 0]
+            )
+            events.append(["lines", self.id, first, old, new])
+        else:
+            events.append(["lines", self.id, first, old, self._lines(now, now + new - 1)])
+            before = max(0, first - h1)
+            after = max(0, h2 - (first + old) + 1)
+            start = min(h1, first)
+            total = before + new + after
+            self._held = (start, start + total - 1) if total > 0 else None
 
     def _fill(self, events: list[Any], count: int) -> None:
         """Send the lines around the viewport that the frontend does not hold yet."""

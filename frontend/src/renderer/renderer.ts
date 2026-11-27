@@ -163,12 +163,83 @@ window.neomacsDebug = {
     faces: frame.faces.size,
     view: viewElement?.snapshot() ?? null,
   }),
+  coverage: () => viewElement?.coverage() ?? null,
+  lineY: (line: number) => viewElement?.lineY(line) ?? null,
   scrollTo: (y: number) => {
     if (viewElement) viewElement.scroller.scrollTop = y;
   },
   scrollBy: (dy: number) => {
     if (viewElement) viewElement.scroller.scrollTop += dy;
   },
+  /**
+   * Scroll by `step` pixels every frame for `steps` frames, entirely inside the
+   * page so nothing but the frame clock paces it.  Each record describes what
+   * the previous frame left on screen.
+   */
+  scrollRun: (step: number, steps: number) =>
+    new Promise((resolve) => {
+      const records: { missingModel: number; missingDom: number; blank: number }[] = [];
+      const started = performance.now();
+      const tick = () => {
+        if (!viewElement) return resolve({ error: "no view" });
+        if (records.length > 0 || steps === 0) records.push(viewElement.coverage());
+        else records.push({ missingModel: 0, missingDom: 0, blank: 0 });
+        if (records.length > steps) {
+          const bad = records.map((r) => r.missingDom > 0 || r.blank > 1);
+          let longest = 0;
+          let run = 0;
+          for (const b of bad) {
+            run = b ? run + 1 : 0;
+            longest = Math.max(longest, run);
+          }
+          const ms = performance.now() - started;
+          return resolve({
+            step,
+            steps,
+            ms: Math.round(ms),
+            pxPerSecond: Math.round((step * steps * 1000) / ms),
+            badFrames: bad.filter(Boolean).length,
+            longestRun: longest,
+            worstBlank: Math.max(...records.map((r) => r.blank)),
+            worstMissing: Math.max(...records.map((r) => r.missingDom)),
+          });
+        }
+        viewElement.scroller.scrollTop += step;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }),
+  /**
+   * Scroll by `step` pixels every frame and check that the text moves by exactly
+   * that much: corrections to estimated heights must not show as jumps.
+   */
+  steadyRun: (step: number, steps: number) =>
+    new Promise((resolve) => {
+      let anchor: number | null = null;
+      let expected: number | null = null;
+      let worst = 0;
+      let measured = 0;
+      const tick = (left: number) => {
+        if (!viewElement) return resolve({ error: "no view" });
+        if (anchor !== null && expected !== null) {
+          const y = viewElement.lineY(anchor);
+          if (y !== null) {
+            worst = Math.max(worst, Math.abs(y - expected));
+            measured += 1;
+          }
+        }
+        if (left <= 0) return resolve({ step, steps, measured, worstJump: Math.round(worst * 100) / 100 });
+        const snap = viewElement.snapshot() as { visible: [number, number] };
+        anchor = Math.round((snap.visible[0] + snap.visible[1]) / 2);
+        const before = viewElement.lineY(anchor);
+        const top = viewElement.scroller.scrollTop;
+        viewElement.scroller.scrollTop += step;
+        const moved = viewElement.scroller.scrollTop - top; // less than `step` at either end
+        expected = before === null ? null : before - moved;
+        requestAnimationFrame(() => requestAnimationFrame(() => tick(left - 1)));
+      };
+      requestAnimationFrame(() => tick(steps));
+    }),
   /** Resolves after the next two painted frames. */
   frames: (count = 2) =>
     new Promise<void>((resolve) => {

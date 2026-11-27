@@ -251,6 +251,69 @@ def test_edits_outside_what_is_held_only_renumber(ui: HeadlessUI) -> None:
     assert "2002 line 2000" in ui.text_rows_shown()[-1]  # same text, renumbered, still in view
 
 
+def test_whole_line_edits_are_reported_exactly() -> None:
+    b = Buffer("t", "one\ntwo\nthree\n")
+    seen: list[tuple[int, int, int]] = []
+    b.add_listener(lambda change: seen.append(change.lines))
+    b.insert(b.line_start(2), "new\n")  # a whole line, at the start of a line
+    b.delete(b.line_start(1), b.line_start(2))  # a whole line removed
+    b.replace(b.line_start(2), b.line_start(3), "TWO\nand a half\n")  # one line became two
+    b.insert(b.line_start(2), "x")  # inside a line
+    b.insert(b.line_start(2) + 1, "\n")  # splitting a line
+    b.insert(b.line_start(1), "no newline")  # at a line start, but not a whole line
+    b.delete(b.line_end(1), b.line_start(3))  # joins two lines and takes a third
+    assert seen == [(2, 0, 1), (1, 1, 0), (2, 1, 2), (2, 1, 1), (2, 1, 2), (1, 1, 1), (1, 3, 1)]
+
+
+def test_changed_ranges_are_tracked_separately() -> None:
+    from neomacs.window import MAX_DIRTY_RANGES, merge_dirty
+
+    ranges = merge_dirty([], 10, 1, 1)
+    ranges = merge_dirty(ranges, 50, 1, 3)  # far below: its own range
+    assert ranges == [(10, 1, 1), (50, 1, 3)]
+    ranges = merge_dirty(ranges, 2, 0, 2)  # inserted above: the others move down
+    assert ranges == [(2, 0, 2), (12, 1, 1), (52, 1, 3)]
+    ranges = merge_dirty(ranges, 13, 1, 1)  # touching one: merged with it
+    assert ranges == [(2, 0, 2), (12, 2, 2), (52, 1, 3)]
+    ranges = merge_dirty(ranges, 10, 45, 1)  # spanning two: merged, with the lines between
+    assert ranges == [(2, 0, 2), (10, 43, 1)]
+    assert merge_dirty([(5, 0, 2)], 5, 2, 0) == []  # inserted, then deleted again
+    many: list[tuple[int, int, int]] = []
+    for n in range(MAX_DIRTY_RANGES + 5):
+        many = merge_dirty(many, 1 + n * 10, 1, 2)
+    # Too many to track: they were folded into one range, and tracking went on from there.
+    assert len(many) <= MAX_DIRTY_RANGES and many[0][0] == 1 and many[0][1] > 100
+    assert sum(new - old for _, old, new in many) == MAX_DIRTY_RANGES + 5
+
+
+def test_edits_on_both_sides_do_not_resend_the_middle(ui: HeadlessUI) -> None:
+    ui.eval("_b.insert(0, '\\n'.join(f'line {n}' for n in range(1, 31)))")
+    before = {n: id(ui.view.line(n)) for n in range(1, 31)}
+    ui.eval("_b.insert(_b.line_start(3), 'A'); _b.insert(_b.line_start(25), 'B'); "
+            "_b.insert(_b.line_start(10), 'whole\\n')")  # fmt: skip
+    assert ui.view.line_count == 31
+    changed = sorted(
+        n for n in range(1, 31) if id(ui.view.line(n if n < 10 else n + 1)) != before[n]
+    )
+    assert changed == [3, 25]  # only the two edited lines; the inserted one is new
+    text = lambda n: "".join(r[1] for r in ui.view.line(n)[1])  # noqa: E731
+    assert [text(n) for n in (3, 10, 11, 26)] == ["Aline 3", "whole", "line 10", "Bline 25"]
+
+
+def test_a_view_at_the_top_stays_at_the_top(ui: HeadlessUI) -> None:
+    ui.eval("_b.insert(0, '\\n'.join(f'line {n}' for n in range(1, 101)))")
+    ui.eval("_b.insert(0, 'new first\\n')")
+    assert ui.text_rows_shown()[0] == "  1 new first"  # at the top: the new line is shown
+    ui.scroll(20)
+    ui.idle()
+    top = ui.text_rows_shown()[0]
+    assert top == " 21 line 20"
+    ui.eval("_b.insert(0, 'another\\n'); _b.insert(_b.line_start(5), 'and one more\\n')")
+    assert ui.text_rows_shown()[0] == " 23 line 20"  # scrolled: the same text stays in view
+    ui.eval("_b.delete(0, _b.line_start(11))")
+    assert ui.text_rows_shown()[0] == "13 line 20"  # (the gutter narrowed: under 100 lines now)
+
+
 def test_a_huge_insert_is_not_sent_unasked(ui: HeadlessUI) -> None:
     ui.type("first\nlast")
     ui.eval("_b.insert(_b.line_start(2), '\\n'.join(f'mid {n}' for n in range(5000)) + '\\n')")

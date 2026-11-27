@@ -1,6 +1,6 @@
 # Electron frontend design
 
-Status: draft 6, 2026-11-27. Stages F0 and F1 are implemented in `frontend/`. The decisions in
+Status: draft 7, 2026-11-27. Stages F0 and F1 are implemented in `frontend/`. The decisions in
 section 2 are confirmed.
 
 This describes the Electron frontend of `neomacs`. It is the client side of the
@@ -179,6 +179,12 @@ The frontend owns scroll position.
 5. When a line is laid out, its measured height replaces the estimate. If it
    lies above the viewport, the scroll offset is adjusted by the difference
    so that what the user is looking at does not move.
+6. The view's position is "this line, this many pixels into it", not a
+   scroll offset; the scroll offset is derived from it on every render.
+   A render can run after the user has scrolled but before the scroll event
+   for it has been delivered, so every render first checks whether the
+   scroller is still where the view last put it, and if not, takes the
+   scroller's position as the user's.
 
 `reveal(view, line, offset, align)` scrolls so the position is visible, using
 the same machinery; if the target line is not held, the renderer scrolls to

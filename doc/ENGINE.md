@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 19, 2026-11-27. Nothing is implemented. The decisions in
+Status: draft 20, 2026-11-27. Nothing is implemented. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
 This describes the backend ("engine") of Neomacs, a new, Python-native
@@ -255,7 +255,18 @@ needs.
 
 The frontend also keeps its scroll position on the same text: when lines are
 added or removed above the first visible line, that line's number changes by
-the difference and what is on screen does not move.
+the difference and what is on screen does not move. The one exception is a
+viewport at the very top of the buffer, which stays at the top, so text
+inserted at the start of a file being viewed from its start is seen.
+
+For that to work the engine must say exactly which lines changed. An edit
+that begins at the start of a line and removes and inserts only whole lines
+is reported as those lines alone: a line inserted directly above the first
+visible line is a splice that ends before it, not a replacement of it. And
+one batch may carry several `lines` events for one view, one per separate
+range of changed lines, in order from the bottom of the buffer to the top,
+so that each one's line numbers are the ones the frontend has when it
+applies it.
 
 **Panels.** Each entry of `layout.panels` is:
 
@@ -1215,8 +1226,10 @@ output from a background task appears as it arrives. An update:
    invisible text, attach inline objects, and emit the result as runs in a
    `lines` splice.
 2. Sends insertions and deletions outside the held range as counts.
-   Between updates the engine keeps one bounding range of changed lines per
-   view, so however many edits were skipped, an update is a single splice.
+   Between updates the engine keeps, per view, a short sorted list of the
+   ranges of lines that changed, merging ranges that touch, so however many
+   edits were skipped an update is a few exact splices. Past 32 separate
+   ranges they are folded into one.
 3. Sends `selections` and `modeline` if they changed, and `reveal` if a
    command moved the primary cursor.
 4. Sends `flush` with the next sequence number.

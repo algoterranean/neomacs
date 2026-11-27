@@ -103,11 +103,13 @@ export class ViewModel {
       }
     }
     if (first + removed <= this.topLine) {
-      this.topLine += added - removed;
+      // Lines changed above the viewport: stay on the same text.  The one
+      // exception is a viewport at the very top, which stays at the top.
+      if (!(this.topLine === 1 && this.topOffset === 0)) this.topLine += added - removed;
     } else if (first <= this.topLine) {
-      // The top line itself was replaced.
+      // The top line itself was replaced.  Stay on whatever is there now; the
+      // offset into it is clamped to its new height when it is laid out.
       this.topLine = Math.max(first, Math.min(this.topLine, first + added - 1));
-      this.topOffset = 0;
     }
   }
 }

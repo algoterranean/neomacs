@@ -118,32 +118,37 @@ export async function runSmoke(
     check("f1.proportional_font", fonts.wide > fonts.narrow * 1.5, fonts);
     check("f1.larger_face", Math.abs(fonts.heading / fonts.base - 1.6) < 0.05, fonts.heading / fonts.base);
 
-    // Gate A1: scrolling.  Count the frames in which a visible line had not arrived.
-    const scrollRun = async (step: number, steps: number) => {
-      let framesWithMissing = 0;
-      let longest = 0;
-      let run = 0;
-      for (let i = 0; i < steps; i++) {
-        await js<void>(`window.neomacsDebug.scrollBy(${step})`);
-        await frames(1);
-        const s = await view();
-        if (s.missingVisible > 0) {
-          framesWithMissing += 1;
-          run += 1;
-          longest = Math.max(longest, run);
-        } else {
-          run = 0;
-        }
-      }
-      return { step, steps, framesWithMissing, longestRun: longest };
-    };
-    const ordinary = await scrollRun(120, 150);
-    check("gateA.scroll_ordinary", ordinary.longestRun <= 2, ordinary);
+    // Gate A1: scrolling.  The run happens inside the page, one step per frame, and
+    // counts frames that left a visible line without an element or part of the
+    // viewport uncovered.
+    interface Run { step: number; pxPerSecond: number; badFrames: number; longestRun: number; worstBlank: number; worstMissing: number }
+    const scrollRun = (step: number, steps: number) => js<Run>(`window.neomacsDebug.scrollRun(${step}, ${steps})`);
+    const speeds: Run[] = [];
+    for (const step of [20, 60, 120, 240]) {
+      speeds.push(await scrollRun(step, 120));
+      await settle();
+    }
+    results["gateA.scroll_speeds"] = speeds;
+    const ordinary = speeds.filter((r) => r.step <= 120);
+    check("gateA.scroll_ordinary", ordinary.every((r) => r.longestRun <= 2), ordinary.map((r) => [r.pxPerSecond, r.badFrames, r.longestRun]));
     const fast = await scrollRun(1500, 60);
     results["gateA.scroll_fast"] = fast; // reported, not a pass or fail
     await settle();
     v = await view();
     check("gateA.scroll_settles", v.missingVisible === 0 && v.visible[0] > 100, v.visible);
+    const settled = await js<{ missingDom: number; blank: number }>("window.neomacsDebug.coverage()");
+    check("gateA.scroll_settles_fully_drawn", settled.missingDom === 0 && settled.blank <= 1, settled);
+
+    // Gate A1b: scrolling back up over lines whose heights were only estimated.  As
+    // they are measured (the wrapped ones are much taller than the estimate) the
+    // text must still move by exactly what was scrolled.
+    interface Steady { measured: number; worstJump: number }
+    const up = await js<Steady>("window.neomacsDebug.steadyRun(-90, 80)");
+    check("gateA.steady_scrolling_up", up.measured > 60 && up.worstJump <= 1, up);
+    await settle();
+    const down = await js<Steady>("window.neomacsDebug.steadyRun(90, 80)");
+    check("gateA.steady_scrolling_down", down.measured > 60 && down.worstJump <= 1, down);
+    await settle();
 
     // Jump to the end.
     await js<void>("window.neomacsDebug.scrollTo(1e12)");
@@ -177,6 +182,39 @@ export async function runSmoke(
       { before: [before.firstVisibleText, before.firstVisibleY, before.visible], after: [after.firstVisibleText, after.firstVisibleY, after.visible] },
     );
     check("gateA.edit_above_renumbers", after.visible[0] === before.visible[0] + 3 - 50, [before.visible[0], after.visible[0]]);
+
+    // Gate A2b: the harder case.  Change lines that are laid out and measured, just
+    // above the viewport: one grows from one row to many, one shrinks, one is
+    // inserted directly above the first visible line.
+    const base = await view();
+    const top = base.visible[0];
+    const baseY = await js<number | null>(`window.neomacsDebug.lineY(${top})`);
+    await control.eval(
+      `_big.insert(_big.line_start(${top - 3}), 'now a very long line that wraps over several rows ' * 15)\n` +
+        `_big.delete(_big.line_start(${top - 6}), _big.line_end(${top - 6}))\n` +
+        `_big.insert(_big.line_start(${top}), 'inserted directly above\\n')`,
+    );
+    await settle();
+    const near = await view();
+    const nearY = await js<number | null>(`window.neomacsDebug.lineY(${top + 1})`);
+    check(
+      "gateA.edit_just_above_keeps_view",
+      near.firstVisibleText === base.firstVisibleText && baseY !== null && nearY !== null && Math.abs(nearY - baseY) <= 1,
+      { text: [base.firstVisibleText, near.firstVisibleText], y: [baseY, nearY], top: [top, near.visible[0]] },
+    );
+    const aboveText = await js<string | null>(
+      `document.querySelector('.nm-lines [data-line="${top}"] .nm-content')?.textContent ?? null`,
+    );
+    check("gateA.edit_just_above_is_drawn", aboveText === "inserted directly above", aboveText);
+
+    // Gate A2c: typing inside a wrapped line on screen makes it taller; lines above it,
+    // and the top of the viewport, stay put.
+    const typedLine = near.visible[0] + 4;
+    const topY = await js<number | null>(`window.neomacsDebug.lineY(${near.visible[0]})`);
+    await control.eval(`_big.insert(_big.line_start(${typedLine}), 'typed text that makes this line wrap onto more rows ' * 8)`);
+    await settle();
+    const topY2 = await js<number | null>(`window.neomacsDebug.lineY(${near.visible[0]})`);
+    check("gateA.edit_in_view_keeps_top", topY !== null && topY2 !== null && Math.abs(topY2 - topY) <= 1, [topY, topY2]);
 
     // An edit on screen changes just that line.
     const target = after.visible[0] + 2;

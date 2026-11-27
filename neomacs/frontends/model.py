@@ -75,7 +75,10 @@ class ViewModel:
                     raise ProtocolError(f"lines at {first} would leave a gap after {self.held}")
                 self.lines[index : index + removed] = payload
         if first + removed <= self.top_line:
-            self.top_line += new - removed
+            # Lines changed above the viewport: stay on the same text.  The one
+            # exception is a viewport at the very top, which stays at the top.
+            if not (self.top_line == 1 and self.top_row == 0):
+                self.top_line += new - removed
         elif first <= self.top_line:  # the top line itself was replaced
             self.top_line = max(first, min(self.top_line, first + new - 1))
             self.top_row = 0

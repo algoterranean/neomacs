@@ -82,7 +82,7 @@ test("the scroll position stays on the same text", () => {
   v.splice(15, 1, [line("below")]);
   assert.deepEqual([v.topLine, v.topOffset], [9, 5]);
   v.splice(9, 1, [line("replaced")]);
-  assert.deepEqual([v.topLine, v.topOffset], [9, 0]);
+  assert.deepEqual([v.topLine, v.topOffset], [9, 5]);
 });
 
 test("observers hear about every change to the held lines", () => {

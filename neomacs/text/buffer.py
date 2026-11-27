@@ -45,6 +45,12 @@ class Change:
     LINE is the line START is on; the edit removed OLD_NEWLINES line breaks and
     inserted NEW_NEWLINES.  For a redisplay request that changed no text,
     old_end == new_end and both newline counts are equal.
+
+    WHOLE_LINES means the edit began at the start of LINE and both the removed
+    and the inserted text were complete lines.  Then exactly OLD_NEWLINES lines
+    starting at LINE were replaced by NEW_NEWLINES lines, and the line that
+    follows is untouched.  Otherwise the line the edit ends on changed too:
+    OLD_NEWLINES + 1 lines became NEW_NEWLINES + 1.
     """
 
     start: int
@@ -54,6 +60,14 @@ class Change:
     old_newlines: int
     new_newlines: int
     text_changed: bool = True
+    whole_lines: bool = False
+
+    @property
+    def lines(self) -> tuple[int, int, int]:
+        """(first line, lines removed, lines inserted)."""
+        if self.whole_lines:
+            return self.line, self.old_newlines, self.new_newlines
+        return self.line, self.old_newlines + 1, self.new_newlines + 1
 
 
 Listener = Callable[[Change], None]
@@ -196,13 +210,26 @@ class Buffer:
         removed = self.store.slice(start, end)
         self.undo.record(start, removed, text)
         line = self.store.line_of(start)
+        whole_lines = (
+            (start == 0 or self.store.slice(start - 1, start) == "\n")
+            and (not removed or removed.endswith("\n"))
+            and (not text or text.endswith("\n"))
+        )
         self.store.replace(start, end, text)
         inserted = len(text)
         for marker in tuple(self._markers):
             marker._adjust(start, end, inserted)  # pyright: ignore[reportPrivateUsage]
         self.tick += 1
         self._cluster_cache = None
-        change = Change(start, end, start + inserted, line, removed.count("\n"), text.count("\n"))
+        change = Change(
+            start,
+            end,
+            start + inserted,
+            line,
+            removed.count("\n"),
+            text.count("\n"),
+            whole_lines=whole_lines,
+        )
         for listener in tuple(self._listeners):
             listener(change)
         after_change.run(self, start, end, start + inserted, buffer=self)

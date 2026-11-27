@@ -28,6 +28,7 @@ export class ViewElement {
   private domLast = 0;
   private reported: string | null = null;
   private settingScroll = false;
+  private knownScrollTop = 0; // the scroll offset the model's position corresponds to
   private lastWidth = 0;
   private onViewport: (viewport: Viewport) => void;
   private requestRender: () => void;
@@ -82,11 +83,23 @@ export class ViewElement {
 
   private scrolled(): void {
     if (this.settingScroll) return;
-    // The user scrolled: the viewport now starts wherever that put it.
-    const at = this.lineAtScroll(this.scroller.scrollTop);
+    if (this.adoptScroll()) this.requestRender();
+  }
+
+  /**
+   * If the scroller is not where this view last put it, the user scrolled: the
+   * viewport now starts wherever that left it.  Called for scroll events, and at
+   * the start of every render, because a render can run before the event for a
+   * scroll that has already happened and must not put the old position back.
+   */
+  private adoptScroll(): boolean {
+    const scrollTop = this.scroller.scrollTop;
+    if (Math.abs(scrollTop - this.knownScrollTop) <= 0.5) return false;
+    this.knownScrollTop = scrollTop;
+    const at = this.lineAtScroll(scrollTop);
     this.model.topLine = at.line;
     this.model.topOffset = at.offset;
-    this.requestRender();
+    return true;
   }
 
   /**
@@ -171,6 +184,7 @@ export class ViewElement {
       h.invalidate();
     }
 
+    this.adoptScroll();
     if (model.pendingReveal) {
       const [line, , align] = model.pendingReveal;
       model.pendingReveal = null;
@@ -181,6 +195,7 @@ export class ViewElement {
     const page = Math.max(1, this.scroller.clientHeight);
     // Lay out twice at most: measuring the lines can move them.
     for (let pass = 0; pass < 2; pass++) {
+      model.topOffset = Math.max(0, Math.min(model.topOffset, h.height(model.topLine) - 1));
       const scrollTop = h.top(model.topLine) + model.topOffset;
       const firstVisible = model.topLine;
       const lastVisible = h.lineAt(scrollTop + page - 1).line;
@@ -202,6 +217,7 @@ export class ViewElement {
       this.scroller.scrollTop = scrollTop;
       this.settingScroll = false;
     }
+    this.knownScrollTop = this.scroller.scrollTop;
 
     this.renderModeline();
     this.report(scrollTop, page);
@@ -274,6 +290,42 @@ export class ViewElement {
   }
 
   // -- for tests and diagnostics ----------------------------------------------
+
+  /**
+   * What is wrong with the viewport as it stands in the DOM right now: visible
+   * lines the model does not hold, visible lines with no element, and pixels of
+   * the viewport that no line element covers.
+   */
+  coverage(): { missingModel: number; missingDom: number; blank: number } {
+    const scrollTop = this.scroller.scrollTop;
+    const page = this.scroller.clientHeight;
+    const first = this.lineAtScroll(scrollTop).line;
+    const last = this.heights.lineAt(scrollTop + page - 1).line;
+    let missingModel = 0;
+    let missingDom = 0;
+    for (let n = first; n <= last; n++) {
+      const line = this.model.line(n);
+      if (!line) missingModel += 1;
+      if (!line || !this.elements.get(line)?.isConnected) missingDom += 1;
+    }
+    const box = this.scroller.getBoundingClientRect();
+    const firstEl = this.linesEl.firstElementChild;
+    const lastEl = this.linesEl.lastElementChild;
+    let blank = page;
+    if (firstEl && lastEl) {
+      const top = firstEl.getBoundingClientRect().top;
+      const bottom = lastEl.getBoundingClientRect().bottom;
+      const atEnd = Number((lastEl as HTMLElement).dataset["line"]) >= this.model.lineCount;
+      blank = Math.max(0, Math.min(page, top - box.top)) + (atEnd ? 0 : Math.max(0, Math.min(page, box.bottom - bottom)));
+    }
+    return { missingModel, missingDom, blank: Math.round(blank) };
+  }
+
+  /** Screen position of a line's element relative to the top of the viewport, if it is in the DOM. */
+  lineY(number: number): number | null {
+    const el = this.linesEl.querySelector<HTMLElement>(`[data-line="${number}"]`);
+    return el ? el.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top : null;
+  }
 
   snapshot(): Record<string, unknown> {
     const scrollTop = this.scroller.scrollTop;
