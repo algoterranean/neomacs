@@ -181,10 +181,9 @@ timestamp, to a file for debugging.
 | `ui.detach()` | notification | Stop redraw and delete the frame. |
 | `view.viewport(win, first_line, last_line, page_lines)` | notification | The lines now visible in a window, after the UI scrolled, resized or re-wrapped. The engine makes sure the UI holds those lines plus a margin. |
 | `view.split_resized(split, ratios)` | notification | The user dragged a divider. |
-| `ui.panel(panel, action, arg)` | notification | The user acted on a panel in the frontend (4.3). |
+| `ui.panel(panel, action, arg)` | request | The user acted on a panel in the frontend: `activate_tab` or `close_tab` (`arg` is the tab's view), `hide`, `dock` (a side), `float`, or `resize` (the fraction of the frame it should take). The engine stays the authority and answers with a new `layout`. |
 | `view.ack(seq)` | notification | The batch whose `flush` carried `seq` has been applied (4.8). |
 | `view.split_resized(split, ratios)` | request | The user dragged a divider: the children of that split now share its space in these ratios. The engine normalises them and answers with a `layout`. |
-| `ui.panel(panel, action, arg)` | request | The user acted on a panel: `activate_tab` or `close_tab` (a view), `hide`, `dock` (a side), `float`, or `resize` (a fraction of the frame). The engine answers with a `layout`. |
 | `input.key(key)` | notification | One key in canonical notation (4.7). |
 | `input.text(text)` | notification | Committed text from an input method. |
 | `input.paste(text, which)` | notification | A paste the frontend started itself: a menu item, a drop, a middle click. Handled by the `paste` command as one undo step. |
