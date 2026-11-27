@@ -14,6 +14,8 @@ export interface ViewHost {
   resourceUrl(id: number): string | null;
   /** The element of a minibuffer embedded in the text, created if need be. */
   inlineRoot(view: number): HTMLElement | null;
+  /** Something drawn has changed size by itself (an image arrived): lay out again. */
+  resized(): void;
 }
 
 /** What is under a point in a view: where in the text, or which part of the view. */
@@ -50,6 +52,11 @@ function objectSpan(run: Run, host: ViewHost | null): HTMLSpanElement {
       if (width !== null) img.width = width;
       if (height !== null) img.height = height;
       img.dataset["resource"] = String(image);
+      // An image arrives after its line was measured, and may be taller than
+      // the line was.  Heights, the scroll range and the cursors are stale until
+      // the view is laid out again.
+      img.addEventListener("load", () => host?.resized());
+      img.addEventListener("error", () => host?.resized());
       img.src = url;
       span.append(img);
     } else {
@@ -294,6 +301,7 @@ export class ViewElement {
             img.className = "nm-gutter-image";
             img.alt = "";
             img.draggable = false;
+            img.addEventListener("load", () => ViewElement.host?.resized());
             img.src = url;
             cell.append(img);
           }

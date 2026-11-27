@@ -61,8 +61,10 @@ export class Mouse {
     const button = event.button + 1; // 1 left, 2 middle, 3 right
     const modifiers = mods(event);
     // The operating system's double-click interval is known here, so the count is too.
+    const pressed = view.hit(event.target instanceof Element ? event.target : null, event.clientX, event.clientY);
     if (!this.send(view, event, "press", button, Math.max(1, Math.min(3, event.detail)), modifiers)) return;
-    this.lastDrag = "";
+    // A drag that ends where it began is a click: nothing more to say.
+    this.lastDrag = pressed ? `${view.model.id}:${pressed.line}:${pressed.offset}` : "";
     this.dragging = { view, button, mods: modifiers };
     if (button === 2) this.host.middlePaste();
   }
@@ -84,6 +86,11 @@ export class Mouse {
   private up(event: MouseEvent): void {
     const dragging = this.dragging;
     if (!dragging) return;
+    // Where the button came up is where the drag ended.  A movement still
+    // waiting for its frame would otherwise be lost, and a quick drag with it:
+    // the release itself selects nothing.  (A drag to a position already
+    // reported is not sent again.)
+    if (this.pendingDrag !== null || event.buttons === 0) this.send(dragging.view, event, "drag", dragging.button, 1, dragging.mods);
     this.dragging = null;
     this.pendingDrag = null;
     this.send(dragging.view, event, "release", dragging.button, 1, dragging.mods);

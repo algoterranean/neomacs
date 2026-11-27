@@ -119,6 +119,7 @@ ViewElement.host = {
     inlineElements.add(element);
     return element.root;
   },
+  resized: () => queueRender(),
 };
 
 function viewOf(target: Element): ViewElement | null {

@@ -716,6 +716,16 @@ export async function runSmoke(
     await dragFrom((from?.x ?? 0), from?.y ?? 0, (to?.x ?? 0), to?.y ?? 0);
     const dragged = await pyText(`${win}.selections.primary.text`);
     check("f4.drag_selects", dragged === "'alpha beta gamma\\nsecond'", dragged);
+    // A quick drag: the button comes up before the frame in which the movement would have been sent.
+    const q0 = await pointAt(mainId, 3, 0);
+    const q1 = await pointAt(mainId, 3, 5);
+    contents.sendInputEvent({ type: "mouseDown", x: Math.round(q0?.x ?? 0), y: Math.round(q0?.y ?? 0), button: "left", clickCount: 1 });
+    contents.sendInputEvent({ type: "mouseMove", x: Math.round((q1?.x ?? 0) + 2), y: Math.round(q1?.y ?? 0), button: "left", modifiers: ["leftbuttondown"] });
+    contents.sendInputEvent({ type: "mouseUp", x: Math.round((q1?.x ?? 0) + 2), y: Math.round(q1?.y ?? 0), button: "left", clickCount: 1 });
+    await frames(6);
+    await settle();
+    const quick = await pyText(`${win}.selections.primary.text`);
+    check("f4.a_quick_drag_selects_too", quick === "'third'", quick);
     const gutterBox = await js<number[]>(
       "(() => { const r = document.querySelector('.nm-window .nm-line[data-line=\"3\"] .nm-gutter-col').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()",
     );
@@ -915,6 +925,36 @@ export async function runSmoke(
     ].map((src) => new Promise((resolve) => { const i = new Image(); i.onload = () => resolve("loaded"); i.onerror = () => resolve("refused"); i.src = src; })))`);
     check("f4.only_defined_resources_are_served", refused.every((r) => r === "refused"), refused);
     await control.eval("_s1.remove(); _s2.remove()");
+    await settle();
+
+    // An image with no stated size is taller than its line was when the line was
+    // measured.  When it arrives the view lays out again by itself: nothing else
+    // happens here to cause a render.
+    const tallPath = path.join(os.tmpdir(), `neomacs-smoke-tall-${process.pid}.png`);
+    writeFileSync(tallPath, makePng(60, [0, 160, 255]));
+    await control.eval(
+      `_k.replace(0, len(_k), 'X tall\\nbelow it'); ${win}.selections.set([(len(_k), len(_k))])\n` +
+        `_tall = ed.resources.image(${JSON.stringify(tallPath)}); _s3 = _k.layer('img').add(0, 1, display={'image': _tall, 'alt': 'tall'})`,
+    );
+    await control.call("engine.idle", 10);
+    let late: { loaded: boolean; lineTop: number; cursorTop: number; lineHeight: number } = { loaded: false, lineTop: 0, cursorTop: -1, lineHeight: 0 };
+    for (let i = 0; i < 100; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      late = await js(`(() => {
+        const img = document.querySelector('img.nm-image');
+        const line = document.querySelector('.nm-window .nm-line[data-line="2"]');
+        const cursor = document.querySelector('.nm-window .nm-primary');
+        return {
+          loaded: !!img && img.complete && img.naturalWidth === 60,
+          lineTop: line ? line.getBoundingClientRect().top : -1,
+          cursorTop: cursor ? cursor.getBoundingClientRect().top : -2,
+          lineHeight: document.querySelector('.nm-window .nm-line[data-line="1"]').getBoundingClientRect().height,
+        };
+      })()`);
+      if (late.loaded && Math.abs(late.lineTop - late.cursorTop) < 3) break;
+    }
+    check("f4.a_late_image_is_laid_out_again", late.loaded && late.lineHeight >= 60 && Math.abs(late.lineTop - late.cursorTop) < 3, late);
+    await control.eval("_s3.remove()");
     await settle();
 
     // -- the clipboard, through the main process --
