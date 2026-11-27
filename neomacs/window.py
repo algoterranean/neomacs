@@ -9,6 +9,7 @@ import secrets
 import time
 from typing import TYPE_CHECKING, Any
 
+from neomacs import vcs
 from neomacs.display.faces import UI_FACES
 from neomacs.display.view import build_line
 from neomacs.errors import FrontendGone, NoFrame, RpcError
@@ -231,6 +232,10 @@ class View:
     def modeline(self) -> list[list[Any]] | None:
         return None
 
+    def modeline_right(self) -> list[list[Any]]:
+        """Runs for the right-hand end of the modeline."""
+        return []
+
     def reset_sync(self) -> None:
         """Forget what the frontend has: it is about to be told everything again."""
         top = self.viewport[0] if self.viewport else 1
@@ -286,12 +291,15 @@ class View:
         if selections != self._sent_selections:
             events.append(["selections", self.id, selections[1], selections[0], self.shape])
             self._sent_selections = selections
-        modeline = self.modeline()
+        left = self.modeline()
+        modeline = None if left is None else (left, self.modeline_right())
         if modeline != self._sent_modeline:
             if modeline is not None:
-                for run in modeline:
+                left, right = modeline
+                for run in (*left, *right):
                     self.frame.use_face(run[2])
-                events.append(["modeline", self.id, modeline])
+                # The right-hand runs are left out when there are none.
+                events.append(["modeline", self.id, left, *([right] if right else [])])
             self._sent_modeline = modeline
         if self._reveal is not None:
             line, offset, align = self._reveal
@@ -383,6 +391,14 @@ class Window(View):
         if status:
             text += f"  [{status}] "
         return [[None, text, self.frame.editor.faces.id_for("modeline")]]
+
+    def modeline_right(self) -> list[list[Any]]:
+        branch = vcs.branch(self.buffer.file)
+        if not branch:
+            return []
+        return [
+            [None, f" {vcs.BRANCH_SYMBOL} {branch} ", self.frame.editor.faces.id_for("modeline")]
+        ]
 
 
 class Split:

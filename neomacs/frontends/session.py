@@ -244,7 +244,11 @@ class Session:
             for view_id, x, y, width in arrangement.modelines:
                 view = self.model.views.get(view_id)
                 runs = (view.modeline if view is not None else None) or []
-                text = "".join(str(run[1]) for run in runs)[:width].ljust(width)
+                text = "".join(str(run[1]) for run in runs)
+                right = "".join(str(run[1]) for run in view.modeline_right) if view else ""
+                if len(right) >= width:
+                    right = ""  # no room for it: the left-hand text matters more
+                text = text[: width - len(right)].ljust(width - len(right)) + right
                 face = runs[0][2] if runs else self.model.ui_faces.get("modeline", 0)
                 put(x, y, text, face, x + width)
             for x, y, height in arrangement.rules:

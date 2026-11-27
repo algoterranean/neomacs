@@ -112,7 +112,13 @@ class HeadlessUI(Session):
 
     @property
     def modeline(self) -> str:
+        """The modeline's text, without what is at its right-hand end."""
         return "".join(run[1] for run in (self.view.modeline or []))
+
+    @property
+    def modeline_right(self) -> str:
+        """The text at the right-hand end of the modeline."""
+        return "".join(run[1] for run in self.view.modeline_right)
 
     @property
     def message(self) -> str:

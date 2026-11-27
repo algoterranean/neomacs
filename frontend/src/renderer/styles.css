@@ -81,8 +81,19 @@ body {
 
 .nm-modeline {
   flex: none;
+  display: flex;
   white-space: pre;
   overflow: hidden;
+}
+
+.nm-modeline-left {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.nm-modeline-right {
+  flex: none;
 }
 
 .nm-status {
