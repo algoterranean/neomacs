@@ -14,6 +14,11 @@ def self_insert(
     sel: Selection, text: Annotated[str, KeyText] = "", n: Annotated[int, Prefix()] = 1
 ) -> None:
     """Insert the character that was typed."""
+    if n == 1:
+        from neomacs.std.structure import pair_insert
+
+        if pair_insert(sel, text):
+            return
     sel.replace(text * max(1, n))
 
 
@@ -46,11 +51,19 @@ def delete_char(sel: Selection, n: Annotated[int, Prefix()] = 1) -> None:
         sel.collapse()
 
 
+def _pair_delete(sel: Selection) -> bool:
+    from neomacs.std.structure import pair_delete
+
+    return pair_delete(sel)
+
+
 @command
 def delete_backward_char(sel: Selection, n: Annotated[int, Prefix()] = 1) -> None:
     """Delete the selection, or N characters before the cursor."""
     if not sel.empty:
         sel.delete()
+    elif n == 1 and _pair_delete(sel):
+        pass
     else:
         sel.head.delete_backward_char(n)
         sel.collapse()

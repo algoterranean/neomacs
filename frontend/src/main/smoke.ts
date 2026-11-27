@@ -439,10 +439,10 @@ export async function runSmoke(
     await settle();
     u = await ui();
     check("f2.prompt_opens", u.chrome.prompt === "M-x " && (u.chrome.popup?.length ?? 0) > 10 && u.focus !== u.mainView, { chrome: u.chrome, focus: u.focus, mainView: u.mainView, engine: await pyText("[(m.label, m.closed) for m in ed.frames[" + frame + "].prompts]") });
-    type("goto");
+    type("goto li"); // two parts, matched in any order: only goto_line has both
     await settle();
     u = await ui();
-    check("f2.completion_narrows", JSON.stringify(u.chrome.popup) === '["goto_line"]' && u.chrome.promptText === "goto", [u.chrome.popup, u.chrome.promptText]);
+    check("f2.completion_narrows", JSON.stringify(u.chrome.popup) === '["goto_line"]' && u.chrome.promptText === "goto li", [u.chrome.popup, u.chrome.promptText]);
     press("Return");
     await settle();
     u = await ui();

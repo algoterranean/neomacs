@@ -21,6 +21,7 @@ State = tuple[str, str]
 CODE: State = ("code", "")
 
 SEARCH_LINES = 5000  # how far a search for a matching bracket goes
+RESCAN_LINES = 20000  # how far past an edit the states of lines are compared at once
 
 
 @dataclass(slots=True)
@@ -91,9 +92,34 @@ class Scanner:
         buffer.add_listener(self._changed)
 
     def _changed(self, change: Change) -> None:
-        if change.text_changed:
-            del self._states[change.line :]
-            self._lines.clear()
+        if not change.text_changed:
+            return
+        self._lines.clear()
+        first = change.line  # the first line whose text changed
+        # The first line the change did not touch, as it was numbered and as
+        # it is now.  A change of whole lines leaves the line it ends on alone.
+        whole = 0 if change.whole_lines else 1
+        old_after = first + change.old_newlines + whole
+        new_after = first + change.new_newlines + whole
+        before = self._states[old_after - 1] if old_after <= len(self._states) else None
+        old_tail = self._states[old_after - 1 :]
+        del self._states[max(1, first - 1 + whole) :]
+        if before is None or new_after > self.buffer.line_count:
+            return
+        # Did the edit change what the following lines are inside (a string
+        # opened or closed, say)?  If so they look different though their text
+        # is the same, and whoever shows them has to be told.
+        last = None
+        for i in range(min(len(old_tail), RESCAN_LINES)):
+            number = new_after + i
+            if number > self.buffer.line_count:
+                break
+            if self.state_at(number) == old_tail[i]:
+                break
+            last = number
+        if last is not None:
+            through = last
+            self.buffer.after_notify(lambda: self.buffer.invalidate_lines(new_after, through))
 
     def state_at(self, line: int) -> State:
         """The state at the start of 1-based LINE."""

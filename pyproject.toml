@@ -14,6 +14,9 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest", "hypothesis", "ruff"]
+# Optional (ENGINE 5.9, D21).  As of 2026-11 the binding turns the GIL back on when
+# imported on a free-threaded build, and tree-sitter-python does not import as published.
+syntax = ["tree-sitter", "tree-sitter-python"]
 
 [project.scripts]
 neomacs = "neomacs.__main__:main"

@@ -79,7 +79,7 @@ def test_change_pipeline_order() -> None:
     b.replace(1, 3, "X\nY\nZ")
     assert events == [
         ("before", "ab\ncd", 1, 3, 5, 0),
-        Change(start=1, old_end=3, new_end=6, line=1, old_newlines=1, new_newlines=2),
+        Change(1, 3, 6, line=1, old_newlines=1, new_newlines=2, removed="b\n"),
         ("after", "aX\nY\nZcd", 1, 3, 6, 8, 1),
     ]
     # Hooks for one buffer do not fire for another.

@@ -14,6 +14,9 @@ from neomacs.std import (
     movement,
     prefix,
     prompts,
+    search,
+    structure,
+    windows,
 )
 
 __all__ = [
@@ -21,11 +24,14 @@ __all__ = [
     "editing",
     "evaluation",
     "files",
+    "search",
+    "structure",
     "help",
     "mouse",
     "movement",
     "prefix",
     "prompts",
+    "windows",
 ]
 
 global_map.default = "self_insert"
@@ -57,6 +63,21 @@ _BINDINGS = {
     "C-<space>": "set_anchor", "C-x h": "select_all", "s-a": "select_all",
     "C-x C-x": "restore_last_selection",
     "C-g": "keyboard_quit",
+    # structure
+    "C-M-f": "forward_expression", "C-M-b": "backward_expression", "C-M-u": "up_expression",
+    "M-]": "goto_matching_bracket", "C-=": "expand_selection", "C-M-=": "shrink_selection",
+    "M-<up>": "expand_selection", "M-<down>": "shrink_selection",
+    "M-;": "toggle_comment", "s-/": "toggle_comment",
+    "C-M-a": "start_of_definition", "C-M-e": "end_of_definition", "C-M-h": "select_definition",
+    # search
+    "C-s": "search_forward", "C-r": "search_backward", "s-f": "search_forward",
+    "M-n": "add_next_match", "s-d": "add_next_match", "C-c m": "select_all_matches",
+    # windows and panels
+    "C-x 2": "split_window_below", "C-x 3": "split_window_right",
+    "C-x 0": "delete_window", "C-x 1": "delete_other_windows", "C-x o": "other_view",
+    "<f6>": "other_view", "C-x p p": "panel.toggle", "C-x p o": "panel.focus",
+    "C-x p n": "panel.next_tab", "C-x p k": "panel.close_tab", "C-x p d": "panel.dock",
+    "C-x p f": "panel.float", "C-h e": "show_messages",
     # cursors
     "C-M-<down>": "add_cursor_below", "C-M-<up>": "add_cursor_above",
     "C-M-n": "add_cursor_below", "C-M-p": "add_cursor_above",
@@ -100,12 +121,23 @@ MENU = [
     ("Edit/Copy", "copy_selection"),
     ("Edit/Paste", "yank"),
     ("Edit/Select All", "select_all"),
+    ("Edit/Find…", "search_forward"),
+    ("Edit/Select Next Match", "add_next_match"),
+    ("Edit/Select All Matches", "select_all_matches"),
+    ("Edit/Toggle Comment", "toggle_comment"),
+    ("Edit/Expand Selection", "expand_selection"),
     ("Tools/Run Command…", "execute_command"),
     ("Tools/Evaluate Buffer", "eval_buffer"),
     ("Tools/Evaluate Definition", "eval_definition"),
     ("Tools/Python REPL", "repl"),
     ("Tools/Toggle Breakpoint", "debug.toggle_breakpoint"),
     ("Tools/Inspect Last Error", "debug.inspect"),
+    ("View/Split Below", "split_window_below"),
+    ("View/Split Right", "split_window_right"),
+    ("View/Close Window", "delete_window"),
+    ("View/Next Window or Panel", "other_view"),
+    ("View/Toggle Panel", "panel.toggle"),
+    ("View/Messages", "show_messages"),
     ("Help/Describe Key…", "describe_key"),
     ("Help/Describe Command…", "describe_command"),
     ("Help/Search Commands…", "apropos"),

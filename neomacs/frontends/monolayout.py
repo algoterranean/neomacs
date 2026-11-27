@@ -119,15 +119,23 @@ class MonoView:
         col = 0
         start = 0
         position = 0  # buffer offset reached so far
+        attrs: dict[str, Any] = line[0]
+        # Paragraph attributes (ENGINE 4.3).  A terminal can indent and align;
+        # spacing before and after a line needs fractions of a row and is not drawn.
+        indent = max(0, min(int(attrs.get("indent", 0)), text_width - 1))
+        text_width -= indent
         for run in line[1]:
-            if len(run) == 2:  # an inline object: one placeholder cell
-                offset, text, face = run[0], "\u25af", 0
+            if len(run) == 2:  # an inline object: its description, or a placeholder
+                offset, face = run[0], 0
+                alt = str(run[1].get("alt", "")) if "image" in run[1] else ""
+                text = f"[{alt}]" if alt else "\u25af"
+                width = sum(cluster_width(text[g.start : g.end]) for g in _iter_graphemes(text))
                 covers = int(run[1].get("covers", 0))
-                if wrap and cells and col + 1 > text_width:
+                if wrap and cells and col + width > text_width:
                     rows.append(Row(number, len(rows), cells, start, position, False))
                     cells, col, start = [], 0, position
-                cells.append(Cell(offset, covers, text, 1, face))
-                col += 1
+                cells.append(Cell(offset, covers, text, width, face))
+                col += width
                 position = offset + covers
                 continue
             offset, text, face = run
@@ -153,9 +161,19 @@ class MonoView:
                     at += len(cluster)
                     position = at
         rows.append(Row(number, len(rows), cells, start, position, True))
+        align = attrs.get("align")
+        if indent or align in ("center", "right"):
+            for row in rows:
+                used = sum(cell.width for cell in row.cells)
+                slack = max(0, text_width - used)
+                pad = indent + (
+                    slack if align == "right" else slack // 2 if align == "center" else 0
+                )
+                if pad:
+                    row.cells.insert(0, Cell(None, 0, " " * pad, pad, 0))
         if len(self._cache) > 4096:
             self._cache.clear()
-        self._cache[number] = (id(line), text_width, rows)
+        self._cache[number] = (id(line), self.text_width, rows)
         return rows
 
     def _clamp_top(self) -> None:

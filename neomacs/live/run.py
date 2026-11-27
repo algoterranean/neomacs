@@ -27,6 +27,7 @@ class SpecialMode(Mode):
     """The mode of buffers the editor writes and the user reads: help, tracebacks."""
 
     name = "special"
+    interactive = False
     keymap = Keymap("special")
 
 
@@ -195,7 +196,7 @@ def special_buffer(name: str, mode: type[Mode]) -> Buffer:
         layer.clear()
     buffer.replace(0, len(buffer), "")
     if not isinstance(buffer.mode, mode):
-        buffer.mode = mode()
+        buffer.set_mode(mode)
     return buffer
 
 
@@ -221,7 +222,12 @@ def report_error(exc: BaseException) -> None:
     buffer = record_error(exc)
     summary = "".join(traceback.format_exception_only(exc)).strip().split("\n")[-1]
     ed.message(buffer.text, kind="log")
-    ed.message(f"{summary}  (show_traceback for the rest)", kind="error")
+    ed.message(summary, kind="error")
+    if ed.frame is not None and ed.frame.draws_panels:
+        # In its panel, without taking the keyboard from the code being worked on.
+        view = ed.show(buffer, "traceback")
+        view.selections.set([(len(buffer), len(buffer))])
+        view.reveal(len(buffer), "bottom")
 
 
 def open_location(filename: str, line: int) -> None:

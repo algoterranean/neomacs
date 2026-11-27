@@ -14,7 +14,9 @@ if TYPE_CHECKING:
 
 # The protocol version (STABILITY 5).  Engine and frontend must agree exactly.
 PROTOCOL = 1
-CAPABILITIES: list[str] = []
+# What a frontend may say it can do when it attaches.  "panels": it draws
+# panels and window splits; without it everything is shown in one window.
+CAPABILITIES: list[str] = ["panels"]
 
 _methods: dict[str, Callable[..., Any]] = {}
 

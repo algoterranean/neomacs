@@ -215,7 +215,7 @@ class Dispatcher:
         spans = [s for layer in buffer.layers for s in layer.at(pos) if s.get("keymap")]
         spans.sort(key=lambda s: -s.priority)
         maps.extend(s.get("keymap") for s in spans if isinstance(s.get("keymap"), Keymap))
-        for mode in reversed(buffer.minor_modes):
+        for mode in reversed([*self.editor.global_modes, *buffer.minor_modes]):
             if isinstance(mode, Mode):
                 maps.extend(type(mode).keymaps())
         debug_keys = self.editor.debugger.keymap

@@ -1,6 +1,6 @@
 # Engine core design
 
-Status: draft 24, 2026-11-27. Stages 0 to 5 are implemented; see
+Status: draft 25, 2026-11-27. Stages 0 to 6 are implemented; see
 IMPLEMENTATION.md for what exists. The decisions in
 section 2 are confirmed; section 16 lists what was deferred.
 
@@ -858,6 +858,40 @@ minor mode, and the highlight on the bracket matching the one at the cursor.
 there is no dictionary segmentation. A language embedded in another (code in
 Markdown, SQL in a string) is not handled.
 
+**As built (Stage 6).**
+
+- *When the tree is loaded.* The option `tree_sitter` is `auto`, `always` or
+  `never`. `auto` loads the binding unless that would turn the global
+  interpreter lock back on: on a free-threaded Python whose lock is off and
+  was not forced off with `PYTHON_GIL=0`, it does not, and says so once in
+  `*messages*`. See the risk row in section 15 for why this is the default.
+- *Reparsing* happens before a view works out what to send, so lines whose
+  structure changed go out in the same update as the edit. The lines the
+  parser reports as changed are redisplayed though their text is the same.
+  The scanner does the equivalent: when an edit changes what the following
+  lines are inside (a string opened or closed), it compares states forward
+  until they agree again and redisplays that far.
+- *A first parse* of more than 200,000 characters runs on another thread on
+  a snapshot. Edits made meanwhile are recorded and applied to the tree when
+  it arrives.
+- *Queries shipped for Python:* `highlights.scm` and `textobjects.scm`,
+  written for this editor. There is no `indents.scm`: the line being
+  indented has usually not been typed yet and does not parse, so Python
+  indentation is a rule in the mode, working from the scanner. A query that
+  does not compile against the installed grammar is skipped, not fatal.
+- *Highlighting without a tree* gives strings, comments, the mode's
+  keywords and constants, numbers, the name after `def` or `class`, and
+  decorators. It is cached per line, keyed on the line's text and the
+  scanner's state at its start.
+- *With a tree,* `enclosing` goes node by node, and a definition is the
+  innermost function or class with its decorators. *Without,* a definition
+  is the top-level block: from an unindented line to the next.
+- *`expression_at`* is the scanner's in both cases; the tree adds nothing
+  the commands need there yet.
+- *Not done:* languages other than Python; a language embedded in another;
+  `indents.scm`; highlighting inside f-string interpolations (they are shown
+  as string).
+
 ## 6. Options
 
 Typed, documented, optionally buffer-local settings, replacing Emacs's
@@ -1012,6 +1046,16 @@ defaults are inherited along the class hierarchy. Minor modes are the same
 thing with `minor = True`, may be global or per buffer, and each gets a
 generated toggle command. Modes are registered by `name`; the major mode for
 a file is chosen from `patterns`, then from the interpreter line.
+
+**As built.** `neomacs.modes` is a package: `Mode`, `FundamentalMode`,
+`TextMode`, `ProgMode`, and `modes/python.py`. Every named mode gets a
+command, `NAME_mode`: a major mode's selects it for the buffer, a minor
+mode's toggles it. Modes the editor sets itself (minibuffer, help,
+traceback, REPL, debug) set `interactive = False` and get none. A minor mode
+with `scope = "global"` is on or off for the whole editor. A mode may define
+`indent_for(buffer, line)`. The mode registry survives re-evaluation of its
+module, and lookups resolve to the class that live patching kept (9.3):
+both were found by Gate D.
 
 ### 7.4 Hooks
 
@@ -1375,6 +1419,30 @@ cycles focus through windows and visible panels.
 
 **In the terminal frontend** a docked panel is drawn as a split with a tab
 line, and a floating one as a box over the text.
+
+**As built.**
+
+- A frontend says it draws panels and splits by listing the capability
+  `panels` when it attaches. For one that does not, every role is shown in
+  its one window, as before Stage 6, and the split commands refuse. The
+  terminal frontend has it; the Electron frontend gets it in its stage F3.
+- Showing something in a panel without focus does not take the place of the
+  tab the user is typing in, if that is in the same panel; it becomes a tab
+  beside it.
+- Closing a panel's last tab hides the panel. `q` in a help, traceback or
+  debug buffer closes its tab.
+- A view that was in a `layout` event and is not in the next one has been
+  closed; frontends drop it. There is no separate event.
+- A traceback from evaluating code is now shown in the bottom panel as it
+  happens, and the debugger shows the stack and variables there beside the
+  source, as sections 9.5 and 10.4 intended.
+- In the terminal, a docked panel takes rows or columns from the main area
+  and has a tab line; a floating one is a box, under the cursor's row when
+  anchored to a position. Spacing before and after a paragraph is not drawn.
+- *Not done:* resizing panels and splits from the frontend; remembering the
+  arrangement between sessions; `ui.panel` actions arriving from a real
+  frontend (the terminal frontend has no mouse; the method is tested
+  directly).
 
 ### 8.6 Menus
 
@@ -1990,7 +2058,7 @@ above.
 | Interrupt cannot break a blocking C call | A runaway regex freezes the engine | Timeouts on searches started by commands; long work goes to `in_thread`. |
 | One process holds all state | A crash loses unsaved work | Recovery journal in stage 7. |
 | The socket evaluates arbitrary code | Local privilege issue | stdio or a 0600 Unix socket only; no TCP without an explicit flag and a token. |
-| `tree-sitter` does not support the free-threaded build | No parse tree, or the GIL is re-enabled when it loads | It is optional (D21); the scanner covers every standard command. Checked on 2026-11-24 with free-threaded 3.15.2 on macOS arm64: `tree-sitter` 0.27.0 has no prebuilt wheel, builds from source, and re-enables the GIL on import; `tree-sitter-python` 0.25.0 builds from source but fails to import (missing scanner symbol). Recheck at the start of stage 6. |
+| `tree-sitter` does not support the free-threaded build | No parse tree, or the GIL is re-enabled when it loads | It is optional (D21); the scanner covers every standard command. Rechecked on 2026-11-27 with free-threaded 3.15.2 on macOS arm64: `tree-sitter` 0.27.0 still has no prebuilt wheel, builds from source, and still re-enables the GIL on import. `tree-sitter-python` 0.25.0 still fails to import as published: its source package leaves out `src/scanner.c`; built with that file added, it loads and parses. So by default the engine does not load the binding on a free-threaded Python (the option `tree_sitter`, 5.9), and a session started with `PYTHON_GIL=0` does. Recheck when either package publishes a free-threaded wheel. |
 | The scanner and the tree disagree | A command behaves differently depending on whether a grammar is installed | The agreement tests in section 14; the table is the single source for delimiters in both layers. |
 | A required dependency lacks a free-threaded build | The GIL is silently re-enabled, or the package will not install | Startup check in CI. Today there are no required dependencies with C extensions. |
 | Free threading exposes races the GIL used to hide | Corruption if a worker thread touches editor state | D1 plus the owner-thread assertion in every mutator, enabled in tests. |

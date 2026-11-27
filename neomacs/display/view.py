@@ -80,26 +80,50 @@ def build_line(buffer: Buffer, line: int, faces: FaceTable, providers: Iterable[
         else:
             runs.append([offset, run_text, face_id])
 
-    def virtual(at: int, key: str) -> None:
-        for p_start, p_end, _, props in pieces:
-            value = props.get(key)
-            if value and (p_start if key == "before_text" else p_end) == at:
-                emit(None, value, faces.id_for(props["face"]) if props.get("face") else 0)
+    # What starts, ends, or is to be shown at each cut, so that the walk
+    # along the line does not look at every piece at every cut: a line of a
+    # few thousand characters can have hundreds of pieces.
+    starting: dict[int, list[tuple[int, int, int, dict[str, Any]]]] = {}
+    ending: dict[int, list[tuple[int, int, int, dict[str, Any]]]] = {}
+    virtual_at: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    for piece in pieces:
+        p_start, p_end, _, props = piece
+        if p_start < p_end:
+            starting.setdefault(p_start, []).append(piece)
+            ending.setdefault(p_end, []).append(piece)
+        if props.get("before_text"):
+            virtual_at.setdefault((p_start, "before_text"), []).append(props)
+        if props.get("after_text"):
+            virtual_at.setdefault((p_end, "after_text"), []).append(props)
+        if props.get("display"):
+            virtual_at.setdefault((p_start, "display"), []).append({**props, "_end": p_end})
 
+    active: list[tuple[int, int, int, dict[str, Any]]] = []
+    hidden = 0  # how many active pieces hide their text
     for i, seg_start in enumerate(ordered):
-        virtual(seg_start, "after_text")
-        virtual(seg_start, "before_text")
-        for p_start, p_end, _, props in pieces:
+        for piece in ending.get(seg_start, ()):
+            active.remove(piece)
+            if piece[3].get("invisible") or piece[3].get("display"):
+                hidden -= 1
+        for key in ("after_text", "before_text"):
+            for props in virtual_at.get((seg_start, key), ()):
+                emit(None, props[key], faces.id_for(props["face"]) if props.get("face") else 0)
+        for props in virtual_at.get((seg_start, "display"), ()):
             # An inline object stands in place of the text its span covers.
-            if props.get("display") and p_start == seg_start:
-                runs.append([seg_start - start, {**props["display"], "covers": p_end - p_start}])
+            runs.append(
+                [seg_start - start, {**props["display"], "covers": props["_end"] - seg_start}]
+            )
         if i + 1 == len(ordered):
             break
-        seg_end = ordered[i + 1]
-        active = [p for p in pieces if p[0] <= seg_start and p[1] >= seg_end and p[0] < p[1]]
-        if any(props.get("invisible") or props.get("display") for _, _, _, props in active):
+        for piece in starting.get(seg_start, ()):
+            active.append(piece)
+            if piece[3].get("invisible") or piece[3].get("display"):
+                hidden += 1
+        if hidden:
             continue
-        active.sort(key=lambda p: p[2])
+        seg_end = ordered[i + 1]
+        if len(active) > 1:
+            active.sort(key=lambda p: p[2])
         names = tuple(props["face"] for _, _, _, props in active if props.get("face"))
         emit(seg_start - start, text[seg_start - start : seg_end - start], faces.id_for(names))
     return [attrs, runs]

@@ -211,7 +211,7 @@ def ui(engine: Path) -> Iterator[HeadlessUI]:
     with HeadlessUI(engine, rows=16, cols=70) as session:
         session.eval(
             "_s = ed.buffers.get('*scratch*'); _s.replace(0, len(_s), '')\n"
-            f"_w = ed.frames[{session.frame_id}].window; _w.show(_s); _w.selections.set([(0, 0)])"
+            f"_fr = ed.frames[{session.frame_id}]; _w = _fr.window; _w.show(_s); _w.selections.set([(0, 0)])"
         )
         yield session
         session.client.notify("ui.detach")
@@ -320,7 +320,7 @@ def test_traceback_buffer_jumps_to_unsaved_code(ui: HeadlessUI) -> None:
     assert ui.message.startswith("KeyError: 'missing'")
     assert value(ui, "_w.buffer.name") == "*scratch*"  # the window is not taken over
     ui.call("show_traceback")
-    lines = value(ui, "_w.buffer.text").split("\n")
+    lines = value(ui, "_fr.focus.buffer.text").split("\n")
     assert lines[:7] == [
         "Traceback (most recent call last):",
         "  <neomacs:*scratch*>, line 8, in <module>",
@@ -331,16 +331,18 @@ def test_traceback_buffer_jumps_to_unsaved_code(ui: HeadlessUI) -> None:
         "    return {}['missing']",
     ]
     assert lines[7] == "KeyError: 'missing'"
-    assert value(ui, "len(_w.buffer.layer('links'))") == 3
+    assert value(ui, "len(_fr.focus.buffer.layer('links'))") == 3
     with pytest.raises(Exception, match="read-only|ReadOnly"):
-        ui.eval("_w.buffer.insert(0, 'x')")
-    ui.eval("_w.selections.set([(_w.buffer.line_start(6) + 4, _w.buffer.line_start(6) + 4)])")
+        ui.eval("_fr.focus.buffer.insert(0, 'x')")
+    ui.eval(
+        "_fr.focus.selections.set([(_fr.focus.buffer.line_start(6) + 4, _fr.focus.buffer.line_start(6) + 4)])"
+    )
     ui.keys("<return>")
     assert value(ui, "(_w.buffer.name, _w.buffer.line_of(_w.cursor.pos))") == ("*scratch*", 3)
-    ui.keys("M-,")  # and back to the traceback
-    assert value(ui, "_w.buffer.name") == "*traceback*"
+    assert ui.panels()["bottom"]["visible"] and value(ui, "_fr.focus is _w")
+    ui.keys("C-x", "p", "o")  # into the panel, where q closes the tab
     ui.keys("q")
-    assert value(ui, "_w.buffer.name") == "*scratch*"
+    assert value(ui, "_fr.focus is _w") and not ui.panels()["bottom"]["visible"]
 
 
 def test_a_syntax_error_is_reported_with_its_line(ui: HeadlessUI) -> None:
@@ -433,7 +435,7 @@ def test_evaluating_a_file_in_a_package_goes_into_its_module_and_drops_stale_reg
 
 def test_repl(ui: HeadlessUI) -> None:
     ui.call("repl")
-    assert value(ui, "_w.buffer.name") == "*repl*"
+    assert value(ui, "_fr.focus.buffer.name") == "*repl*"
     ui.type("1 + 1")
     ui.keys("<return>")
     ui.type("def sq(x):")
@@ -446,21 +448,24 @@ def test_repl(ui: HeadlessUI) -> None:
     ui.keys("<return>")
     ui.type("await asyncio.sleep(0, 'slept')")
     ui.keys("<return>")
-    text = value(ui, "_w.buffer.text")
+    text = value(ui, "_fr.focus.buffer.text")
     assert text == (
         ">>> 1 + 1\n2\n>>> def sq(x):\n    return x * x\n>>> sq(7)\n49\n"
         ">>> 1 / 0\nZeroDivisionError: division by zero\n>>> await asyncio.sleep(0, 'slept')\n'slept'\n>>> "
     )
-    ui.eval("_w.show(_s)")
+    ui.call("panel.close_tab")
+    titles = [tab["title"] for tab in ui.panels()["bottom"]["tabs"]]
+    assert "*repl*" not in titles and "*traceback*" in titles  # the error's tab was added beside it
+    ui.eval("_fr.focus_view(_w)")
 
 
 def test_describe_command_key_option_and_apropos(ui: HeadlessUI) -> None:
     ui.call("describe_command", "kill_line")
-    text = value(ui, "_w.buffer.text")
-    assert value(ui, "_w.buffer.name") == "*help*"
+    text = value(ui, "_fr.focus.buffer.text")
+    assert value(ui, "_fr.focus.buffer.name") == "*help*"
     assert text.startswith("kill_line\n\nkill_line(") and "Keys: C-k" in text
     assert "Defined in neomacs.std.editing, " in text and "editing.py, line " in text
-    ui.eval("_h = _w.buffer; _w.selections.set([(len(_h) - 3, len(_h) - 3)])")
+    ui.eval("_h = _fr.focus.buffer; _fr.focus.selections.set([(len(_h) - 3, len(_h) - 3)])")
     ui.keys("<return>")  # the link to the definition
     assert value(ui, "_w.buffer.name") == "editing.py"
     assert "def kill_line" in value(
@@ -472,9 +477,9 @@ def test_describe_command_key_option_and_apropos(ui: HeadlessUI) -> None:
     ui.keys("C-h", "k")
     ui.keys("C-x")
     ui.keys("C-f")
-    assert value(ui, "_w.buffer.text").startswith("C-x C-f runs the command files.find\n")
+    assert value(ui, "_fr.focus.buffer.text").startswith("C-x C-f runs the command files.find\n")
     ui.keys("q")
-    assert value(ui, "_w.buffer.name") == "*scratch*"
+    assert value(ui, "_fr.focus is _w") is True
     ui.keys("C-h", "k", "<f12>")
     assert ui.message == "<f12> is undefined"
 
@@ -483,18 +488,18 @@ def test_describe_command_key_option_and_apropos(ui: HeadlessUI) -> None:
     ui.type("test_w")
     assert ui.candidates() == ["test_width"]
     ui.keys("<tab>", "<return>")
-    text = value(ui, "_w.buffer.text")
+    text = value(ui, "_fr.focus.buffer.text")
     assert "How wide a test is." in text and "Value here: 4" in text and "Default: 4" in text
     ui.keys("q")
     ui.eval("_s.options.test_width = 9")
     ui.keys("C-h", "v")
     ui.type("test_width")
     ui.keys("<return>")
-    assert "Value here: 9  (from buffer)" in value(ui, "_w.buffer.text")
+    assert "Value here: 9  (from buffer)" in value(ui, "_fr.focus.buffer.text")
     ui.keys("q")
 
     ui.call("apropos", "^kill_|test_width")
-    lines = value(ui, "_w.buffer.text").split("\n")
+    lines = value(ui, "_fr.focus.buffer.text").split("\n")
     assert lines[0] == "Commands" and "kill_line  (C-k)  Kill" in " ".join(lines)
     assert "Options" in lines and any(line.startswith("test_width  How wide") for line in lines)
     ui.keys("q")
@@ -532,7 +537,7 @@ def test_every_standard_module_survives_eval_buffer(ui: HeadlessUI) -> None:
         ui, "_ed_mod.kill_line is _held and _held.__code__ is ed.commands['kill_line'].fn.__code__"
     )
     assert value(ui, "_held.__code__.co_filename == _ed_mod.__file__")
-    assert [item["label"] for item in ui.model.menu] == ["File", "Edit", "Tools", "Help"]
+    assert [item["label"] for item in ui.model.menu] == ["File", "Edit", "Tools", "View", "Help"]
     # The editor still edits: typing, several cursors, kill and yank, undo, a prompt.
     ui.eval("_w.show(_s)")
     put(ui, "")

@@ -25,6 +25,7 @@ class MinibufferMode(Mode):
     """The major mode of a single-line minibuffer."""
 
     name = "minibuffer"
+    interactive = False
     keymap: ClassVar[Keymap | None] = Keymap("minibuffer")
 
 
@@ -100,7 +101,7 @@ class Minibuffer:
         )
         self.buffer = Buffer("*minibuffer*", initial)
         self.buffer.undo.clear()
-        self.buffer.mode = MultilineMinibufferMode() if multiline else MinibufferMode()
+        self.buffer.set_mode(MultilineMinibufferMode if multiline else MinibufferMode)
         self.buffer.locals["minibuffer"] = self
         self.buffer.option_values["gutter_columns"] = []
         if not multiline:

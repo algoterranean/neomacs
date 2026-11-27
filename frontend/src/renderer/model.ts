@@ -116,10 +116,25 @@ export class ViewModel {
   }
 }
 
+export interface PanelInfo {
+  id: number;
+  name: string;
+  visible: boolean;
+  mode: string;
+  side?: string;
+  size: number;
+  tabs: { view: number; title: string }[];
+  active: number | null;
+}
+
 export class FrameModel {
   faces = new Map<number, FaceAttrs>();
+  // Images and other resources by id.  Drawing them is stage F3.
+  resources = new Map<number, { kind: string; source: Record<string, unknown> }>();
   uiFaces: Record<string, number> = {};
-  layout: { main: [string, number]; panels: unknown[] } | null = null;
+  // `main` is ["win", id] or ["split", id, direction, ratios, children].
+  layout: { main: unknown[]; panels: PanelInfo[] } | null = null;
+  lastWindow: number | null = null;
   views = new Map<number, ViewModel>();
   focus: number | null = null;
   title = "";
@@ -140,9 +155,33 @@ export class FrameModel {
     return view;
   }
 
+  /** The ids of the windows in the main area, in reading order. */
+  windows(): number[] {
+    const found: number[] = [];
+    const walk = (node: unknown[]): void => {
+      if (node[0] === "win") found.push(node[1] as number);
+      else for (const child of node[4] as unknown[][]) walk(child);
+    };
+    if (this.layout) walk(this.layout.main);
+    return found;
+  }
+
+  /** Every view the layout mentions: windows and the tabs of panels. */
+  layoutViews(): Set<number> {
+    const found = new Set(this.windows());
+    for (const panel of this.layout?.panels ?? []) for (const tab of panel.tabs ?? []) found.add(tab.view);
+    return found;
+  }
+
+  /**
+   * The window of the main area that has, or last had, the focus.  Until
+   * splits and panels are drawn (stage F3) it is the one view shown.
+   */
   get mainView(): ViewModel | null {
-    if (!this.layout || this.layout.main[0] !== "win") return null;
-    return this.view(this.layout.main[1]);
+    const windows = this.windows();
+    if (windows.length === 0) return null;
+    if (this.lastWindow === null || !windows.includes(this.lastWindow)) this.lastWindow = windows[0] ?? null;
+    return this.lastWindow === null ? null : this.view(this.lastWindow);
   }
 
   /** Apply one batch.  Returns the sequence numbers of the flushes in it. */
@@ -155,6 +194,7 @@ export class FrameModel {
           break;
         case "reset":
           this.faces.clear();
+          this.resources.clear();
           this.uiFaces = {};
           this.layout = null;
           this.views.clear();
@@ -170,14 +210,21 @@ export class FrameModel {
         case "ui_faces":
           this.uiFaces = a[0] as Record<string, number>;
           break;
-        case "layout":
+        case "layout": {
+          const before = this.layoutViews();
           this.layout = a[0] as FrameModel["layout"];
+          // A view that was in the layout and no longer is has been closed.
+          const now = this.layoutViews();
+          for (const id of before) if (!now.has(id)) this.views.delete(id);
+          if (this.focus !== null && this.windows().includes(this.focus)) this.lastWindow = this.focus;
           break;
+        }
         case "title":
           this.title = a[0] as string;
           break;
         case "focus":
           this.focus = a[0] as number;
+          if (this.windows().includes(this.focus)) this.lastWindow = this.focus;
           break;
         case "win_info":
           this.view(a[0] as number).info = a[1] as ViewInfo;
@@ -222,6 +269,9 @@ export class FrameModel {
           break;
         case "reveal":
           this.view(a[0] as number).pendingReveal = [a[1] as number, a[2] as number, a[3] as string];
+          break;
+        case "resource_define":
+          this.resources.set(a[0] as number, { kind: a[1] as string, source: a[2] as Record<string, unknown> });
           break;
         default:
           throw new ProtocolError(`unknown redraw event: ${name}`);
