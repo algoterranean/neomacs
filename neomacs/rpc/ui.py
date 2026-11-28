@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from neomacs import workbench
 from neomacs.errors import NoFrame, RpcError
 from neomacs.rpc.api import CAPABILITIES, PROTOCOL, method
 from neomacs.rpc.protocol import Connection
@@ -269,6 +270,8 @@ def tab(conn: Connection, view: int, action: str, index: Any, to: Any = None) ->
     if not isinstance(index, int) or not 0 <= index < len(window.tabs):
         raise RpcError(f"window {view} has no tab {index}")
     if action == "activate":
+        # The keyboard goes to the window: a question left open could not be answered.
+        workbench.give_up_questions(frame)
         window.show(window.tabs[index])
         frame.focus_view(window)
     elif action == "close":

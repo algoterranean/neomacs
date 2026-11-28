@@ -169,6 +169,15 @@ def test_a_click_on_a_tab(ui: HeadlessUI, files: list[Path]) -> None:
     ui.idle()
     assert tabs(ui, 0) == ["[a.txt]", "b.txt", "c.txt"]
     assert value(ui, "_f.focus.id") == first  # the keyboard goes to the window clicked in
+    # A question that was open is given up, not left without the keyboard.
+    ui.keys("C-x", "C-f")
+    assert ui.prompt is not None
+    ui.client.notify("ui.tab", first, "activate", 1)
+    ui.idle()
+    assert ui.prompt is None and ui.model.minibuffers == {}
+    assert tabs(ui, 0) == ["a.txt", "[b.txt]", "c.txt"] and value(ui, "_f.focus.id") == first
+    ui.client.notify("ui.tab", first, "activate", 0)
+    ui.idle()
     ui.client.notify("ui.tab", first, "move", 0, 2)
     ui.idle()
     assert tabs(ui, 0) == ["b.txt", "c.txt", "[a.txt]"]

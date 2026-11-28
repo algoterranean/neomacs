@@ -765,6 +765,12 @@ body {
   -webkit-user-select: none;
 }
 
+/* `display: flex` above would otherwise outdo the `hidden` attribute, and
+   the border would still take a pixel. */
+.nm-window-tabs[hidden] {
+  display: none;
+}
+
 .nm-window-tabs::-webkit-scrollbar {
   display: none;
 }

@@ -1361,12 +1361,16 @@ export async function runSmoke(
       await control.call("engine.call", "view.toggle_tabs", []);
       await settle();
       const hidden = await js<number>("document.querySelectorAll('.nm-window-tabs:not([hidden])').length");
+      // Hidden means no room taken: each window's text starts where the window does.
+      const room = await js<number[]>(
+        `[...document.querySelectorAll('.nm-window')].map((w) => Math.max(w.querySelector('.nm-window-tabs').getBoundingClientRect().height, w.querySelector('.nm-view').getBoundingClientRect().top - w.getBoundingClientRect().top))`,
+      );
       await control.eval(
         `_tw.frame.delete_window(_tw2)\n_tw.show(_tb0)\n_tw.tabs[:] = _tabs0\n` +
           `for _b in list(ed.buffers):\n    if _b.file and _b.file.parent == _td: ed.buffers.kill(_b)\ned.update_frames()`,
       );
       await settle();
-      check("tabs.hidden_again", hidden === 0 && (await pyText("ed.options.tabs")) === "False" && (await arrangement()).views.filter((v) => !v.inline && v.inPanel === null).length === 1, { hidden });
+      check("tabs.hidden_again", hidden === 0 && room.length === 2 && room.every((r) => r === 0) && (await pyText("ed.options.tabs")) === "False" && (await arrangement()).views.filter((v) => !v.inline && v.inPanel === null).length === 1, { hidden, room });
     }
 
     // -- the kill ring chooser: a list with a preview beside it (KILLRING 7) --
