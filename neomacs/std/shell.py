@@ -66,6 +66,8 @@ def shell_command(
 
     # Where the file being edited is, as a shell started there would be.
     cwd = origin.file.parent if origin.file is not None and origin.file.parent.is_dir() else None
+    if cwd is None:
+        cwd = ed.frame.workspace.root  # the project's directory, if it has one
     buffer.locals["process"] = ed.spawn(shell_argv(line), buffer=buffer, cwd=cwd, on_exit=finished)
     view = ed.show(buffer, "output")
     view.selections.set([(len(buffer), len(buffer))])

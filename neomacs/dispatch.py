@@ -469,11 +469,22 @@ class Dispatcher:
         }.get(ask.kind)
         if ask.kind == "choice":
             completer = completion.choices(ask.choices)
+        initial = ask.initial
+        if ask.kind == "file" and not initial:
+            # A file name starts where the project is, not where the engine
+            # happened to be started (WORKSPACE 4.3).
+            frame = self.editor.frame
+            root = frame.workspace.root if frame is not None else None
+            if root is not None:
+                home = str(Path.home())
+                initial = str(root) + "/"
+                if initial.startswith(home + "/"):
+                    initial = "~" + initial[len(home) :]
         text = await self.editor.minibuffer.read(
             ask.prompt,
             completer=completer,
             history=ask.history,
-            initial=ask.initial,
+            initial=initial,
             submit_selects=ask.kind in ("buffer", "command", "choice"),
         )
         if ask.kind == "file" and not text.strip():

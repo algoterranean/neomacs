@@ -141,6 +141,9 @@ class Editor:
         self.timers = Timers(self)
         self.processes: set[Process] = set()  # started with `spawn` and still running
         self.projects = Projects(self)
+        from neomacs.workspace import Workspaces
+
+        self.workspaces = Workspaces(self)
         from neomacs.ext.registry import Extensions
 
         self.extensions = Extensions(self)
@@ -344,7 +347,14 @@ class Editor:
         where that is (ENGINE 8.5).  The view gets the keyboard only if FOCUS."""
         from neomacs import panels
 
-        return panels.place(self._need_frame(), buffer, role, focus=focus)
+        frame = self._need_frame()
+        if role == "document":
+            # A buffer is shown in its own project: one that belongs to
+            # another takes the frame there (WORKSPACE 4.1).
+            owner = self.workspaces.of(buffer)
+            if owner is not None and owner is not frame.workspace:
+                frame.switch(owner)
+        return panels.place(frame, buffer, role, focus=focus)
 
     # -- tasks ----------------------------------------------------------------
 

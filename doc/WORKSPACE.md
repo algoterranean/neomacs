@@ -1,7 +1,8 @@
 # Projects and the workbench design
 
-Status: draft 1, 2026-11-27. Nothing here is built. Section 2 holds the
-decisions taken; section 12 lists what is still open.
+Status: draft 2, 2026-11-27. Stage W-1 (projects in the engine) is built;
+section 13 says how it differs from what is described before it. Stages W-2
+to W-6 are not built. Section 2 holds the decisions taken. Nothing is open.
 
 This describes two things that arrive together: **projects**, each with its
 own buffers, windows and layout, and the **workbench**, the frame around the
@@ -48,6 +49,11 @@ All by the user, 2026-11-27, unless a reason says otherwise.
 | W8 | The options sidebar is built as a region that can be shown and hidden, and is empty. | Its contents are to be decided later. |
 | W9 | One engine holds every project. The kill ring, configuration, extensions and key bindings are shared. | Proposed here. Switching is then instant and nothing has to be handed between processes. |
 | W10 | The user-facing word is "project". In engine code the class is `Workspace`. | `neomacs/project.py` already means a directory's `.neomacs/settings.toml` (ENGINE D31). |
+| W11 | The two sides of a diff are not kept level row for row in this change. They scroll together by matching lines. | Level rows need filler the protocol cannot ask for yet; that is a design of its own. |
+| W12 | Each frame has its own current project. Two Electron windows can show two projects. | |
+| W13 | A project with unsaved buffers cannot be removed until they are saved or killed. | |
+| W14 | A panel docked at the bottom sits under the main area only; the sidebars run the full height beside it. | As VS Code has it by default. |
+| W15 | The centre of the meta bar shows the project's name, as the button that opens the command palette. | |
 
 ## 3. Words
 
@@ -67,11 +73,11 @@ is renamed `MainArea`, so the word has one meaning.
 ### 4.1 The model
 
 ```python
-ed.workspaces                  # every project, in sidebar order
-ed.workspaces.add(path)        # make a directory a project
+ed.workspaces  # every project, in sidebar order
+ed.workspaces.add(path)  # make a directory a project
 ed.workspaces.remove(ws)
-ed.workspaces.of(buffer)       # the project a buffer belongs to
-frame.workspace                # the project this frame is showing
+ed.workspaces.of(buffer)  # the project a buffer belongs to
+frame.workspace  # the project this frame is showing
 frame.switch(ws)
 ```
 
@@ -79,13 +85,18 @@ A `Workspace` has an id, a name (the directory's name unless renamed), a
 root directory, and for each frame an arrangement.
 
 - **Where a buffer belongs.** A buffer visiting a file belongs to the
-  project whose root is the nearest ancestor of the file. A buffer with no
-  file belongs to the project that was current when it was made. Buffers the
-  editor writes itself (`*messages*`, `*help*`, and the rest named like
-  that) belong to none and can be shown in any.
-- **No project.** Files outside every root belong to a built-in project
-  called "No project", which has no root, cannot be removed, and is what a
-  fresh editor shows. Its details sidebar is empty.
+  project whose root is the nearest ancestor of the file. A file under no
+  project's root, and a buffer with no file, belong to the project that was
+  current when they were opened: opening `~/.zshrc` while working in a
+  project does not take the user out of it. Buffers the editor writes
+  itself (`*messages*`, `*help*`, and the rest named like that) belong to
+  none and can be shown in any.
+- **Opening a file that is in another project** switches to that project
+  and shows it there. A buffer is only ever shown in its own project.
+- **No project.** A built-in project called "No project" has no root,
+  cannot be removed, and is what a fresh editor shows. What is opened while
+  it is current, and is under no root, belongs to it. Its details sidebar
+  is empty.
 - **Membership follows the file.** Saving a buffer under a new name moves
   it to the project its new place is in. Adding a project whose root
   contains files that are already open moves those buffers into it.
@@ -135,7 +146,7 @@ Consequences:
 | `project.switch` | Ask for a project by name, with completion. |
 | `project.next`, `project.previous` | Step through the project sidebar. |
 | `project.rename` | Change the name shown. |
-| `project.remove` | Take a project out of the list. Refused while it has unsaved buffers (section 12, question 3). Its buffers are killed; its files are not touched. |
+| `project.remove` | Take a project out of the list. Refused while it has unsaved buffers (W13). Its buffers are killed; its files are not touched. |
 
 ## 5. The workbench
 
@@ -158,7 +169,7 @@ Consequences:
 
 - The main area is what the frame is today: the window tree and the panels
   docked around it (ENGINE 8.5). A panel docked at the bottom is under the
-  main area only, between the sidebars (section 12, question 4).
+  main area only, between the sidebars (W14).
 - Each sidebar has a width, kept in ems, and can be hidden. Dragging its
   inner edge resizes it. Hidden sidebars give their space to the main area.
 - The engine holds which regions are shown and how wide, per frame, so that
@@ -297,7 +308,7 @@ capability.
 
 Not in this change: keeping the two sides level row for row. Lines wrap to
 different heights and one side has lines the other lacks, so level rows
-need filler the protocol has no way to ask for yet (section 12, question 1).
+need filler the protocol has no way to ask for yet (W11).
 
 ## 9. Session restore
 
@@ -370,7 +381,7 @@ commit, and the diff view.
 - **Not verifiable without the user:** how it looks and feels in a visible
   window.
 
-## 12. Risks and open questions
+## 12. Risks
 
 | Risk | Consequence | Mitigation |
 |---|---|---|
@@ -380,17 +391,40 @@ commit, and the diff view.
 | A full sync on every switch | A visible flash on a large layout | Measured in W-2; if it shows, only what differs is sent. |
 | The session file and the journal disagree | A restored buffer and a recovered one for the same file | Recovering replaces the text of the buffer that is already visiting the file, which is what `recover` does today. |
 
-Open questions, each with what is proposed:
+## 13. As built
 
-1. **Level rows in a diff.** Proposed: not in this change (section 8).
-   Scrolling together by matching lines first; filler rows are a protocol
-   addition to design on its own.
-2. **Does each Electron window have its own current project?** Proposed:
-   yes. A frame shows one project; two windows can show two.
-3. **Removing a project that has unsaved buffers.** Proposed: refused,
-   saying which buffers, until they are saved or killed.
-4. **Where a bottom panel sits.** Proposed: under the main area only, with
-   the sidebars running the full height beside it, as VS Code has it by
-   default.
-5. **What the centre of the meta bar shows.** Proposed: the project's name,
-   as a button that opens the command palette.
+### W-1: projects in the engine
+
+Built as sections 4.1 to 4.4 describe, with these details.
+
+- **Where things are.** `neomacs/workspace.py` has `Workspace`,
+  `Workspaces` (`ed.workspaces`) and the hooks `workspace_changed` and
+  `workspaces_changed`. `Frame.workspace` and `Frame.switch` are in
+  `neomacs/window.py`. The commands are in `neomacs/std/projects.py`.
+- **Keys.** `C-c p p` switches, `C-c p a` adds, `C-c p n` and `C-c p b` go
+  to the next and the previous. `C-x p` was taken by panels.
+- **`ed.show` is where a buffer is kept to its own project.** Showing a
+  buffer as a document switches the frame to the buffer's project first.
+  Opening a file, choosing a buffer, following a link in a traceback and
+  recovering unsaved text all go through it, so all of them behave alike.
+  Showing a buffer in a panel (help, messages, output) does not switch.
+- **A frame's table of views holds only the project on show.** The views
+  of a project that is put away are kept with its arrangement and are not
+  sent to the frontend. They stay attached to their buffers, so their
+  cursors follow edits made meanwhile.
+- **Killing a buffer** that a put-away window shows gives that window
+  another buffer of its own project, or `*scratch*`.
+- **A frame that goes** takes its arrangements with it.
+- **Names are kept distinct:** a second project whose directory has the
+  same name is called `name (2)`.
+- **`project.switch` lists the projects in their own order** until
+  something is typed, and then by how well they match.
+- **Not in W-1:** nothing of a project is remembered across a restart
+  (that is W-6), and the frame's title does not name the project (W-2).
+- **Verified:** 13 tests through the reference frontend, which lays out as
+  the terminal frontend does: the list; membership, with nested roots and
+  save-as; each project's windows, cursors and panels coming back; unsaved
+  work in a project that is not showing; prompts; killing and removing; two
+  frames with a project and a layout each. It was not run by hand in a real
+  terminal.
+

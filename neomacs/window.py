@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from neomacs.keymap import Keymap
     from neomacs.minibuffer import Minibuffer
     from neomacs.rpc.protocol import Connection
+    from neomacs.workspace import Workspace
 
 _view_ids = itertools.count(1)
 _frame_ids = itertools.count(1)
@@ -479,6 +480,10 @@ class Frame:
         self.root: Any = self.window
         # Panels by name (ENGINE 8.5).
         self.panels: dict[str, Any] = {}
+        # The project this frame is showing (WORKSPACE 4).  The window tree,
+        # the panels and the focus above are its; the layouts of the others
+        # are kept with them until they are shown again.
+        self.workspace: Workspace = editor.workspaces.none
         editor.frames[self.id] = self
         self.schedule_update()
 
@@ -497,6 +502,45 @@ class Frame:
     def draws_panels(self) -> bool:
         """Whether the frontend said it draws panels and splits when it attached."""
         return "panels" in self.capabilities
+
+    # -- projects (WORKSPACE 4.2) ------------------------------------------------
+
+    @provisional("0.1")
+    def switch(self, workspace: Workspace) -> None:
+        """Show another project: put away this one's windows, panels and
+        focus as they are, and bring back the other's as they were left."""
+        from neomacs.workspace import Arrangement, workspace_changed
+
+        if workspace is self.workspace:
+            return
+        # A prompt is a question asked in the project being left.
+        for minibuffer in list(self.minibuffers.values()):
+            minibuffer.close()
+        old = self.workspace
+        kept = dict(self.views)
+        old.arrangements[self.id] = Arrangement(
+            self.root, self.window, self.focus, self.panels, kept
+        )
+        self.views.clear()
+        found = workspace.arrangements.pop(self.id, None)
+        if found is None:
+            mine = self.editor.workspaces.buffers(workspace)
+            scratch = self.editor.buffers.get("*scratch*")
+            buffer = mine[-1] if mine else scratch
+            if buffer is None:
+                buffer = self.editor.buffers.new("*scratch*")
+            window = Window(self, buffer)  # which puts itself among the views
+            self.root, self.window, self.focus, self.panels = window, window, window, {}
+        else:
+            self.views.update(found.views)
+            self.root, self.window, self.focus = found.root, found.window, found.focus
+            self.panels = found.panels
+        self.workspace = workspace
+        self.prefix = None
+        self.clear_keys()
+        workspace_changed.run(self)
+        # Everything on screen is other views now: tell the frontend afresh.
+        self.full_sync()
 
     # -- the window tree (ENGINE 8.2) -------------------------------------------
 
@@ -916,6 +960,7 @@ class Frame:
             self._expiry_timer = None
         for view in list(self.views.values()):
             view.close()
+        self.editor.workspaces.forget_frame(self)
         self.editor.frames.pop(self.id, None)
         self.conn = None
 
