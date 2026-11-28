@@ -144,6 +144,10 @@ class Editor:
         from neomacs.workspace import Workspaces
 
         self.workspaces = Workspaces(self)
+        # The file tree (WORKSPACE 5.4): a number that goes up whenever the
+        # listings a frontend holds may be stale, and git's answers by root.
+        self.files_generation = 0
+        self.files_status: dict[Any, Any] = {}
         from neomacs.ext.registry import Extensions
 
         self.extensions = Extensions(self)

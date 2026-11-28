@@ -205,7 +205,8 @@ Consequences:
 - A file takes the colour of its git state (modified, untracked, staged,
   conflicted), and a directory that of the most pressing state inside it.
 - Click opens the file in the focused window. Up, down, left, right, Return
-  and typing a name's first letters work when the tree has the keyboard.
+  and typing a name's first letters work when the tree has the keyboard,
+  which `view.focus_files` (`s-E`) gives it and Escape takes away.
 - Context menu: New File, New Folder, Rename, Delete, Copy Path, Reveal.
   Delete moves to the system trash where there is one and asks first.
 - The tree is read again after a save, a file action, a git action, when
@@ -262,6 +263,9 @@ Engine to frontend, in `redraw`:
 | `["git", {"branch", "ahead", "behind", "staged", "changes", "untracked", "conflicted"} or null]` | The current project's git state; `null` when it is not in a repository. Each list is of `{"path", "state"}`. |
 | `["files_changed", workspace]` | Listings the frontend holds for this project may be out of date: ask again. |
 
+One notification outside `redraw`: `ui.focus("files")` asks the frontend to
+give the keyboard to its file tree.
+
 `win_info` gains `tabs`: `[{"title", "modified", "active", "path"}]`, the last
 only for a buffer with a file (section 7). It is absent when the `tabs`
 option is off.
@@ -270,7 +274,7 @@ Frontend to engine:
 
 | Method | Kind | Purpose |
 |---|---|---|
-| `files.list(workspace, directory)` | request | The entries of a directory: `[{"name", "kind", "git", "ignored"}]`. |
+| `files.list(workspace, directory)` | request | The entries of a directory, given relative to the project's root (`""` is the root): `[{"name", "kind", "git", "ignored"}]`. `kind` is `directory` or `file`; `git` is `conflicted`, `modified`, `staged`, `untracked` or null. |
 | `ui.region(name, shown, width)` | notification | The user hid, showed or resized a region. Either of the last two may be `null` for "as it is". |
 | `ui.status(side, index)` | notification | The user clicked an item of the status bar. The engine runs the command it put there, in the view the bar describes; the frontend names no command. |
 | `ui.tab(view, action, index, to)` | notification | `activate`, `close`, or `move` (to the place `to`) the tab at `index` of the window `view`. |
@@ -541,3 +545,57 @@ Built as section 7 describes, with these details.
 - **Not verified:** the strip with more tabs than fit, and the look in a
   visible window. Nothing was tried on Linux or Windows, where `s-w` and
   the others need the Super key.
+
+### W-4: the file tree
+
+Built as section 5.4 describes, with these details.
+
+- **Where things are.** Engine: `neomacs/filetree.py` (listings, and
+  saying when they are stale), `neomacs/git.py` (what git says has
+  changed), `neomacs/trash.py`, the commands in `neomacs/std/filetree.py`,
+  `files.list` in `neomacs/rpc/ui.py`. Electron:
+  `frontend/src/renderer/filetree.ts`.
+- **Commands.** `files.new_file`, `files.new_folder`, `files.rename`,
+  `files.delete`, `files.copy_path`, `files.refresh`, `view.focus_files`.
+  Each takes the path it is about, which is how the tree runs them; run by
+  name they are about the buffer's file or the directory it is in. Names
+  are asked for in the prompt area, not typed into the tree.
+- **Renaming** takes along the buffers visiting the file, or files under a
+  directory: they keep their text, unsaved changes included, and take the
+  new name. **Deleting** kills the buffers visiting what went, but keeps
+  any with unsaved changes.
+- **The trash** is `~/.Trash` on macOS and the freedesktop.org home trash
+  elsewhere on POSIX. A file trashed on macOS this way has no "Put Back" in
+  the Finder. Windows has no trash that can be reached without its shell:
+  there the question is "Delete ... for good?".
+- **Git state** comes from `git status --porcelain=v2`, run once for each
+  time the listings are said to be stale and shared by every directory
+  asked for. Staged and untracked files share one colour (a new face,
+  `added`); a directory shows a dot in the colour of the most pressing
+  state inside it.
+- **Only a project's own directories can be listed:** a path with `..` in
+  it, or an absolute one, is refused. Links are followed.
+- **A directory is cut short at 5000 entries,** and nothing says so.
+- **A click never gives the tree the keyboard:** it opens the file or the
+  folder and the text keeps it, as with every other click on the frame.
+  `view.focus_files` (`s-E`) gives the tree the keyboard; Escape, Return
+  on a file, any key with a modifier, or a press of the mouse gives it
+  back. While the tree has it the engine is not told of bare keys.
+- **Which folders are open** is kept by the frontend for each project,
+  for as long as the window lives. It is not the engine's yet, so W-6 has
+  nothing of it to restore.
+- **Stale** is said after a save, after a file command, when the window
+  gets the keyboard back, and by `files.refresh`. Not after a shell
+  command, nor a git one: there are none of those yet (W-5).
+- **Double-click to keep a tab** is not built: there are no preview tabs.
+- **Verified:** 12 engine tests (the order of a listing, what may be
+  listed, git state against a real repository made with `git`, a project
+  below the top of its repository, reading git's output, when stale is
+  said, each command against a temporary directory and a trash of the
+  test's own); 6 checks in `npm run smoke` (the tree and where it is,
+  reading again, colours, a click on a folder and on a file, the keyboard
+  in the tree with the engine hearing none of it, a tree for each
+  project, the new-file button). A picture was saved and looked at.
+- **Not verified:** the context menu, which is native and cannot be driven
+  off screen; the real trash on any system (the tests use a directory of
+  their own); the look in a visible window; anything on Linux or Windows.

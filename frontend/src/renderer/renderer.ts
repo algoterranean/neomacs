@@ -5,6 +5,7 @@ import { Chrome } from "./chrome.ts";
 import { FaceSheet } from "./faces.ts";
 import { overBudget, Perf } from "./perf.ts";
 import { applyTheme, themeVariables } from "./theme.ts";
+import type { FileEntry } from "./filetree.ts";
 import { Workbench } from "./workbench.ts";
 import type { Position } from "./geometry.ts";
 import { Input } from "./input.ts";
@@ -121,6 +122,7 @@ const workbench = new Workbench(root, chrome.main, chrome.strip, {
   chooseDirectory: () => host.chooseDirectory(),
   contextMenu: (items) => host.contextMenu(items),
   reveal: (path) => host.reveal(path),
+  listFiles: (workspace, directory) => rpc.call("files.list", workspace, directory) as unknown as Promise<FileEntry[]>,
   ownTitleBar: host.platform === "darwin",
 });
 
@@ -413,6 +415,14 @@ rpc.onNotification("clipboard.set", (which, content) => {
 });
 rpc.onRequest("clipboard.get", async (which) => ({ text: await host.clipboardRead(typeof which === "string" ? which : "clipboard") }));
 rpc.onNotification("ui.open_frame", (options) => host.openFrame(options ?? {}));
+// `view.focus_files`: the keyboard goes to the file tree until it gives it back.
+rpc.onNotification("ui.focus", (what) => {
+  if (what === "files") workbench.focusFiles();
+});
+// While the file tree has the keyboard, bare keys are its own.
+input.intercept = (event) => workbench.files.key(event);
+// A press of the mouse anywhere is the end of that.
+window.addEventListener("mousedown", () => workbench.files.setActive(false), true);
 host.onMenuCommand((command) => {
   if (command === "yank") {
     // The menu's Paste: what is on the clipboard, sent as a paste.

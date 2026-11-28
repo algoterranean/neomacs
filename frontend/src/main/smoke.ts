@@ -1238,6 +1238,140 @@ export async function runSmoke(
       await settle();
       check("workbench.the_palette_field_and_status_items_run_commands", palette === "M-x " && goto === "Go to line: ", { palette, goto });
 
+      // -- the file tree, in the upper half of the details sidebar (WORKSPACE 5.4) --
+      {
+        interface TreeRow { path: string; kind: string; depth: number; open: boolean; git: string | null; ignored: boolean; selected: boolean; color: string; rect: number[] }
+        interface Tree { active: boolean; requests: number; hint: string | null; rows: TreeRow[] }
+        const tree = async () => (await js<{ workbench: { tree: Tree } }>("window.neomacsDebug.snapshot()")).workbench.tree;
+        const paths = async () => (await tree()).rows.map((r) => r.path + (r.kind === "directory" ? "/" : ""));
+        const rowAt = async (path: string) => (await tree()).rows.find((r) => r.path === path) as TreeRow;
+        const clickRow = async (path: string) => {
+          const r = (await rowAt(path)).rect;
+          await mouseAt((r[0] ?? 0) + 40, (r[1] ?? 0) + (r[3] ?? 0) / 2);
+          await frames(4);
+          await settle();
+        };
+        // A key for the tree: the engine is not told of it, so there is nothing of the engine's to wait for.
+        const treeKey = async (keyCode: string) => {
+          contents.sendInputEvent({ type: "keyDown", keyCode });
+          contents.sendInputEvent({ type: "keyUp", keyCode });
+          await frames(4);
+        };
+        const sentKeys = () => js<number>("window.neomacsDebug.snapshot().input.keys");
+        const atFirst = await paths();
+        // Files made behind the editor's back are seen when it is told to look again.
+        await control.eval(
+          `import subprocess\n(_wd / 'alpha' / 'sub' / 'deep').mkdir(parents=True)\n(_wd / 'alpha' / 'sub' / 'inner.txt').write_text('inner\\n')\n` +
+            `(_wd / 'alpha' / 'sub' / 'deep' / 'leaf.txt').write_text('leaf\\n')\n(_wd / 'alpha' / 'zeta.txt').write_text('zeta\\n')\n` +
+            `(_wd / 'alpha' / '.gitignore').write_text('*.log\\n')\n(_wd / 'alpha' / 'noise.log').write_text('log\\n')\n` +
+            `subprocess.run(['git', 'init', '-q'], cwd=_wd / 'alpha', check=True)`,
+        );
+        const unseen = await paths();
+        await control.call("engine.call", "files.refresh", []);
+        await frames(6);
+        await settle();
+        const listed = await tree();
+        const filesPane = (await bench()).files;
+        const first = listed.rows[0]?.rect ?? [0, 0, 0, 0];
+        await shot("16-file-tree");
+        check(
+          "files.the_tree_lists_the_project_and_reads_it_again_when_told",
+          JSON.stringify(atFirst) === '["alpha.txt"]' && JSON.stringify(unseen) === '["alpha.txt"]' &&
+            JSON.stringify(listed.rows.map((r) => r.path)) === '["sub",".gitignore","alpha.txt","noise.log","zeta.txt"]' &&
+            listed.rows[0]?.kind === "directory" && listed.hint === null &&
+            (first[0] ?? -9) >= filesPane[0] - 1 && (first[1] ?? -9) >= filesPane[1] - 1 && (first[1] ?? 0) < filesPane[1] + filesPane[3],
+          { atFirst, unseen, rows: listed.rows.map((r) => r.path), first, filesPane },
+        );
+        const ignored = listed.rows.find((r) => r.path === "noise.log");
+        const fresh = listed.rows.find((r) => r.path === "zeta.txt");
+        check(
+          "files.rows_take_the_colour_of_their_git_state",
+          fresh?.git === "untracked" && fresh.color === "rgb(115, 201, 145)" && listed.rows[0]?.git === "untracked" && ignored?.ignored === true && ignored.git === null,
+          { fresh, ignored, sub: listed.rows[0] },
+        );
+
+        // A click opens a folder, and a file in the window; the keyboard stays with the text.
+        await clickRow("sub");
+        const opened = await paths();
+        await clickRow("sub/inner.txt");
+        const visited = { buffer: await pyText("_wf.window.buffer.name"), activeIsRoot: (await js<{ activeIsRoot: boolean }>("window.neomacsDebug.snapshot()")).activeIsRoot, active: (await tree()).active };
+        check(
+          "files.a_click_opens_a_folder_or_a_file",
+          JSON.stringify(opened) === '["sub/","sub/deep/","sub/inner.txt",".gitignore","alpha.txt","noise.log","zeta.txt"]' &&
+            (await rowAt("sub/inner.txt")).depth === 1 && visited.buffer === "'inner.txt'" && visited.activeIsRoot && !visited.active,
+          { opened, visited },
+        );
+
+        // With the keyboard, the arrows move through it and the engine hears none of it.
+        const keysBefore = await sentKeys();
+        const textBefore = await pyText("_wf.window.buffer.text");
+        await control.call("engine.call", "view.focus_files", []);
+        await frames(4);
+        const entered = await tree();
+        await treeKey("Home");
+        await treeKey("Right"); // sub is open already: into it
+        const into = (await tree()).rows.find((r) => r.selected)?.path;
+        await treeKey("Right"); // sub/deep: opened
+        await frames(6);
+        await treeKey("Down");
+        const leaf = (await tree()).rows.find((r) => r.selected)?.path;
+        await treeKey("Left"); // to the folder it is in
+        await treeKey("Left"); // which closes
+        const closed = await paths();
+        await treeKey("z"); // the first letters of a name
+        const typedTo = (await tree()).rows.find((r) => r.selected)?.path;
+        const quiet = (await sentKeys()) === keysBefore && (await pyText("_wf.window.buffer.text")) === textBefore;
+        await treeKey("Return");
+        await frames(4);
+        await settle();
+        const left = { buffer: await pyText("_wf.window.buffer.name"), active: (await tree()).active };
+        type("q");
+        await settle();
+        const typedInText = await pyText("_wf.window.buffer.text");
+        check(
+          "files.the_keyboard_moves_through_the_tree",
+          entered.active && into === "sub/deep" && leaf === "sub/deep/leaf.txt" &&
+            JSON.stringify(closed) === '["sub/","sub/deep/","sub/inner.txt",".gitignore","alpha.txt","noise.log","zeta.txt"]' &&
+            typedTo === "zeta.txt" && quiet && left.buffer === "'zeta.txt'" && !left.active && typedInText.includes("q"),
+          { entered: entered.active, into, leaf, closed, typedTo, quiet, left, typedInText },
+        );
+
+        // Each project has its own tree, and comes back with the folders it had open.
+        await control.call("engine.call", "project.switch", ["beta"]);
+        await frames(6);
+        await settle();
+        const beta = await paths();
+        await control.call("engine.call", "project.switch", ["alpha"]);
+        await frames(6);
+        await settle();
+        const alphaAgain = await paths();
+        check(
+          "files.each_project_has_its_own_tree",
+          JSON.stringify(beta) === '["beta.txt"]' && JSON.stringify(alphaAgain) === JSON.stringify(closed),
+          { beta, alphaAgain },
+        );
+
+        // The button for a new file asks for its name, and the tree shows it once made.
+        await clickRow("sub/deep");
+        const plus = await rectOf(".nm-files-pane .nm-pane-tool");
+        await mouseAt((plus[0] as number) + (plus[2] as number) / 2, (plus[1] as number) + (plus[3] as number) / 2);
+        await frames(4);
+        await settle();
+        const asked = (await ui()).chrome.prompt;
+        type("made.txt");
+        press("Return");
+        await frames(6);
+        await settle();
+        const made = { paths: await paths(), buffer: await pyText("_wf.window.buffer.name"), onDisk: await pyText("(_wd / 'alpha' / 'sub' / 'deep' / 'made.txt').is_file()") };
+        check(
+          "files.the_new_file_button_asks_and_the_tree_shows_it",
+          asked === "New file in sub/deep/: " && made.paths.includes("sub/deep/made.txt") && made.buffer === "'made.txt'" && made.onDisk === "True",
+          { asked, made },
+        );
+        await control.eval("ed.show(ed.buffers.visit(_wd / 'alpha' / 'alpha.txt'), focus=True)");
+        await settle();
+      }
+
       // Its colours are the theme's, and its regions are labelled.
       const look = () =>
         js<Record<string, string>>(

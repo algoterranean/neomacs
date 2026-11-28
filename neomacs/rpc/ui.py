@@ -194,6 +194,26 @@ def focus(conn: Connection, gained: bool) -> None:
         # The user has been somewhere else, and may have copied something
         # there: look, without anything waiting on the answer (KILLRING 5.2).
         editor.start_task(editor.kill_ring.capture(frame), name="clipboard", frame=frame)
+        if frame.draws_workbench:
+            # Files may have been made, changed or removed meanwhile too.
+            from neomacs import filetree
+
+            filetree.changed(editor)
+
+
+@method("files.list")
+async def files_list(conn: Connection, workspace: int, directory: str = "") -> Any:
+    """The entries of a directory of a project, for the file tree (WORKSPACE
+    6).  DIRECTORY is relative to the project's root, "" for the root."""
+    from neomacs import filetree
+
+    found = conn.editor.workspaces.get(int(workspace))
+    if found is None or found.root is None:
+        raise RpcError(f"no such project: {workspace}")
+    try:
+        return await filetree.list_directory(conn.editor, found, str(directory))
+    except (OSError, ValueError) as error:
+        raise RpcError(str(error)) from None
 
 
 @method("ui.region")

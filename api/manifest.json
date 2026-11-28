@@ -1752,6 +1752,13 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.text.buffer.BufferList.rename",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer', name: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.text.buffer.BufferList.visit",
    "kind": "method",
    "signature": "(self, path: 'Path | str') -> 'Buffer'",

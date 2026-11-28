@@ -47,6 +47,7 @@ DARK: dict[str, Attrs] = {
     "breakpoint": {"fg": "#f44747"},
     "debug-line": {"bg": "#3a3d16"},
     "warning": {"fg": "#cca700"},
+    "added": {"fg": "#73c991"},  # a file git has not seen, or has staged
     # What a graphical frontend draws around the text: lists and boxes that
     # float over it, notices, the lines between things, what is picked out.
     "popup": {"fg": "#d4d4d4", "bg": "#252526"},
@@ -87,6 +88,7 @@ LIGHT: dict[str, Attrs] = {
     "breakpoint": {"fg": "#cf222e"},
     "debug-line": {"bg": "#fff8c5"},
     "warning": {"fg": "#9a6700"},
+    "added": {"fg": "#1a7f37"},
     "popup": {"fg": "#1f2328", "bg": "#f6f8fa"},
     "popup-selected": {"bg": "#b6d7ff"},
     "toast": {"bg": "#eaeef2"},
@@ -110,7 +112,7 @@ DEFAULT_THEME = "dark"
 UI_FACES = (
     "selection", "cursor", "gutter", "placeholder", "modeline",
     "popup", "popup-selected", "toast", "chrome-border", "divider", "accent", "scrollbar",
-    "error", "warning", "metabar", "sidebar", "statusbar",
+    "error", "warning", "added", "metabar", "sidebar", "statusbar",
 )  # fmt: skip
 
 
