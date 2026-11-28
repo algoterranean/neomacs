@@ -2,6 +2,8 @@
 // This mirrors neomacs/frontends/model.py, which is the reference.
 
 // A text run, or an inline object standing for buffer text (an image, a minibuffer).
+import type { GitInfo } from "./gitpanel.ts";
+
 export type Run = [offset: number | null, text: string, face: number];
 export type ObjectRun = [offset: number | null, object: Record<string, unknown>];
 export type LineAttrs = { gutter?: Record<string, [string, number]>; [key: string]: unknown };
@@ -168,6 +170,8 @@ export class FrameModel {
   statusRight: StatusItem[] = [];
   /** How many times the engine has said file listings may be stale. */
   filesChanged = 0;
+  /** The current project's repository as git describes it; null when it is in none. */
+  git: GitInfo | null = null;
   faces = new Map<number, FaceAttrs>();
   // Images and other resources by id.  Drawing them is stage F3.
   resources = new Map<number, { kind: string; source: Record<string, unknown> }>();
@@ -249,6 +253,9 @@ export class FrameModel {
           break;
         case "regions":
           this.regions = a[0] as Record<string, RegionState>;
+          break;
+        case "git":
+          this.git = a[0] as GitInfo | null;
           break;
         case "files_changed":
           this.filesChanged += 1;

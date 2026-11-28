@@ -10,6 +10,7 @@
 // answers with new state; nothing here changes what is shown on its own.
 
 import { type FileEntry, FileTree } from "./filetree.ts";
+import { GitPanel } from "./gitpanel.ts";
 import type { FrameModel, RegionState, StatusItem, WorkspaceInfo } from "./model.ts";
 
 export interface WorkbenchHost {
@@ -65,6 +66,8 @@ export class Workbench {
   private drawn = { regions: "", workspaces: "", status: "", files: "" };
   /** The file tree, in the upper half of the details sidebar. */
   readonly files: FileTree;
+  /** The git panel, in the lower half. */
+  readonly git: GitPanel;
   private dragging: Sidebar | null = null;
 
   /** `main` is where the views go; `messages` is the message strip, which sits in the status bar. */
@@ -110,7 +113,6 @@ export class Workbench {
     project.append(this.heading("Projects"), this.projectList, add);
 
     // The details sidebar is split at half its height: files above, git below.
-    // The git half is empty until its stage (WORKSPACE W-5).
     const details = el("div", "nm-sidebar nm-details-sidebar", "Details sidebar");
     details.setAttribute("role", "complementary");
     this.files = new FileTree({
@@ -126,8 +128,14 @@ export class Workbench {
     const filesBody = el("div", "nm-pane-body");
     filesBody.append(this.files.element);
     files.append(filesHeading, filesBody);
+    this.git = new GitPanel({ command: (name, args) => host.command(name, args), refocus: () => host.refocus() });
     const git = el("div", "nm-details-pane nm-git-pane", "Git");
-    git.append(this.heading("Git"), el("div", "nm-pane-body"));
+    const gitHeading = this.heading("Git");
+    gitHeading.classList.add("nm-pane-heading");
+    gitHeading.append(this.git.tools);
+    const gitBody = el("div", "nm-pane-body");
+    gitBody.append(this.git.element);
+    git.append(gitHeading, gitBody);
     details.append(files, el("div", "nm-pane-divider"), git);
 
     const options = el("div", "nm-sidebar nm-options-sidebar", "Options sidebar");
@@ -161,7 +169,10 @@ export class Workbench {
     // text is typed into, and with it the input method.  Nothing here is
     // typed into, so the focus goes straight back.
     for (const region of [this.metaBar, project, details, options, this.statusBar]) {
-      region.addEventListener("mouseup", () => host.refocus());
+      region.addEventListener("mouseup", (event) => {
+        // The one thing here that is typed into keeps the keyboard it was given.
+        if (!(event.target instanceof HTMLTextAreaElement)) host.refocus();
+      });
       region.addEventListener("dragend", () => host.refocus());
     }
   }
@@ -223,6 +234,7 @@ export class Workbench {
     this.updateWorkspaces(frame.workspaces);
     this.updateStatus(frame.statusLeft, frame.statusRight);
     this.updateFiles(frame);
+    this.git.update(frame.git, frame.workspaces.some((w) => w.current && w.root !== null));
   }
 
   /** The file tree shows the current project, and reads it again when told it is stale. */
@@ -351,6 +363,7 @@ export class Workbench {
       files: rect(this.body.querySelector(".nm-files-pane") as Element),
       git: rect(this.body.querySelector(".nm-git-pane") as Element),
       tree: this.files.snapshot(),
+      gitPanel: this.git.snapshot(),
       centre: this.centre.textContent,
       toggles: Object.fromEntries([...this.toggles].map(([name, button]) => [name, button.classList.contains("nm-on")])),
       projects: [...this.projectList.children].map((row) => ({

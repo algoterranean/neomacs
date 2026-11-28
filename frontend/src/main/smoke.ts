@@ -1372,6 +1372,149 @@ export async function runSmoke(
         await settle();
       }
 
+      // -- the git panel, in the lower half of the details sidebar, and the diff (WORKSPACE 5.5, 8) --
+      {
+        interface PanelRow { path: string; letter: string; rect: number[]; actions: Record<string, number[]> }
+        interface PanelGroup { name: string; title: string; tool: number[] | null; rows: PanelRow[] }
+        interface Panel { hint: string | null; branch: string; message: string; messageRect: number[]; commitEnabled: boolean; commitRect: number[]; typing: boolean; groups: PanelGroup[] }
+        const panel = async () => (await js<{ workbench: { gitPanel: Panel } }>("window.neomacsDebug.snapshot()")).workbench.gitPanel;
+        const shape = async () => Object.fromEntries((await panel()).groups.map((g) => [g.name, g.rows.map((r) => `${r.letter} ${r.path}`)]));
+        const until = async (want: string, what: () => Promise<unknown>) => {
+          // What git says comes back when git has been asked: wait for it.
+          for (let i = 0; i < 100 && JSON.stringify(await what()) !== want; i++) await frames(3);
+          return JSON.stringify(await what());
+        };
+        const mid = (r: number[]) => [(r[0] ?? 0) + (r[2] ?? 0) / 2, (r[1] ?? 0) + (r[3] ?? 0) / 2] as [number, number];
+        const rowOf = async (group: string, path: string) => (await panel()).groups.find((g) => g.name === group)?.rows.find((r) => r.path === path) as PanelRow;
+        const gitEnv = `{**__import__('os').environ, 'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@example.invalid', 'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@example.invalid'}`;
+        // beta is in no repository; alpha's was made above, with nothing committed.
+        await control.call("engine.call", "project.switch", ["beta"]);
+        await frames(6);
+        await settle();
+        const noRepo = await until('"This project is not in a git repository."', async () => (await panel()).hint);
+        await control.call("engine.call", "project.switch", ["alpha"]);
+        await control.eval(
+          `import os\nfor _gk, _gv in ${gitEnv}.items(): os.environ[_gk] = _gv\n` +
+            `_g = lambda *a: subprocess.run(['git', *a], cwd=_wd / 'alpha', check=True, capture_output=True, text=True).stdout\n` +
+            `_g('checkout', '-q', '-b', 'main')\n(_wd / 'alpha' / 'story.txt').write_text(''.join(f'line {n}\\n' for n in range(1, 121)))\n` +
+            `_g('add', 'story.txt', '.gitignore')\n_g('commit', '-q', '-m', 'first')\n` +
+            `_gt = (_wd / 'alpha' / 'story.txt').read_text().split('\\n')\n_gt[4] = 'line five'\n_gt[79:79] = ['an added line', 'and another']\n(_wd / 'alpha' / 'story.txt').write_text('\\n'.join(_gt))\n` +
+            `for _gb in ed.workspaces.buffers(_wa): _gb.saved_tick = _gb.tick`,
+        );
+        await control.call("engine.call", "git.refresh", []);
+        const first = await until('{"changes":["M story.txt"]}', async () => ({ changes: (await shape())["changes"] }));
+        const opened = await panel();
+        const gitPane = (await bench()).git;
+        await shot("17-git-panel");
+        check(
+          "git.the_panel_lists_what_has_changed",
+          noRepo === '"This project is not in a git repository."' && first === '{"changes":["M story.txt"]}' && opened.branch === "main" && opened.hint === null &&
+            (opened.groups.find((g) => g.name === "untracked")?.rows.length ?? 0) >= 3 && !opened.groups.some((g) => g.name === "staged") &&
+            (opened.messageRect[1] ?? 0) >= gitPane[1] - 1 && !opened.commitEnabled,
+          { noRepo, first, branch: opened.branch, groups: await shape(), gitPane, message: opened.messageRect },
+        );
+
+        // The buttons on a row stage and unstage it.  (They show when the pointer is on the row.)
+        const hover = async (r: number[]) => {
+          contents.sendInputEvent({ type: "mouseMove", x: Math.round(mid(r)[0]), y: Math.round(mid(r)[1]) });
+          await frames(3);
+        };
+        let story = await rowOf("changes", "story.txt");
+        await hover(story.rect);
+        await mouseAt(...mid(story.actions["stage"] as number[]));
+        const staged = await until('["M story.txt"]', async () => (await shape())["staged"] ?? null);
+        const stagedInGit = await pyText("_g('diff', '--cached', '--name-only').split()");
+        story = await rowOf("staged", "story.txt");
+        await hover(story.rect);
+        await mouseAt(...mid(story.actions["unstage"] as number[]));
+        const unstaged = await until('["M story.txt"]', async () => (await shape())["changes"] ?? null);
+        check(
+          "git.a_rows_buttons_stage_and_unstage",
+          staged === '["M story.txt"]' && stagedInGit === "['story.txt']" && unstaged === '["M story.txt"]' && (await pyText("_g('diff', '--cached', '--name-only')")) === "''",
+          { staged, stagedInGit, unstaged },
+        );
+
+        // A click on a row opens its diff: two windows, the changed rows coloured from edge to edge.
+        await mouseAt((story.rect[0] ?? 0) + 30, mid((await rowOf("changes", "story.txt")).rect)[1]);
+        await frames(8);
+        await settle();
+        const sides = (await arrangement()).views.filter((v) => v.inPanel === null && !v.inline).sort((a, b) => (a.rect[0] ?? 0) - (b.rect[0] ?? 0));
+        const rowColours = await js<Record<string, string[]>>(
+          `Object.fromEntries([...document.querySelectorAll('.nm-window .nm-view')].map((v, i) => [i, [...new Set([...v.querySelectorAll('.nm-line')].map((l) => getComputedStyle(l).backgroundColor))]]))`,
+        );
+        const marks = await pyJson<{ old: number[]; fresh: number[] }>(
+          `{'old': sorted(_wf.diff.old_buffer.line_offset(s.start)[0] for s in _wf.diff.old_buffer.layer('diff')), 'fresh': sorted(_wf.diff.new_buffer.line_offset(s.start)[0] for s in _wf.diff.new_buffer.layer('diff'))}`,
+        );
+        await shot("18-diff");
+        check(
+          "git.a_click_on_a_row_opens_its_diff_side_by_side",
+          sides.length === 2 && sides[0]?.name === "*story.txt (staged)*" && sides[1]?.name === "story.txt" && (sides[0]?.rect[0] ?? 9) < (sides[1]?.rect[0] ?? 0) &&
+            Math.abs((sides[0]?.rect[1] ?? 0) - (sides[1]?.rect[1] ?? 9)) < 2 && sides[1]?.focused === true &&
+            JSON.stringify(marks) === '{"old":[5],"fresh":[5,80,81]}' &&
+            (rowColours["0"] ?? []).includes("rgb(59, 58, 28)") && (rowColours["1"] ?? []).includes("rgb(59, 58, 28)"),
+          { sides: sides.map((v) => [v.name, v.rect, v.focused]), marks, rowColours },
+        );
+
+        // Going to the next change brings both sides to it; scrolling one brings the other.
+        press("c", ["control"]);
+        press("g");
+        press("n");
+        await frames(10);
+        await settle();
+        const visible = async () =>
+          pyJson<{ old: [number, number]; fresh: [number, number]; line: number; match: number }>(
+            `{'old': list(_wf.diff.old.viewport[:2]), 'fresh': list(_wf.diff.new.viewport[:2]), 'line': _wf.diff.new.buffer.line_offset(_wf.diff.new.cursor.pos)[0], 'match': _wf.diff.matching_line(1, _wf.diff.new.viewport[0])}`,
+          );
+        const stepped = await visible();
+        const newSide = (await arrangement()).views.find((v) => v.name === "story.txt") as Shown;
+        await frames(30); // past the moment in which a side is taken to be following the other
+        contents.sendInputEvent({ type: "mouseWheel", x: Math.round((newSide.rect[0] ?? 0) + 100), y: Math.round((newSide.rect[1] ?? 0) + 100), deltaX: 0, deltaY: -900, canScroll: true });
+        await frames(30);
+        await settle();
+        const scrolled = await visible();
+        check(
+          "git.the_two_sides_of_a_diff_keep_together",
+          stepped.line === 80 && stepped.fresh[0] <= 80 && 80 <= stepped.fresh[1] && stepped.old[0] <= 80 && 78 <= stepped.old[1] &&
+            scrolled.fresh[0] > stepped.fresh[0] + 5 && scrolled.old[0] > stepped.old[0] + 5 && Math.abs(scrolled.old[0] - scrolled.match) <= 1,
+          { stepped, scrolled },
+        );
+        await control.call("engine.call", "git.close_diff", []);
+        await frames(6);
+        await settle();
+        const afterClose = (await arrangement()).views.filter((v) => v.inPanel === null && !v.inline).map((v) => v.name);
+
+        // The message box takes typing itself; with something staged and a message, Commit commits.
+        await control.call("engine.call", "git.stage", ["story.txt"]);
+        await until('["M story.txt"]', async () => (await shape())["staged"] ?? null);
+        const keysBefore = await js<number>("window.neomacsDebug.snapshot().input.keys");
+        const textBefore = await pyText("_wf.window.buffer.text");
+        const box = await panel();
+        await mouseAt(...mid(box.messageRect));
+        await frames(4);
+        const typingNow = (await panel()).typing;
+        for (const ch of "Tell the story") {
+          contents.sendInputEvent({ type: "keyDown", keyCode: ch === " " ? "Space" : ch });
+          contents.sendInputEvent({ type: "char", keyCode: ch });
+          contents.sendInputEvent({ type: "keyUp", keyCode: ch === " " ? "Space" : ch });
+        }
+        await frames(6);
+        const written = await panel();
+        const quiet = (await js<number>("window.neomacsDebug.snapshot().input.keys")) === keysBefore && (await pyText("_wf.window.buffer.text")) === textBefore;
+        await mouseAt(...mid(written.commitRect));
+        const committed = await until('"Tell the story"', async () => (await pyText("_g('log', '-1', '--format=%s').strip()")).slice(1, -1));
+        await until("null", async () => (await shape())["staged"] ?? null);
+        const done = await panel();
+        const back = (await js<{ activeIsRoot: boolean }>("window.neomacsDebug.snapshot()")).activeIsRoot;
+        check(
+          "git.the_message_box_and_the_commit_button",
+          JSON.stringify(afterClose) === '["story.txt"]' && !box.commitEnabled && typingNow && written.message === "Tell the story" && written.commitEnabled && quiet &&
+            committed === '"Tell the story"' && done.message === "" && !done.commitEnabled && !done.groups.some((g) => g.name === "staged" || g.name === "changes") && back,
+          { afterClose, typingNow, written: written.message, enabled: written.commitEnabled, quiet, committed, done: await shape(), back },
+        );
+        await control.eval("ed.show(ed.buffers.visit(_wd / 'alpha' / 'alpha.txt'), focus=True)");
+        await settle();
+      }
+
       // Its colours are the theme's, and its regions are labelled.
       const look = () =>
         js<Record<string, string>>(

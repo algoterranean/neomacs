@@ -412,6 +412,157 @@ body {
   opacity: 0.5;
 }
 
+/* The git panel (WORKSPACE 5.5). */
+.nm-git-branch {
+  font-size: 0.8em;
+  text-transform: none;
+  letter-spacing: 0;
+  align-self: center;
+  padding-right: 0.4em;
+  white-space: nowrap;
+}
+
+.nm-git-panel {
+  user-select: none;
+  -webkit-user-select: none;
+  padding-bottom: 0.6em;
+}
+
+.nm-git-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  padding: 0.2em 0.7em 0.5em;
+}
+
+.nm-git-message {
+  font: inherit;
+  color: var(--nm-fg, #d4d4d4);
+  background: var(--nm-bg, #1e1e1e);
+  border: 1px solid var(--nm-border, #454545);
+  border-radius: 3px;
+  padding: 0.3em 0.45em;
+  resize: vertical;
+  min-height: 2.6em;
+  box-sizing: border-box;
+  width: 100%;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.nm-git-message:focus {
+  outline: 1px solid var(--nm-accent, #0e639c);
+  outline-offset: -1px;
+}
+
+.nm-git-commit-button {
+  font: inherit;
+  color: #ffffff;
+  background: var(--nm-accent, #0e639c);
+  border: 0;
+  border-radius: 3px;
+  padding: 0.25em 0;
+  cursor: pointer;
+}
+
+.nm-git-commit-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.nm-git-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3em 0.7em 0.15em 0.9em;
+  font-size: 0.8em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.nm-git-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.12em 0.7em 0.12em 1.4em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.nm-git-row:hover {
+  background: color-mix(in srgb, var(--nm-sidebar-fg, #cccccc) 10%, transparent);
+}
+
+.nm-git-name {
+  flex: none;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nm-git-where {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.85em;
+  opacity: 0.55;
+}
+
+/* A row's buttons are there when the pointer is on it. */
+.nm-git-actions {
+  flex: none;
+  display: flex;
+  gap: 0.1em;
+  visibility: hidden;
+}
+
+.nm-git-row:hover .nm-git-actions {
+  visibility: visible;
+}
+
+.nm-git-action {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  padding: 0 0.4em;
+  cursor: pointer;
+}
+
+.nm-git-action:hover {
+  background: color-mix(in srgb, var(--nm-sidebar-fg, #cccccc) 20%, transparent);
+}
+
+.nm-git-letter {
+  flex: none;
+  width: 1em;
+  text-align: center;
+  font-size: 0.85em;
+}
+
+.nm-git-is-modified .nm-git-letter,
+.nm-git-is-renamed .nm-git-letter {
+  color: var(--nm-warning, #cca700);
+}
+
+.nm-git-is-added .nm-git-letter,
+.nm-git-is-untracked .nm-git-letter,
+.nm-git-is-copied .nm-git-letter {
+  color: var(--nm-added, #73c991);
+}
+
+.nm-git-is-deleted .nm-git-letter,
+.nm-git-is-conflicted .nm-git-letter {
+  color: var(--nm-error, #f14c4c);
+}
+
+.nm-git-is-deleted .nm-git-name {
+  text-decoration: line-through;
+}
+
 .nm-pane-divider {
   flex: none;
   height: 1px;

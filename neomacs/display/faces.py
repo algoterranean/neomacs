@@ -48,6 +48,10 @@ DARK: dict[str, Attrs] = {
     "debug-line": {"bg": "#3a3d16"},
     "warning": {"fg": "#cca700"},
     "added": {"fg": "#73c991"},  # a file git has not seen, or has staged
+    # The rows of a diff (WORKSPACE 8).
+    "diff-added": {"bg": "#203a26"},
+    "diff-removed": {"bg": "#472424"},
+    "diff-changed": {"bg": "#3b3a1c"},
     # What a graphical frontend draws around the text: lists and boxes that
     # float over it, notices, the lines between things, what is picked out.
     "popup": {"fg": "#d4d4d4", "bg": "#252526"},
@@ -89,6 +93,9 @@ LIGHT: dict[str, Attrs] = {
     "debug-line": {"bg": "#fff8c5"},
     "warning": {"fg": "#9a6700"},
     "added": {"fg": "#1a7f37"},
+    "diff-added": {"bg": "#dafbe1"},
+    "diff-removed": {"bg": "#ffebe9"},
+    "diff-changed": {"bg": "#fff8c5"},
     "popup": {"fg": "#1f2328", "bg": "#f6f8fa"},
     "popup-selected": {"bg": "#b6d7ff"},
     "toast": {"bg": "#eaeef2"},

@@ -7,8 +7,10 @@ for that often: a listing is read when the file tree is.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from neomacs import proc
 
@@ -18,6 +20,47 @@ STATES = ("conflicted", "modified", "staged", "untracked")
 _TIMEOUT = 10.0
 # Looking must not write to the repository, nor wait for a prompt.
 _ENV = {"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
+
+
+# What the letters of git's two-letter state mean.
+_LETTERS = {
+    "M": "modified", "T": "modified", "A": "added", "D": "deleted", "R": "renamed", "C": "copied",
+}  # fmt: skip
+
+
+@dataclass
+class Repository:
+    """A repository as `git status` describes it.  Paths are relative to its
+    top, with `/` between their parts.  A file changed both in the index and
+    since is in `staged` and in `changes`."""
+
+    top: Path
+    branch: str | None = None  # None when HEAD is detached
+    upstream: str | None = None
+    ahead: int = 0
+    behind: int = 0
+    staged: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    changes: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    untracked: list[str] = field(default_factory=list[str])
+    conflicted: list[str] = field(default_factory=list[str])
+
+    def describe(self, limit: int = 2000) -> dict[str, Any]:
+        """What a frontend is told (WORKSPACE 6).  A list longer than LIMIT is cut short."""
+
+        def rows(found: list[tuple[str, str]]) -> list[dict[str, str]]:
+            return [{"path": path, "state": state} for path, state in found[:limit]]
+
+        return {
+            "top": str(self.top),
+            "branch": self.branch,
+            "upstream": self.upstream,
+            "ahead": self.ahead,
+            "behind": self.behind,
+            "staged": rows(self.staged),
+            "changes": rows(self.changes),
+            "untracked": rows([(path, "untracked") for path in self.untracked]),
+            "conflicted": rows([(path, "conflicted") for path in self.conflicted]),
+        }
 
 
 @dataclass
@@ -31,6 +74,8 @@ class Status:
     # then so is everything in it, and git lists nothing inside.
     all_untracked: bool = False
     all_ignored: bool = False
+    # The repository as a whole, for the git panel (WORKSPACE 5.5).
+    repository: Repository | None = None
 
     def _under(self, path: str, names: set[str] | dict[str, str]) -> str | None:
         """The entry of NAMES that is PATH or a directory above it."""
@@ -61,17 +106,22 @@ class Status:
         return next((state for state in STATES if state in inside), None)
 
 
-def parse(output: str, prefix: str = "") -> Status:
-    """Read `git status --porcelain=v2 -z`.  Its paths are relative to the
-    top of the repository; those not under PREFIX are left out, and the rest
-    are given relative to it."""
+def parse(output: str, prefix: str = "", top: Path | None = None) -> Status:
+    """Read `git status --porcelain=v2 --branch -z`.  Its paths are relative
+    to the top of the repository.  The states of the result are of those
+    under PREFIX, given relative to it; its `repository` is of all of them."""
     status = Status()
+    repository = Repository(top if top is not None else Path())
+    status.repository = repository
     records = output.split("\0")
     index = 0
     while index < len(records):
         record = records[index]
         index += 1
         kind = record[:1]
+        if kind == "#":
+            _header(repository, record)
+            continue
         if kind == "1":
             fields = record.split(" ", 8)
             path, xy = fields[-1], fields[1]
@@ -84,7 +134,16 @@ def parse(output: str, prefix: str = "") -> Status:
         elif kind in ("?", "!"):
             path, xy = record[2:], kind * 2
         else:
-            continue  # a header, or the empty end
+            continue  # the empty end
+        if kind == "?":
+            repository.untracked.append(path)
+        elif kind == "u":
+            repository.conflicted.append(path)
+        elif kind in ("1", "2"):
+            if xy[:1] != ".":
+                repository.staged.append((path, _LETTERS.get(xy[:1], "modified")))
+            if xy[1:2] != ".":
+                repository.changes.append((path, _LETTERS.get(xy[1:2], "modified")))
         if path.endswith("/") and prefix.startswith(path):
             # A directory at or above PREFIX, listed whole.
             if kind == "!":
@@ -110,18 +169,49 @@ def parse(output: str, prefix: str = "") -> Status:
     return status
 
 
+def _header(repository: Repository, record: str) -> None:
+    words = record.split(" ")
+    if words[1:2] == ["branch.head"] and len(words) > 2:
+        repository.branch = None if words[2] == "(detached)" else words[2]
+    elif words[1:2] == ["branch.upstream"] and len(words) > 2:
+        repository.upstream = words[2]
+    elif words[1:2] == ["branch.ab"] and len(words) > 3:
+        with contextlib.suppress(ValueError):
+            repository.ahead, repository.behind = int(words[2]), -int(words[3])
+
+
 async def status(directory: Path) -> Status | None:
     """What has changed under DIRECTORY, or None if it is not in a repository
     (or git is not to be had)."""
-    base = ["git", "-C", str(directory)]
     try:
-        where = await proc.run([*base, "rev-parse", "--show-prefix"], env=_ENV, timeout=_TIMEOUT)
+        where = await git(directory, "rev-parse", "--show-prefix", "--show-toplevel")
         if where.returncode != 0:
             return None
-        asked = ["status", "--porcelain=v2", "-z", "--ignored=matching", "--untracked-files=normal"]
-        listed = await proc.run([*base, *asked], env=_ENV, timeout=_TIMEOUT)
+        listed = await git(
+            directory, "status", "--porcelain=v2", "--branch", "-z",
+            "--ignored=matching", "--untracked-files=all",
+        )  # fmt: skip
     except Exception:  # noqa: BLE001 - no git, no repository, no answer: no colours
         return None
     if listed.returncode != 0:
         return None
-    return parse(listed.stdout, where.stdout.strip("\n"))
+    prefix, _, top = where.stdout.rstrip("\n").partition("\n")
+    return parse(listed.stdout, prefix, Path(top) if top else directory)
+
+
+async def git(directory: Path, *args: str, input: str | None = None) -> proc.Completed:  # noqa: A002
+    """Run git in DIRECTORY and return what it did.  It never waits for the
+    user: a question it would ask is a failure."""
+    return await proc.run(
+        ["git", "-C", str(directory), *args], input=input, env=_ENV, timeout=_TIMEOUT
+    )
+
+
+async def show(directory: Path, what: str) -> str | None:
+    """The text of WHAT, as `git show` names things: `:path` is the index's
+    version of a file, `HEAD:path` the last commit's.  None if there is none."""
+    try:
+        found = await git(directory, "show", what)
+    except Exception:  # noqa: BLE001
+        return None
+    return found.stdout if found.returncode == 0 else None

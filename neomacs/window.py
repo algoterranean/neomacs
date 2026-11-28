@@ -267,6 +267,8 @@ class View:
                     self.frame.use_resource(run[1]["image"])
             for mark in line[0].get("gutter", {}).values():
                 self.frame.use_face(mark[1])
+            if "face" in line[0]:
+                self.frame.use_face(line[0]["face"])
             built.append(line)
         return built
 
@@ -557,6 +559,8 @@ class Frame:
 
         self.regions: dict[str, dict[str, Any]] = workbench.default_regions(editor)
         self.sent_workbench: dict[str, Any] = {}
+        # A side-by-side diff on show in this frame, if there is one (WORKSPACE 8).
+        self.diff: Any = None
         editor.frames[self.id] = self
         self.schedule_update()
 

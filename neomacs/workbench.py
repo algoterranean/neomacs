@@ -82,7 +82,8 @@ def describe_workspaces(frame: Frame) -> list[dict[str, Any]]:
     ]
 
 
-_QUIET = ("timer ", "clipboard", "exit of ")  # tasks that are the editor's own business
+# Tasks that are the editor's own business.
+_QUIET = ("timer ", "clipboard", "exit of ", "git status")
 _NEWLINES = {"\n": "LF", "\r\n": "CRLF", "\r": "CR"}
 
 
@@ -146,7 +147,13 @@ def describe_status(frame: Frame) -> tuple[list[dict[str, Any]], list[dict[str, 
     probe = workspace.root / "x" if workspace.root is not None else buffer.file
     branch = vcs.branch(probe)
     if branch:
-        left.append(_item(f"{vcs.BRANCH_SYMBOL} {branch}", title="Branch"))
+        text = f"{vcs.BRANCH_SYMBOL} {branch}"
+        git = editor.git_states.get(workspace.id)
+        if git is not None and git["branch"] == branch:
+            # How far it is from the branch it follows, when it follows one.
+            text += f" ↑{git['ahead']}" if git["ahead"] else ""
+            text += f" ↓{git['behind']}" if git["behind"] else ""
+        left.append(_item(text, title="Branch"))
     for info in editor.tasks:
         if info.name.startswith(_QUIET) or info.task.done():
             continue
@@ -183,6 +190,11 @@ def sync(frame: Frame, body: list[Any]) -> None:
         if frame.sent_workbench.get("files") is not None:
             body.append(["files_changed", frame.workspace.id])
         frame.sent_workbench["files"] = files
+    # What git says of the project's repository, once it has been asked.
+    git = frame.editor.git_states.get(frame.workspace.id)
+    if "git" not in frame.sent_workbench or git != frame.sent_workbench["git"]:
+        body.append(["git", git])
+        frame.sent_workbench["git"] = git
     status = describe_status(frame)
     if status != frame.sent_workbench.get("status"):
         body.append(["status", status[0], status[1]])

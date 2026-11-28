@@ -260,7 +260,7 @@ Engine to frontend, in `redraw`:
 | `["regions", {name: {"shown": bool, "width": ems}}]` | Which regions are shown: `meta`, `project`, `details`, `options`, `status`, and `bottom` for the bottom panel. The sidebars have a width. |
 | `["workspaces", [{"id", "name", "root", "current", "unsaved"}]]` | The project list, in order. |
 | `["status", left, right]` | The status bar's items at each end: `{"text", "command", "title"}`, the last two optional. Clicking an item with a `command` runs it. The middle of the bar is the `message` events there have always been. |
-| `["git", {"branch", "ahead", "behind", "staged", "changes", "untracked", "conflicted"} or null]` | The current project's git state; `null` when it is not in a repository. Each list is of `{"path", "state"}`. |
+| `["git", {"top", "branch", "upstream", "ahead", "behind", "staged", "changes", "untracked", "conflicted"} or null]` | The repository the current project is in; `null` when it is in none, or git has not answered yet. Each list is of `{"path", "state"}`, the path from the repository's `top`; a state is `modified`, `added`, `deleted`, `renamed`, `copied`, `untracked` or `conflicted`. |
 | `["files_changed", workspace]` | Listings the frontend holds for this project may be out of date: ask again. |
 
 One notification outside `redraw`: `ui.focus("files")` asks the frontend to
@@ -599,3 +599,76 @@ Built as section 5.4 describes, with these details.
 - **Not verified:** the context menu, which is native and cannot be driven
   off screen; the real trash on any system (the tests use a directory of
   their own); the look in a visible window; anything on Linux or Windows.
+
+### W-5: git
+
+Built as sections 5.5 and 8 describe, with these details.
+
+- **Where things are.** Engine: `neomacs/git.py` (reading `git status`,
+  running git), `neomacs/diff.py` (the two sides of a diff), the commands
+  in `neomacs/std/git.py`; `neomacs/filetree.py` asks git and keeps the
+  answer for the tree and the panel both. Electron:
+  `frontend/src/renderer/gitpanel.ts`.
+- **Commands and keys.** `git.stage` (`C-c g s`), `git.unstage`
+  (`C-c g u`), `git.stage_all`, `git.unstage_all`, `git.discard`,
+  `git.commit` (`C-c g c`), `git.refresh`, `git.diff` (`C-c g d`),
+  `git.next_change` (`C-c g n`), `git.previous_change` (`C-c g p`),
+  `git.close_diff` (`C-c g q`). Run by name they are about the buffer's
+  file. They work in every frontend.
+- **The panel is about the whole repository** the project's root is in,
+  not only the part under the root, since a commit is of everything
+  staged. Paths are from the repository's top.
+- **One `git status` serves the tree and the panel.** It is run in the
+  background whenever the file listings are said to be stale, and the
+  frontend is sent the answer when it differs. Until git has answered, the
+  panel is told `null`, as for no repository.
+- **A fourth group, Merge Conflicts,** is shown above Staged when there
+  are any. A click on one opens the file; staging it marks it resolved.
+- **Discarding** a file git knows runs `git checkout -- path`, and a
+  buffer visiting it takes the file's text, its unsaved changes going
+  too. A file git has never seen goes to the trash, as `files.delete`
+  sends it.
+- **Committing** runs `git commit -F -` with the message. Git is never
+  let ask a question: one it would ask (a passphrase, an editor) is a
+  failure, and what it said is the message shown. Nothing is pushed or
+  pulled; there are no commands for that.
+- **The message box is the one place in the workbench that is typed
+  into.** While it has the keyboard the engine is not told of keys;
+  Escape, or a press of the mouse elsewhere, gives the keyboard back.
+  `git.commit` by name asks for the message in a prompt instead.
+- **The diff.** The file stays in the window it was shown in, which keeps
+  its tabs, and the old version gets a window of its own at its left,
+  holding a read-only buffer (`*name (staged)*`, `*name (last commit)*`)
+  in the file's mode. One diff at a time in a frame: another takes its
+  place. `git.close_diff` removes the old side's window.
+- **Marks** are a face for the whole row (`diff-added`, `diff-removed`,
+  `diff-changed`), which is a new line attribute, `face`, that a frontend
+  may ignore; and a sign in the `signs` gutter column where one is shown.
+  They are worked out again 0.3 s after the last edit. Two sides of more
+  than 40,000 lines together are not compared.
+- **A changed block is marked whole:** which words within a line differ
+  is not shown.
+- **Scrolling** one side brings the other to the matching line at its
+  top. A side that has just been brought along is not taken to be the
+  user scrolling for 0.3 s.
+- **The diff ends** when either window is closed or shows another buffer.
+  That is noticed after the next command, so a tab closed with the mouse
+  ends it only once a key is pressed.
+- **Ahead and behind** are in the panel's heading and beside the branch in
+  the status bar.
+- **A file that was deleted** has no diff: there is no file to put at the
+  right.
+- **Verified:** 13 engine tests, every repository made with real git: what
+  the panel is told (staged, changed, deleted, untracked, a merge
+  conflict, ahead of an upstream), each command, a commit's message and
+  contents read back with `git log` and `git show`, the diff's marks
+  against the hunks `git diff -U0` reports, stepping, scrolling, the
+  staged diff, and what ends one. 5 checks in `npm run smoke` with real
+  clicks and keys: the panel's lists, a row's stage and unstage buttons, a
+  click opening the diff with its rows coloured, the two sides keeping
+  together, typing a message and committing. Pictures were saved and
+  looked at.
+- **Not verified:** the discard button and the stage-all buttons in the
+  Electron window (their commands are tested in the engine); a commit
+  that needs signing, or hooks; very large repositories; the look in a
+  visible window; anything on Linux or Windows.
