@@ -37,6 +37,8 @@ export class Input {
   private context: EditContextLike | null = null;
   private composing = false;
   keysSent = 0;
+  /** Asked about every key before it is sent: true means it was taken, and the engine is not told. */
+  intercept: ((event: KeyboardEvent) => boolean) | null = null;
   textsSent = 0;
 
   constructor(
@@ -54,6 +56,12 @@ export class Input {
       "keydown",
       (event) => {
         const began = performance.now();
+        if (this.intercept?.(event)) {
+          // A widget of the frontend's own has the keyboard for now.
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         const key = translateKey(event, options);
         if (key === null) return; // a bare modifier, or the input method's business
         event.preventDefault();

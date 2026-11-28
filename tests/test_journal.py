@@ -244,7 +244,8 @@ def test_a_file_that_changed_meanwhile_is_pointed_out(tmp_path: Path) -> None:
         for name in ("same.txt", "changed.txt", "deleted.txt"):
             ui.open(tmp_path / name)
             ui.type("edit ")
-        wait_for(lambda: len(texts(data)) == 3)
+        # All of what was typed, not the entry as it was part of the way through.
+        wait_for(lambda: list(texts(data).values()) == ["edit x\n"] * 3)
         crash(ui)
     (tmp_path / "changed.txt").write_text("somebody else wrote this\n")
     (tmp_path / "deleted.txt").unlink()

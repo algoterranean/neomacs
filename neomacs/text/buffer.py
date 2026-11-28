@@ -618,6 +618,15 @@ class BufferList:
         return buffer
 
     @provisional("0.1")
+    def rename(self, buffer: Buffer, name: str) -> None:
+        """Call BUFFER NAME, made unique if another has it."""
+        if self._buffers.get(buffer.name) is not buffer or name == buffer.name:
+            return
+        del self._buffers[buffer.name]
+        buffer.name = self._unique(name)
+        self._buffers[buffer.name] = buffer
+
+    @provisional("0.1")
     def kill(self, buffer: Buffer) -> None:
         if self._buffers.get(buffer.name) is buffer:
             buffer_killed.run(buffer, buffer=buffer)

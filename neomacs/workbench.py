@@ -177,6 +177,12 @@ def sync(frame: Frame, body: list[Any]) -> None:
     if workspaces != frame.sent_workbench.get("workspaces"):
         body.append(["workspaces", workspaces])
         frame.sent_workbench["workspaces"] = workspaces
+    # The file tree asks for its listings; it is told here when to ask again.
+    files = (frame.workspace.id, frame.editor.files_generation)
+    if files != frame.sent_workbench.get("files"):
+        if frame.sent_workbench.get("files") is not None:
+            body.append(["files_changed", frame.workspace.id])
+        frame.sent_workbench["files"] = files
     status = describe_status(frame)
     if status != frame.sent_workbench.get("status"):
         body.append(["status", status[0], status[1]])

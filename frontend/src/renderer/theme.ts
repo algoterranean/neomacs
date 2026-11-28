@@ -22,6 +22,7 @@ const SOURCES: [string, string, "fg" | "bg"][] = [
   ["--nm-scroll", "scrollbar", "fg"],
   ["--nm-error", "error", "fg"],
   ["--nm-warning", "warning", "fg"],
+  ["--nm-added", "added", "fg"],
   ["--nm-meta", "metabar", "bg"],
   ["--nm-meta-fg", "metabar", "fg"],
   ["--nm-sidebar", "sidebar", "bg"],

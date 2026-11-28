@@ -304,6 +304,114 @@ body {
   overflow: auto;
 }
 
+/* A pane's heading with its buttons at the right. */
+.nm-pane-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nm-pane-tools {
+  display: flex;
+  gap: 0.2em;
+  font-size: 1.25em; /* the heading is small; its buttons are not */
+  letter-spacing: 0;
+}
+
+.nm-pane-tool {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  padding: 0 0.35em;
+  cursor: pointer;
+}
+
+.nm-pane-tool:hover {
+  background: color-mix(in srgb, var(--nm-sidebar-fg, #cccccc) 15%, transparent);
+}
+
+.nm-pane-hint {
+  padding: 0.6em 0.9em;
+  opacity: 0.6;
+  white-space: normal;
+}
+
+/* The file tree (WORKSPACE 5.4). */
+.nm-file-tree {
+  min-height: 100%;
+  padding-bottom: 0.6em;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.nm-file {
+  display: flex;
+  align-items: center;
+  padding: 0.12em 0.6em 0.12em 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.nm-file:hover {
+  background: color-mix(in srgb, var(--nm-sidebar-fg, #cccccc) 10%, transparent);
+}
+
+.nm-file.nm-selected {
+  background: color-mix(in srgb, var(--nm-sidebar-fg, #cccccc) 16%, transparent);
+}
+
+/* The tree has the keyboard: the row the arrows are on stands out. */
+.nm-file-tree.nm-keyboard .nm-file.nm-selected {
+  background: var(--nm-selected, #094771);
+  outline: 1px solid var(--nm-accent, #0e639c);
+  outline-offset: -1px;
+}
+
+.nm-file-twist {
+  flex: none;
+  width: 1.1em;
+  text-align: center;
+  opacity: 0.7;
+}
+
+.nm-file-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nm-file-mark {
+  flex: none;
+  padding-left: 0.6em;
+  font-size: 0.8em;
+  opacity: 0.9;
+}
+
+.nm-file.nm-git-modified .nm-file-name,
+.nm-file.nm-git-modified .nm-file-mark {
+  color: var(--nm-warning, #cca700);
+}
+
+.nm-file.nm-git-staged .nm-file-name,
+.nm-file.nm-git-staged .nm-file-mark,
+.nm-file.nm-git-untracked .nm-file-name,
+.nm-file.nm-git-untracked .nm-file-mark {
+  color: var(--nm-added, #73c991);
+}
+
+.nm-file.nm-git-conflicted .nm-file-name,
+.nm-file.nm-git-conflicted .nm-file-mark {
+  color: var(--nm-error, #f14c4c);
+}
+
+.nm-file.nm-file-ignored {
+  opacity: 0.5;
+}
+
 .nm-pane-divider {
   flex: none;
   height: 1px;

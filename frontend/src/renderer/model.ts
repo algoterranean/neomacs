@@ -166,6 +166,8 @@ export class FrameModel {
   workspaces: WorkspaceInfo[] = [];
   statusLeft: StatusItem[] = [];
   statusRight: StatusItem[] = [];
+  /** How many times the engine has said file listings may be stale. */
+  filesChanged = 0;
   faces = new Map<number, FaceAttrs>();
   // Images and other resources by id.  Drawing them is stage F3.
   resources = new Map<number, { kind: string; source: Record<string, unknown> }>();
@@ -247,6 +249,9 @@ export class FrameModel {
           break;
         case "regions":
           this.regions = a[0] as Record<string, RegionState>;
+          break;
+        case "files_changed":
+          this.filesChanged += 1;
           break;
         case "workspaces":
           this.workspaces = a[0] as WorkspaceInfo[];

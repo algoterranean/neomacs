@@ -9,6 +9,7 @@
 // status bar.  Everything a click does is a command sent to the engine, which
 // answers with new state; nothing here changes what is shown on its own.
 
+import { type FileEntry, FileTree } from "./filetree.ts";
 import type { FrameModel, RegionState, StatusItem, WorkspaceInfo } from "./model.ts";
 
 export interface WorkbenchHost {
@@ -26,6 +27,8 @@ export interface WorkbenchHost {
   contextMenu(items: { id: string; label: string }[]): Promise<string | null>;
   /** Show a path in the system's file manager. */
   reveal(path: string): void;
+  /** The entries of a directory of a project, for the file tree. */
+  listFiles(workspace: number, directory: string): Promise<FileEntry[]>;
   /** The window's title bar is the meta bar, with the window's buttons at its left. */
   ownTitleBar: boolean;
 }
@@ -59,7 +62,9 @@ export class Workbench {
   private statusBar: HTMLDivElement;
   private statusLeft: HTMLDivElement;
   private statusRight: HTMLDivElement;
-  private drawn = { regions: "", workspaces: "", status: "" };
+  private drawn = { regions: "", workspaces: "", status: "", files: "" };
+  /** The file tree, in the upper half of the details sidebar. */
+  readonly files: FileTree;
   private dragging: Sidebar | null = null;
 
   /** `main` is where the views go; `messages` is the message strip, which sits in the status bar. */
@@ -105,11 +110,22 @@ export class Workbench {
     project.append(this.heading("Projects"), this.projectList, add);
 
     // The details sidebar is split at half its height: files above, git below.
-    // Both are empty until their stages (WORKSPACE W-4, W-5).
+    // The git half is empty until its stage (WORKSPACE W-5).
     const details = el("div", "nm-sidebar nm-details-sidebar", "Details sidebar");
     details.setAttribute("role", "complementary");
+    this.files = new FileTree({
+      list: (workspace, directory) => host.listFiles(workspace, directory),
+      command: (name, args) => host.command(name, args),
+      contextMenu: (items) => host.contextMenu(items),
+      reveal: (path) => host.reveal(path),
+    });
     const files = el("div", "nm-details-pane nm-files-pane", "Files");
-    files.append(this.heading("Files"), el("div", "nm-pane-body"));
+    const filesHeading = this.heading("Files");
+    filesHeading.classList.add("nm-pane-heading");
+    filesHeading.append(this.files.tools);
+    const filesBody = el("div", "nm-pane-body");
+    filesBody.append(this.files.element);
+    files.append(filesHeading, filesBody);
     const git = el("div", "nm-details-pane nm-git-pane", "Git");
     git.append(this.heading("Git"), el("div", "nm-pane-body"));
     details.append(files, el("div", "nm-pane-divider"), git);
@@ -206,6 +222,23 @@ export class Workbench {
     this.updateRegions(frame.regions);
     this.updateWorkspaces(frame.workspaces);
     this.updateStatus(frame.statusLeft, frame.statusRight);
+    this.updateFiles(frame);
+  }
+
+  /** The file tree shows the current project, and reads it again when told it is stale. */
+  private updateFiles(frame: FrameModel): void {
+    const current = frame.workspaces.find((w) => w.current) ?? null;
+    this.files.setWorkspace(current);
+    const key = `${frame.resets}:${frame.filesChanged}`;
+    if (key === this.drawn.files) return;
+    const first = this.drawn.files === "";
+    this.drawn.files = key;
+    if (!first) this.files.refresh();
+  }
+
+  /** Give the keyboard to the file tree (`view.focus_files`). */
+  focusFiles(): void {
+    this.files.setActive(true);
   }
 
   private updateRegions(regions: Record<string, RegionState>): void {
@@ -317,6 +350,7 @@ export class Workbench {
       statusPlain: this.statusBar.classList.contains("nm-status-plain"),
       files: rect(this.body.querySelector(".nm-files-pane") as Element),
       git: rect(this.body.querySelector(".nm-git-pane") as Element),
+      tree: this.files.snapshot(),
       centre: this.centre.textContent,
       toggles: Object.fromEntries([...this.toggles].map(([name, button]) => [name, button.classList.contains("nm-on")])),
       projects: [...this.projectList.children].map((row) => ({

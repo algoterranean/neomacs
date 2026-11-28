@@ -100,6 +100,7 @@ class FrameModel:
         self.regions: dict[str, dict[str, Any]] = {}
         self.workspaces: list[dict[str, Any]] = []
         self.status: tuple[list[dict[str, Any]], list[dict[str, Any]]] = ([], [])
+        self.files_changed = 0  # times told that file listings may be stale
         # Minibuffers shown outside the text: view id -> (host, options).
         self.minibuffers: dict[int, tuple[dict[str, Any], dict[str, Any]]] = {}
         self.popup: dict[str, Any] | None = None
@@ -202,6 +203,8 @@ class FrameModel:
                 self.workspaces = args[0]
             elif name == "status":
                 self.status = (args[0], args[1])
+            elif name == "files_changed":
+                self.files_changed += 1
             elif name == "focus":
                 self.focus = args[0]
                 if self.focus in self.windows():
