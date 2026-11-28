@@ -1,0 +1,396 @@
+# Projects and the workbench design
+
+Status: draft 1, 2026-11-27. Nothing here is built. Section 2 holds the
+decisions taken; section 12 lists what is still open.
+
+This describes two things that arrive together: **projects**, each with its
+own buffers, windows and layout, and the **workbench**, the frame around the
+main area in the Electron frontend that makes it look and work like VS Code:
+a meta bar, three sidebars and a status bar, laid out as `CLAUDE.md` names
+them. It assumes ENGINE.md (4, 8) and FRONTEND.md (5, 13).
+
+## 1. Goals and non-goals
+
+Goals:
+
+- Several projects open in one editor, switched from the project sidebar.
+  Each keeps its own open buffers, window splits, tabs and panels, and comes
+  back as it was left.
+- A frame a VS Code user finds their way around: files in a tree, changes in
+  a git panel, tabs over each editor, one status bar, a command palette in
+  the title bar.
+- Everything a sidebar does is a command, so a key or a line of Python can
+  do it too.
+- What was open yesterday is open today.
+
+Non-goals, in this change (W6):
+
+- Quick open by file name, and search across a project.
+- An integrated terminal, language servers, a settings screen, a minimap,
+  breadcrumbs, an extensions marketplace view.
+- Watching the disk for changes (ENGINE 16 defers it).
+- The workbench in the terminal frontend. It gets the project commands
+  through prompts, and nothing is taken away from it.
+
+## 2. Decisions taken
+
+All by the user, 2026-11-27, unless a reason says otherwise.
+
+| # | Decision | Reason |
+|---|---|---|
+| W1 | The sidebars are native Electron widgets, not buffers shown in regions. | Closest to how VS Code feels: rows that hover, buttons on a row, context menus. |
+| W2 | The engine owns what the sidebars show and do: the project list, directory listings, git state and every action. The frontend draws and asks. | One source of truth; commands, keys and Python reach the same actions as the mouse (ENGINE D5 and D17 are the same split). |
+| W3 | The details sidebar is split at half its height: the file tree above, git status below. The project sidebar lists projects. | |
+| W4 | Modelines stay. The status bar is one strip for the frame and shows frame-wide things. | `CLAUDE.md`: the status bar is not the modeline. |
+| W5 | Editor tabs are per window, as in VS Code. | |
+| W6 | In scope: tabs, git actions with side-by-side diffs, session restore. Out: section 1's non-goals. | |
+| W7 | The meta bar holds a command palette field and toggles for the sidebars. | |
+| W8 | The options sidebar is built as a region that can be shown and hidden, and is empty. | Its contents are to be decided later. |
+| W9 | One engine holds every project. The kill ring, configuration, extensions and key bindings are shared. | Proposed here. Switching is then instant and nothing has to be handed between processes. |
+| W10 | The user-facing word is "project". In engine code the class is `Workspace`. | `neomacs/project.py` already means a directory's `.neomacs/settings.toml` (ENGINE D31). |
+
+## 3. Words
+
+| Word | Meaning |
+|---|---|
+| project | What the user sees: a directory, and what is open in it. |
+| `Workspace` | The engine's object for a project. |
+| arrangement | One frame's layout for one project: the window tree, each window's tabs, the panels, which view has the keyboard. |
+| region | A fixed part of the frame: meta bar, project sidebar, details sidebar, main area, options sidebar, status bar. The names are `CLAUDE.md`'s and are used exactly, in identifiers and CSS classes too. |
+| workbench | The regions together. A capability a frontend claims (4.1). |
+
+`layout.ts` has a class `Workspace` today, the arranger of the main area. It
+is renamed `MainArea`, so the word has one meaning.
+
+## 4. Projects
+
+### 4.1 The model
+
+```python
+ed.workspaces                  # every project, in sidebar order
+ed.workspaces.add(path)        # make a directory a project
+ed.workspaces.remove(ws)
+ed.workspaces.of(buffer)       # the project a buffer belongs to
+frame.workspace                # the project this frame is showing
+frame.switch(ws)
+```
+
+A `Workspace` has an id, a name (the directory's name unless renamed), a
+root directory, and for each frame an arrangement.
+
+- **Where a buffer belongs.** A buffer visiting a file belongs to the
+  project whose root is the nearest ancestor of the file. A buffer with no
+  file belongs to the project that was current when it was made. Buffers the
+  editor writes itself (`*messages*`, `*help*`, and the rest named like
+  that) belong to none and can be shown in any.
+- **No project.** Files outside every root belong to a built-in project
+  called "No project", which has no root, cannot be removed, and is what a
+  fresh editor shows. Its details sidebar is empty.
+- **Membership follows the file.** Saving a buffer under a new name moves
+  it to the project its new place is in. Adding a project whose root
+  contains files that are already open moves those buffers into it.
+- **Nested roots.** The nearest root wins, as with project settings
+  (EXTENSIONS 8.1). A project's settings file and a project in this sense
+  are found independently: one is a file in a directory, the other is a
+  directory the user added.
+
+### 4.2 Switching
+
+`frame.switch(ws)`:
+
+1. Stores the frame's window tree, panels, focused view and main window as
+   the old project's arrangement for this frame.
+2. Loads the new project's arrangement for this frame; if it has none, a
+   single window on the project's most recent buffer, or an empty one.
+3. Sends the frontend everything again (`full_sync`, ENGINE 4.6).
+
+Consequences:
+
+- Views of a project that is not showing stay alive. Their selections
+  follow edits, as any view's do, so a buffer shared between two projects'
+  arrangements (an editor buffer such as `*messages*`) is safe.
+- Unsaved buffers of a project that is not showing stay open, stay unsaved,
+  and stay in the recovery journal (ENGINE 11.1).
+- A command running in one project that switches away keeps its pinned view
+  and buffer (ENGINE 7.7); only what the frame shows changes.
+- Prompts do not survive a switch: an open prompt is cancelled first.
+- Timers, tasks and processes belong to the editor, not to a project, and
+  carry on.
+
+### 4.3 What narrows to the project
+
+- `buffers.switch` offers the current project's buffers and the editor's
+  own. With a prefix argument it offers every buffer; choosing one from
+  another project switches to that project.
+- Tabs (section 7) list only buffers of the window's project.
+- `files.find` starts in the project's root, not the engine's working
+  directory.
+- `shell_command` runs in the project's root when the buffer has no file.
+
+### 4.4 Commands
+
+| Command | Does |
+|---|---|
+| `project.add` | Ask for a directory and make it a project; switch to it. |
+| `project.switch` | Ask for a project by name, with completion. |
+| `project.next`, `project.previous` | Step through the project sidebar. |
+| `project.rename` | Change the name shown. |
+| `project.remove` | Take a project out of the list. Refused while it has unsaved buffers (section 12, question 3). Its buffers are killed; its files are not touched. |
+
+## 5. The workbench
+
+### 5.1 Regions
+
+```
++-----------------------------------------------------------------------+
+| meta bar                                                              |
++----------+----------+--------------------------------------+----------+
+|          | files    |  tab  tab  tab                       |          |
+| project  |          |                                      | options  |
+| sidebar  +----------+             main area                | sidebar  |
+|          | git      |                                      |          |
+|          |          +--------------------------------------+          |
+|          |          |  bottom panel                        |          |
++----------+----------+--------------------------------------+----------+
+| status bar                                                            |
++-----------------------------------------------------------------------+
+```
+
+- The main area is what the frame is today: the window tree and the panels
+  docked around it (ENGINE 8.5). A panel docked at the bottom is under the
+  main area only, between the sidebars (section 12, question 4).
+- Each sidebar has a width, kept in ems, and can be hidden. Dragging its
+  inner edge resizes it. Hidden sidebars give their space to the main area.
+- The engine holds which regions are shown and how wide, per frame, so that
+  a command or a key can toggle one: `view.toggle_project_sidebar`,
+  `view.toggle_details_sidebar`, `view.toggle_options_sidebar`,
+  `view.toggle_bottom_panel`. The frontend reports a drag.
+
+### 5.2 Meta bar
+
+- On macOS it is the window's title bar: the native bar is hidden, the
+  traffic lights sit inset at its left, and the bar drags the window. On
+  other platforms it is a strip under the native frame.
+- Centre: a field showing the project's name. Clicking it, or `s-P`, opens
+  the command palette (`execute_command`, which is the prompt that exists).
+- Right: a toggle button for each sidebar and for the bottom panel, lit
+  when the region is shown.
+
+### 5.3 Project sidebar
+
+- One row for each project: its name, and a dot when it has unsaved
+  buffers. The current one is marked. "No project" is last.
+- Click switches. A "+" at the bottom opens the system's directory dialog
+  and runs `project.add`. A row's context menu has Rename, Remove, and
+  Reveal in the file manager.
+- Rows can be dragged to reorder.
+
+### 5.4 Details sidebar: files
+
+- A tree of the project's root, read a directory at a time as it is
+  expanded. Which directories are expanded is remembered for each project.
+- Directories first, then files, by name. Names matched by `.gitignore` are
+  shown dimmed; `.git` is not shown.
+- A file takes the colour of its git state (modified, untracked, staged,
+  conflicted), and a directory that of the most pressing state inside it.
+- Click opens the file in the focused window. Up, down, left, right, Return
+  and typing a name's first letters work when the tree has the keyboard.
+- Context menu: New File, New Folder, Rename, Delete, Copy Path, Reveal.
+  Delete moves to the system trash where there is one and asks first.
+- The tree is read again after a save, a file action, a git action, when
+  the window regains focus, and by a refresh button. Nothing watches the
+  disk.
+
+### 5.5 Details sidebar: git
+
+- Shown when the project's root is in a git repository; otherwise it says
+  so and offers nothing.
+- Heading: the branch, and how far ahead and behind its upstream.
+- Three groups, each hidden when empty: Staged, Changes, Untracked. A row
+  is a path and a letter for its state.
+- On a row: a button to stage or unstage, and one to discard, which asks
+  first. On a group's heading: stage all, unstage all.
+- A commit box at the top: a message, and a Commit button that is enabled
+  when something is staged and the message is not empty.
+- Click on a row opens its diff (section 8).
+- Read again at the same moments as the file tree.
+
+### 5.6 Options sidebar
+
+A region with a heading and nothing in it. Hidden by default.
+
+### 5.7 Status bar
+
+One strip across the bottom of the frame.
+
+| Left | Middle | Right |
+|---|---|---|
+| project name; branch with ahead and behind; running tasks with their progress | the latest message; keys typed so far | line and column; selection count; mode; encoding; line ending |
+
+- The right-hand part describes the focused window. The same facts stay in
+  that window's modeline (W4): the modeline is what tells two windows apart
+  when both are in view.
+- The message strip under the main area today goes: its text is the middle
+  of the status bar. Warnings and errors still raise a toast.
+- Clicking the branch focuses the git panel; clicking the position runs
+  `goto_line`; clicking the mode runs a prompt to choose one.
+
+## 6. Protocol
+
+A frontend that draws the workbench claims the capability `workbench` when
+it attaches. Everything below is sent only to a frontend that claimed it
+(STABILITY 5.1), so the terminal frontend sees none of it.
+
+Engine to frontend, in `redraw`:
+
+| Event | Meaning |
+|---|---|
+| `["regions", {name: {"shown": bool, "width": ems}}]` | Which sidebars and whether the bottom panel are shown. |
+| `["workspaces", [{"id", "name", "root", "current", "unsaved"}]]` | The project list, in order. |
+| `["status", left, middle, right]` | The status bar, as runs. A run may carry a `command` to run when clicked. |
+| `["git", {"branch", "ahead", "behind", "staged", "changes", "untracked", "conflicted"} or null]` | The current project's git state; `null` when it is not in a repository. Each list is of `{"path", "state"}`. |
+| `["files_changed", workspace]` | Listings the frontend holds for this project may be out of date: ask again. |
+
+`win_info` gains `tabs`: `[{"title", "modified", "active"}]` (section 7).
+
+Frontend to engine:
+
+| Method | Kind | Purpose |
+|---|---|---|
+| `files.list(workspace, directory)` | request | The entries of a directory: `[{"name", "kind", "git", "ignored"}]`. |
+| `ui.region(name, shown, width)` | notification | The user hid, showed or resized a region. |
+| `ui.tab(view, action, index, to)` | notification | `activate`, `close`, or `move` a tab. |
+| `engine.call(command, args)` | request | Everything else: `project.switch`, `git.stage`, `files.rename` and the rest are commands. |
+
+The protocol version does not change: all of this belongs to a new
+capability.
+
+## 7. Editor tabs
+
+- A window has `tabs`: the buffers that have been shown in it, in the order
+  they were first shown. Showing a buffer adds it; the shown one is active.
+- `tabs.close` (`s-w`) removes the active tab and shows the one to its
+  left. Closing the last tab of a window removes the window if it is not
+  the only one, and otherwise shows an empty buffer. Closing a tab does not
+  kill the buffer; a buffer in no window's tabs stays open until killed.
+- `tabs.next`, `tabs.previous` (`s-}`, `s-{`), `tabs.move`.
+- Splitting a window gives the new one a single tab, the buffer it shows.
+- Killing a buffer removes it from every window's tabs.
+- Panels keep their own tab strips (ENGINE 8.5), unchanged.
+- In Electron: a strip above each window. A tab has its name, a dot when
+  modified, and a close button; a middle click closes; tabs drag to reorder
+  within their strip. Dragging between windows is not in this change.
+
+## 8. Diffs
+
+`git.diff(path)`, also what a click in the git panel runs:
+
+- Splits the focused window in two, side by side. Left: a read-only buffer
+  holding the version in `HEAD` (for a staged row, `HEAD` against the
+  index; for an unstaged row, the index against the file). Right: the
+  file's own buffer, editable as ever.
+- Lines that differ are marked with a face on each side: removed, added,
+  changed. The marks are recomputed when the file's buffer changes.
+- Scrolling either side reveals the matching line on the other.
+- `git.next_change`, `git.previous_change` move between changed blocks.
+- Closing either window ends the diff and removes the marks.
+
+Not in this change: keeping the two sides level row for row. Lines wrap to
+different heights and one side has lines the other lacks, so level rows
+need filler the protocol has no way to ask for yet (section 12, question 1).
+
+## 9. Session restore
+
+- `session.json` in the data directory (DISTRIBUTION 5) holds: the
+  projects in order; for each, the files open with their cursor positions,
+  and each frame's arrangement (window tree with ratios, tabs and which is
+  active, panels); the regions' state; which project was current.
+- It is written a moment after any of that changes, and when the engine
+  stops, by the pattern of the recovery journal: decided on the owner
+  thread, written in a worker thread, replaced whole.
+- At startup it is read before any frontend is served. Projects and buffers
+  are made then; an arrangement is applied to the first frame that attaches
+  (and the second to the second, for as many as there were).
+- A file that has gone is left out, with one message naming them all.
+- It holds no text. Unsaved text is the journal's, and `recover` still
+  offers it; the two do not depend on each other.
+- The `session_restore` option, on by default, turns reading it off.
+  `--safe` does not: a session is data, not code.
+- Editor buffers and buffers with no file are not restored.
+
+## 10. Implementation stages
+
+Each is one branch and one pull request, and ends in something usable.
+
+**W-1: projects in the engine.** `Workspace`, membership, arrangements,
+`frame.switch`, the commands of 4.4, the narrowing of 4.3. *Runnable:* in
+the terminal frontend, add two directories as projects, open files and
+split windows in each, and switch back and forth.
+
+**W-2: the frame.** The capability, `regions`, `workspaces` and `status`;
+in Electron the six regions, the meta bar, the status bar, the toggles, and
+the project sidebar working. The other sidebars are empty. *Runnable:*
+click between projects in the Electron window.
+
+**W-3: editor tabs.** Section 7.
+
+**W-4: the file tree.** `files.list`, the file commands, the tree widget.
+
+**W-5: git.** The status model, the panel, stage, unstage, discard and
+commit, and the diff view.
+
+**W-6: session restore.** Section 9.
+
+## 11. Verification
+
+- **Projects:** switching swaps the window tree and the buffers offered,
+  and back again with every cursor where it was; an unsaved buffer in a
+  project that is not showing is still journalled; save-as moves a buffer
+  between projects; a nested root wins.
+- **Tabs:** open, close, reorder, split; closing the last; killing a buffer
+  shown in two windows.
+- **Files:** `files.list` and each file command against a temporary
+  directory, including names that are not valid Unicode and a directory
+  that cannot be read.
+- **Git:** against a repository made with real `git` in a temporary
+  directory: status in each state, stage, unstage, discard, commit; the
+  lines a diff marks are the lines `git diff` reports.
+- **Session:** an engine writes one, a second engine restores it; a deleted
+  file is skipped; a session file that is damaged is ignored with a message.
+- **Electron** (`npm run smoke`, with real keys and clicks, and pictures
+  saved and looked at): the regions where `CLAUDE.md` puts them; each
+  sidebar toggles and resizes; a click on a project switches the main
+  area; the tree expands and opens a file; staging moves a row, and a
+  commit clears the panel; a diff shows two windows; tabs close and
+  reorder; after the engine is restarted the projects, tabs and splits are
+  back.
+- **Standing:** the whole suite, strict type checking, the manifest, Gate
+  D, the latency benchmark, and the renderer budgets of FRONTEND 11 with
+  the workbench on screen.
+- **Not verifiable without the user:** how it looks and feels in a visible
+  window.
+
+## 12. Risks and open questions
+
+| Risk | Consequence | Mitigation |
+|---|---|---|
+| A second kind of interface beside buffers (W1) | Sidebars are not scriptable as buffers are, and the terminal frontend has none | Every action is a command (W2); the terminal gets them through prompts. |
+| Git on a large repository | `git status` takes seconds; the panel lags | It runs as a background task, never on the lane; a refresh under way is not started twice. |
+| Nothing watches the disk | The tree and the git panel are stale after work in a terminal | Refreshed on focus, which is when the user comes back from one. |
+| A full sync on every switch | A visible flash on a large layout | Measured in W-2; if it shows, only what differs is sent. |
+| The session file and the journal disagree | A restored buffer and a recovered one for the same file | Recovering replaces the text of the buffer that is already visiting the file, which is what `recover` does today. |
+
+Open questions, each with what is proposed:
+
+1. **Level rows in a diff.** Proposed: not in this change (section 8).
+   Scrolling together by matching lines first; filler rows are a protocol
+   addition to design on its own.
+2. **Does each Electron window have its own current project?** Proposed:
+   yes. A frame shows one project; two windows can show two.
+3. **Removing a project that has unsaved buffers.** Proposed: refused,
+   saying which buffers, until they are saved or killed.
+4. **Where a bottom panel sits.** Proposed: under the main area only, with
+   the sidebars running the full height beside it, as VS Code has it by
+   default.
+5. **What the centre of the meta bar shows.** Proposed: the project's name,
+   as a button that opens the command palette.
