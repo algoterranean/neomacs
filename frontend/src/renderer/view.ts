@@ -628,15 +628,15 @@ export class ViewElement {
     const deadline = performance.now() + 250;
     first = Math.max(1, first);
     last = Math.min(this.model.lineCount, last);
+    const asked = { yes: false };
     try {
-      await this.waitForLines(first, last, deadline);
+      await this.waitForLines(first, last, deadline, asked);
     } finally {
-      if (this.askedFor > 0) this.askedFor -= 1;
+      if (asked.yes) this.askedFor -= 1;
     }
   }
 
-  private async waitForLines(first: number, last: number, deadline: number): Promise<void> {
-    let asked = false;
+  private async waitForLines(first: number, last: number, deadline: number, asked: { yes: boolean }): Promise<void> {
     for (;;) {
       let held = true;
       for (let n = first; n <= last; n++) if (!this.model.line(n)) held = false;
@@ -656,8 +656,8 @@ export class ViewElement {
       // really in view: the engine would take that as the newer word, and
       // not send them.  Any batch brings a render, and batches come for
       // reasons of their own (the status bar, a task ending).
-      if (!asked) {
-        asked = true;
+      if (!asked.yes) {
+        asked.yes = true;
         this.askedFor += 1;
       }
       this.reported = null; // the first render afterwards reports the real viewport again

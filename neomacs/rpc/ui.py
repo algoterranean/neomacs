@@ -207,6 +207,14 @@ def region(
         workbench.set_region(frame, name, shown, width)
 
 
+@method("ui.status")
+async def status(conn: Connection, side: str, index: int) -> None:
+    """The user clicked an item of the status bar (WORKSPACE 6)."""
+    from neomacs import workbench
+
+    await workbench.run_status_item(_frame(conn), str(side), int(index))
+
+
 @method("input.interrupt")
 def interrupt(conn: Connection) -> None:
     """Out-of-band cancel.  It is acted on from the reader thread (see `attach`);

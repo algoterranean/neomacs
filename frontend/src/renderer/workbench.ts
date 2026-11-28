@@ -14,6 +14,10 @@ import type { FrameModel, RegionState, StatusItem, WorkspaceInfo } from "./model
 export interface WorkbenchHost {
   /** Run a command in the engine, as a key would. */
   command(name: string, args?: (string | number | boolean | null)[]): void;
+  /** A status item was clicked: the engine runs what it put there. */
+  statusItem(side: "left" | "right", index: number): void;
+  /** Give the keyboard back to the text: a click elsewhere took the browser's focus. */
+  refocus(): void;
   /** Tell the engine a region was shown, hidden or resized. */
   region(name: string, shown: boolean | null, width: number | null): void;
   /** Ask the user for a directory with the system's own dialog. */
@@ -136,6 +140,14 @@ export class Workbench {
     this.statusBar.append(this.statusLeft, messages, this.statusRight);
 
     root.replaceChildren(this.metaBar, this.body, this.statusBar);
+
+    // A click on any of this takes the browser's focus from the element the
+    // text is typed into, and with it the input method.  Nothing here is
+    // typed into, so the focus goes straight back.
+    for (const region of [this.metaBar, project, details, options, this.statusBar]) {
+      region.addEventListener("mouseup", () => host.refocus());
+      region.addEventListener("dragend", () => host.refocus());
+    }
   }
 
   private heading(text: string): HTMLDivElement {
@@ -152,26 +164,38 @@ export class Workbench {
     bar.dataset["region"] = name;
     bar.addEventListener("pointerdown", (event) => {
       const sidebar = this.sidebars.get(name) as HTMLDivElement;
-      const em = parseFloat(getComputedStyle(this.body).fontSize) || 14;
+      // The sidebar's own font size: its width is set in its own ems.
+      const em = parseFloat(getComputedStyle(sidebar).fontSize) || 14;
       const startX = event.clientX;
       const startWidth = sidebar.getBoundingClientRect().width;
       const sign = name === "options" ? -1 : 1; // the options sidebar grows to the left
       let width = startWidth;
       this.dragging = name;
       bar.setPointerCapture(event.pointerId);
+      let moved = false;
       const move = (e: PointerEvent) => {
+        moved = true;
         width = Math.max(6 * em, Math.min(60 * em, startWidth + sign * (e.clientX - startX)));
         sidebar.style.width = `${width / em}em`;
       };
-      const up = () => {
+      const finish = (e: PointerEvent) => {
         bar.removeEventListener("pointermove", move);
-        bar.removeEventListener("pointerup", up);
+        bar.removeEventListener("pointerup", finish);
+        bar.removeEventListener("pointercancel", finish);
         this.dragging = null;
-        // The engine keeps the width; it comes back in `regions`.
-        this.host.region(name, null, Math.round((width / em) * 100) / 100);
+        if (e.type === "pointercancel") {
+          // Called off: the width is what the engine last said.
+          this.drawn.regions = "";
+          this.host.refocus();
+          return;
+        }
+        // The engine keeps the width; it comes back in `regions`.  A press
+        // and release with no movement is not a resize.
+        if (moved) this.host.region(name, null, Math.round((width / em) * 100) / 100);
       };
       bar.addEventListener("pointermove", move);
-      bar.addEventListener("pointerup", up);
+      bar.addEventListener("pointerup", finish);
+      bar.addEventListener("pointercancel", finish);
       event.preventDefault();
     });
     return bar;
@@ -260,20 +284,21 @@ export class Workbench {
     const key = JSON.stringify([left, right]);
     if (key === this.drawn.status) return;
     this.drawn.status = key;
-    const draw = (items: StatusItem[]) =>
-      items.map((item) => {
+    const draw = (items: StatusItem[], side: "left" | "right") =>
+      items.map((item, index) => {
         const command = item.command;
         const made = el(command ? "button" : "span", command ? "nm-status-item nm-status-button" : "nm-status-item");
         made.textContent = item.text; // text, never markup
         if (item.title) made.title = item.title;
         if (command) {
           (made as HTMLButtonElement).type = "button";
-          made.addEventListener("click", () => this.host.command(command));
+          // The engine is told which item, and runs what it put there, in the view it describes.
+          made.addEventListener("click", () => this.host.statusItem(side, index));
         }
         return made;
       });
-    this.statusLeft.replaceChildren(...draw(left));
-    this.statusRight.replaceChildren(...draw(right));
+    this.statusLeft.replaceChildren(...draw(left, "left"));
+    this.statusRight.replaceChildren(...draw(right, "right"));
   }
 
   /** What is drawn, for tests: where each region is, and what the lists hold. */

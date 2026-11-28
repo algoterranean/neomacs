@@ -270,6 +270,7 @@ Frontend to engine:
 |---|---|---|
 | `files.list(workspace, directory)` | request | The entries of a directory: `[{"name", "kind", "git", "ignored"}]`. |
 | `ui.region(name, shown, width)` | notification | The user hid, showed or resized a region. Either of the last two may be `null` for "as it is". |
+| `ui.status(side, index)` | notification | The user clicked an item of the status bar. The engine runs the command it put there, in the view the bar describes; the frontend names no command. |
 | `ui.tab(view, action, index, to)` | notification | `activate`, `close`, or `move` a tab. |
 | `engine.call(command, args)` | request | Everything else: `project.switch`, `git.stage`, `files.rename` and the rest are commands. |
 
@@ -454,9 +455,16 @@ Built as sections 5.1 to 5.3, 5.6 and 5.7 describe, with these differences.
 - **Status items are objects, not runs,** and the middle of the bar is not
   in the `status` event: it is the message and the pending keys, which
   arrive as they always have (section 6 is corrected).
-- **Clicks are notifications.** A click on a project, a toggle or a status
-  item sends `engine.call` without waiting for an answer, since a command
-  that asks the user something does not answer until they have.
+- **Clicks are notifications.** A click on a project or a toggle sends
+  `engine.call` without waiting for an answer, since a command that asks
+  the user something does not answer until they have. A click on a status
+  item sends `ui.status`.
+- **The right-hand end of the status bar is about the view with the
+  keyboard,** a panel's tab included; while a prompt has the keyboard, about
+  the window that last had it. A click on an item there gives up any open
+  prompt, gives that view the keyboard, and runs the command in it.
+- **A click on the frame gives the browser's focus back to the text,** so
+  that an input method goes on working.
 - **Keys.** `s-b` toggles the details sidebar and `s-P` opens the command
   palette.
 - **Colours** are three new faces, `metabar`, `sidebar` and `statusbar`,

@@ -194,3 +194,36 @@ def test_everything_is_sent_again_after_a_resync(ui: HeadlessUI, tmp_path: Path)
     ui.client.call("ui.resync")
     ui.idle()
     assert (ui.model.regions, ui.model.workspaces, ui.model.status) == before
+
+
+def test_the_bar_describes_the_view_with_the_keyboard_and_a_click_acts_there(
+    ui: HeadlessUI, tmp_path: Path
+) -> None:
+    (tmp_path / "long.txt").write_text("".join(f"line {i}\n" for i in range(1, 41)))
+    ui.open(tmp_path / "long.txt")
+    ui.eval("ed.show(ed.buffers.get('*messages*'), 'messages', focus=True)")
+    ui.eval("ed.frame.focus.selections.set([(0, 0)])")
+    # A panel has the keyboard: the bar is about the panel's buffer.
+    assert value(ui, "ed.frame.focus.buffer.name") == "*messages*"
+    assert texts(ui.model.status[1])[0] == "Ln 1, Col 1"
+    ui.eval("_f.focus_view(_f.window); _f.window.selections.set([(12, 12)])")
+    assert texts(ui.model.status[1])[0] == "Ln 2, Col 6"
+    # A prompt has it: the bar stays the window's, and a click on the
+    # position asks about that window, not the prompt.
+    ui.keys("M-x")
+    assert texts(ui.model.status[1])[0] == "Ln 2, Col 6"
+    ui.client.notify("ui.status", "right", 0)
+    ui.idle()
+    assert ui.prompt == "Go to line: "
+    ui.type("30")
+    ui.keys("<return>")
+    assert value(ui, "(_f.window.buffer.name, _f.window.buffer.line_of(_f.window.cursor.pos))") == (
+        "long.txt", 30,
+    )  # fmt: skip
+    # The question that was open before the click was given up, not left behind.
+    assert ui.prompt is None and value(ui, "_f.focus is _f.window") is True
+    # Which item, not which command: one that is not there, or has none, does nothing.
+    for side, index in (("right", 99), ("right", 2), ("left", -1), ("nowhere", 0)):
+        ui.client.notify("ui.status", side, index)
+    ui.idle()
+    assert ui.prompt is None

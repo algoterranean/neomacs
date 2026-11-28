@@ -111,6 +111,8 @@ chrome.main.prepend(workspace.root, workspace.floatingLayer);
 // something does not answer until they have.
 const workbench = new Workbench(root, chrome.main, chrome.strip, {
   command: (name, args = []) => rpc.notify("engine.call", name, args),
+  statusItem: (side, index) => rpc.notify("ui.status", side, index),
+  refocus: () => root.focus({ preventScroll: true }),
   region: (name, shown, width) => rpc.notify("ui.region", name, shown, width),
   chooseDirectory: () => host.chooseDirectory(),
   contextMenu: (items) => host.contextMenu(items),

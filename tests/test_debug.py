@@ -157,7 +157,7 @@ def stepper() -> None:
 @command
 async def sleeper() -> None:
     before = 1
-    got = await asyncio.sleep(0.15, "slept")
+    got = await asyncio.sleep(0.8, "slept")
     after = before + 1
     log.append((before, got, after))
 

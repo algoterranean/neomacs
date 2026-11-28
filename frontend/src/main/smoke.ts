@@ -1171,6 +1171,10 @@ export async function runSmoke(
       await settle();
       const noProject = await bench();
       const widestMain = await mainRect();
+      // A click on a button must not take the keyboard from the text: the
+      // input method works only while the element typed into has the focus.
+      const focusKept = await js<boolean>("document.activeElement === document.getElementById('root')");
+      check("workbench.a_click_on_the_frame_leaves_the_keyboard_with_the_text", focusKept, focusKept);
       check(
         "workbench.sidebars_hide_and_give_their_room_to_the_main_area",
         noDetails.details === null && noDetails.toggles["details"] === false && Math.abs(widerMain[0] - pw) <= 3 &&
@@ -1195,6 +1199,16 @@ export async function runSmoke(
       // Dragging a sidebar's edge resizes it, and the engine keeps the width.
       const edge = await rectOf('.nm-sidebar-resizer[data-region="project"]');
       const before = (await bench()).project as Box;
+      // A press and release with no movement changes nothing.
+      const widthBefore = await pyText("_wf.regions['project']['width']");
+      await mouseAt((edge[0] as number) + 2, 300);
+      await settle();
+      const untouched = (await bench()).project as Box;
+      check(
+        "workbench.pressing_an_edge_without_dragging_changes_nothing",
+        untouched[2] === before[2] && (await pyText("_wf.regions['project']['width']")) === widthBefore,
+        { before, untouched, widthBefore },
+      );
       await dragFrom((edge[0] as number) + 2, 300, (edge[0] as number) + 62, 300);
       const after = (await bench()).project as Box;
       const kept = Number(await pyText("_wf.regions['project']['width']"));
@@ -1203,7 +1217,8 @@ export async function runSmoke(
         // Wider by about what the pointer moved (the first of the moves is spent
         // taking hold), and the engine's width is the width that is drawn.
         (after[2] as number) - (before[2] as number) >= 30 && (after[2] as number) - (before[2] as number) <= 64 &&
-          Math.abs(kept * 14 * 0.9 - (after[2] as number)) <= 3,
+          // The engine's width, in the sidebar's own ems (0.9 of the frame's 14 px), is what is drawn.
+          Math.abs(kept * 14 * 0.9 - (after[2] as number)) <= 1.5,
         { before, after, kept },
       );
 
