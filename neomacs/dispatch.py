@@ -407,7 +407,7 @@ class Dispatcher:
         invocation: int,
         args: tuple[Any, ...],
     ) -> None:
-        if view.id in frame.views:
+        if frame.owns(view):  # on screen, or put away with its project by this command
             buffer = view.buffer
             view.selections.normalize()
             if buffer.tick != tick:

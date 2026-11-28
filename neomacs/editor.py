@@ -227,7 +227,7 @@ class Editor:
     def view(self) -> View:
         """The view a command was started in, or outside a command the frame's focused view."""
         pins = pins_var.get()
-        if pins is not None and pins[0].id in pins[0].frame.views:
+        if pins is not None and pins[0].frame.owns(pins[0]):
             return pins[0]
         return self._need_frame().focus
 
@@ -236,7 +236,7 @@ class Editor:
     def window(self) -> Window:
         """The main-area window: the focused one, or the last that was."""
         pins = pins_var.get()
-        if pins is not None and pins[1].id in pins[1].frame.views:
+        if pins is not None and pins[1].frame.owns(pins[1]):
             return pins[1]
         return self._need_frame().window
 
@@ -244,7 +244,7 @@ class Editor:
     @provisional("0.1")
     def buffer(self) -> Buffer:
         pins = pins_var.get()
-        if pins is not None and pins[0].id in pins[0].frame.views:
+        if pins is not None and pins[0].frame.owns(pins[0]):
             return pins[0].buffer
         return self._need_frame().focus.buffer
 

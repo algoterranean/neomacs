@@ -413,7 +413,16 @@ Built as sections 4.1 to 4.4 describe, with these details.
   sent to the frontend. They stay attached to their buffers, so their
   cursors follow edits made meanwhile.
 - **Killing a buffer** that a put-away window shows gives that window
-  another buffer of its own project, or `*scratch*`.
+  another buffer of its own project, or a scratch buffer; a put-away panel
+  tab that shows it is closed. Both are what happens to one on screen.
+- **Saving a buffer into another project** takes it out of the windows of
+  the project it has left, and a frame that was working in it follows it
+  to its new project.
+- **A command that switches projects keeps its pinned view and buffer**
+  (ENGINE 7.7): a view put away with its project still counts as the
+  frame's (`Frame.owns`).
+- **Unsaved means any modified buffer of the project,** with a file or
+  without, for the purpose of W13.
 - **A frame that goes** takes its arrangements with it.
 - **Names are kept distinct:** a second project whose directory has the
   same name is called `name (2)`.
@@ -421,7 +430,7 @@ Built as sections 4.1 to 4.4 describe, with these details.
   something is typed, and then by how well they match.
 - **Not in W-1:** nothing of a project is remembered across a restart
   (that is W-6), and the frame's title does not name the project (W-2).
-- **Verified:** 13 tests through the reference frontend, which lays out as
+- **Verified:** 19 tests through the reference frontend, which lays out as
   the terminal frontend does: the list; membership, with nested roots and
   save-as; each project's windows, cursors and panels coming back; unsaved
   work in a project that is not showing; prompts; killing and removing; two

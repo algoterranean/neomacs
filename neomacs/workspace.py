@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from neomacs.errors import NeomacsError
 from neomacs.hooks import Hook
 from neomacs.stability import provisional
-from neomacs.text.buffer import Buffer, buffer_created, buffer_killed
+from neomacs.text.buffer import Buffer, after_save, buffer_created, buffer_killed
 
 if TYPE_CHECKING:
     from neomacs.editor import Editor
@@ -128,7 +128,8 @@ class Workspaces:
 
     @provisional("0.1")
     def unsaved(self, workspace: Workspace) -> list[Buffer]:
-        return [b for b in self.buffers(workspace) if b.modified and b.file is not None]
+        """WORKSPACE's buffers that have changes not saved, with a file or without."""
+        return [b for b in self.buffers(workspace) if b.modified]
 
     # -- changing --------------------------------------------------------------
 
@@ -199,6 +200,17 @@ class Workspaces:
         for frame in list(editor.frames.values()):
             self._discard(frame, workspace)
         for buffer in mine:
+            # Nothing should be showing one by now, but a window that is must
+            # not be left on a buffer that has gone.
+            for frame in list(editor.frames.values()):
+                for view in list(frame.views.values()):
+                    if view.buffer is not buffer:
+                        continue
+                    panel: Any = getattr(view, "panel", None)
+                    if panel is not None:
+                        panel.close(view)
+                    else:
+                        view.show(self._instead(frame.workspace, buffer))
             editor.buffers.kill(buffer)
         workspaces_changed.run()
         editor.update_frames()
@@ -258,19 +270,84 @@ class Workspaces:
             workspace = frame.workspace if frame is not None else self.none
         buffer.locals[_OWNER] = workspace
 
+    def _fallback(self, but: Buffer) -> Buffer:
+        """A buffer any window can show: the scratch buffer, or another like
+        it if that is the one going."""
+        buffers = self.editor.buffers
+        for candidate in buffers:
+            if candidate is not but and candidate.name.startswith("*scratch*"):
+                return candidate
+        return buffers.new("*scratch*")
+
+    def _instead(self, workspace: Workspace, buffer: Buffer) -> Buffer:
+        """What a window of WORKSPACE shows when it can no longer show BUFFER."""
+        others = [b for b in self.buffers(workspace) if b is not buffer]
+        return others[-1] if others else self._fallback(buffer)
+
+    def _stored_away(self, arrangement: Arrangement, workspace: Workspace, buffer: Buffer) -> None:
+        """Take BUFFER out of a layout that is not on screen: a window that
+        shows it shows something else, and a panel tab that shows it is closed,
+        as each would be were the layout on show."""
+        for view in list(arrangement.views.values()):
+            if view.buffer is not buffer:
+                continue
+            panel: Any = getattr(view, "panel", None)
+            if panel is None:
+                view.show(self._instead(workspace, buffer))
+                continue
+            if view in panel.tabs:
+                index = panel.tabs.index(view)
+                panel.tabs.pop(index)
+                if panel.active is view:
+                    panel.active = (
+                        panel.tabs[min(index, len(panel.tabs) - 1)] if panel.tabs else None
+                    )
+                if not panel.tabs:
+                    panel.visible = False
+            if arrangement.focus is view:
+                arrangement.focus = panel.active if panel.active is not None else arrangement.window
+            del arrangement.views[view.id]
+            # `close` takes a view out of the frame's table, where this one is not.
+            view.buffer.remove_listener(view._on_change)  # pyright: ignore[reportPrivateUsage]
+            view.selections.detach()
+
     def replace_killed(self, buffer: Buffer) -> None:
-        """BUFFER is being killed.  A window that shows it, in a layout that is
-        not on screen, shows something else instead."""
-        scratch = self.editor.buffers.get("*scratch*")
+        """BUFFER is being killed: see to the layouts that are not on screen."""
         for workspace in self:
             for arrangement in workspace.arrangements.values():
-                for view in arrangement.views.values():
-                    if view.buffer is not buffer:
-                        continue
-                    others = [b for b in self.buffers(workspace) if b is not buffer]
-                    replacement = others[-1] if others else scratch
-                    if replacement is not None and replacement is not buffer:
-                        view.show(replacement)
+                self._stored_away(arrangement, workspace, buffer)
+
+    def rehome(self, buffer: Buffer) -> None:
+        """BUFFER was saved, perhaps under a name that puts it in another
+        project.  If so, the windows of the project it has left stop showing
+        it, and a frame that was working in it follows it to its new one."""
+        owner = self.of(buffer)
+        if owner is None:
+            return
+        following: list[Frame] = []
+        for frame in list(self.editor.frames.values()):
+            if frame.workspace is owner:
+                continue
+            for view in list(frame.views.values()):
+                if view.buffer is not buffer:
+                    continue
+                if view is frame.focus:
+                    following.append(frame)
+                panel: Any = getattr(view, "panel", None)
+                if panel is not None:
+                    panel.close(view)
+                else:
+                    view.show(self._instead(frame.workspace, buffer))
+        for workspace in self:
+            if workspace is owner:
+                continue
+            for arrangement in workspace.arrangements.values():
+                self._stored_away(arrangement, workspace, buffer)
+        from neomacs import panels
+
+        for frame in following:
+            frame.switch(owner)
+            panels.place(frame, buffer, "document", focus=True)
 
 
 def _workspaces() -> Workspaces | None:
@@ -292,5 +369,12 @@ def _killed(buffer: Buffer) -> None:
         workspaces.replace_killed(buffer)
 
 
+def _saved(buffer: Buffer) -> None:
+    workspaces = _workspaces()
+    if workspaces is not None:
+        workspaces.rehome(buffer)
+
+
 buffer_created.add(_created)
 buffer_killed.add(_killed)
+after_save.add(_saved)

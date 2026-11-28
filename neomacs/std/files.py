@@ -47,7 +47,9 @@ async def switch_buffer(name: str = "", everywhere: Annotated[Any, RawPrefix] = 
     if not name:
         completer = all_buffers_completer if everywhere is not None else buffers_completer
         prompt = "Switch to buffer: " if everywhere is None else "Switch to buffer (any project): "
-        name = await ed.minibuffer.read(prompt, completer=completer, submit_selects=True)
+        name = await ed.minibuffer.read(
+            prompt, completer=completer, history="buffers", submit_selects=True
+        )
     buffer = ed.buffers.get(name)
     if buffer is None:
         buffer = ed.buffers.new(name)

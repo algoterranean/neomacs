@@ -505,6 +505,18 @@ class Frame:
 
     # -- projects (WORKSPACE 4.2) ------------------------------------------------
 
+    def owns(self, view: View) -> bool:
+        """Whether VIEW is one of this frame's: on screen, or kept with a
+        project that is not showing.  A command that switches projects still
+        has the view it was started in."""
+        if view.id in self.views:
+            return True
+        for workspace in self.editor.workspaces:
+            kept = workspace.arrangements.get(self.id)
+            if kept is not None and view.id in kept.views:
+                return True
+        return False
+
     @provisional("0.1")
     def switch(self, workspace: Workspace) -> None:
         """Show another project: put away this one's windows, panels and

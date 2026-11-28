@@ -333,3 +333,123 @@ def test_a_shell_command_runs_in_the_projects_directory(ui: HeadlessUI, tmp_path
         assert time.monotonic() < deadline
         time.sleep(0.02)
     assert value(ui, f"{out}.text").split("\n")[1] == str(alpha.resolve())
+
+
+# -- from review -----------------------------------------------------------------------------
+
+
+def test_unsaved_text_with_no_file_also_keeps_a_project_from_being_removed(
+    ui: HeadlessUI, tmp_path: Path
+) -> None:
+    add(ui, tree(tmp_path / "alpha", "a.txt"))
+    ui.call("buffers.switch", "notes")
+    ui.type("thoughts not saved anywhere")
+    with pytest.raises(Exception, match=r"alpha has unsaved buffers \(notes\)"):
+        ui.client.eval("ed.workspaces.remove(ed.workspaces.get('alpha'))")
+    assert value(ui, "ed.buffers.get('notes').text") == "thoughts not saved anywhere"
+    assert names(ui) == ["alpha", "No project"]
+
+
+def test_saving_a_buffer_into_another_project_takes_it_and_the_frame_there(
+    ui: HeadlessUI, tmp_path: Path
+) -> None:
+    alpha, beta = tree(tmp_path / "alpha", "a.txt", "stays.txt"), tree(tmp_path / "beta", "b.txt")
+    add(ui, beta)
+    add(ui, alpha)
+    ui.open(alpha / "stays.txt")
+    ui.open(alpha / "a.txt")
+    ui.keys("C-x", "2")  # shown in two windows of alpha
+    ui.eval(f"ed.buffer.save({str(beta / 'moved.txt')!r})")
+    # It is beta's now, and the frame that was working in it has gone with it.
+    assert value(ui, "ed.workspaces.of(ed.buffers.get('a.txt')).name") == "beta"
+    assert state(ui)["project"] == "beta" and state(ui)["focus"] == "a.txt"
+    # Alpha's windows show something of alpha's.
+    ui.keys("C-c", "p", "n")
+    assert state(ui)["windows"] == [("stays.txt", 0), ("stays.txt", 0)]
+    # Removing beta kills the buffer, and nothing anywhere is left showing it.
+    ui.eval("ed.workspaces.remove(ed.workspaces.get('beta'))")
+    assert value(ui, "ed.buffers.get('a.txt')") is None
+    shown = value(ui, "[v.buffer.name for f in ed.frames.values() for v in f.views.values()]")
+    assert shown == ["stays.txt", "stays.txt"]
+    assert value(
+        ui, "all(v.buffer.name in ed.buffers for f in ed.frames.values() for v in f.views.values())"
+    )
+
+
+def test_a_command_that_switches_projects_keeps_the_buffer_it_started_in(
+    ui: HeadlessUI, tmp_path: Path
+) -> None:
+    alpha, beta = tree(tmp_path / "alpha", "a.txt"), tree(tmp_path / "beta", "b.txt")
+    add(ui, beta)
+    ui.open(beta / "b.txt")
+    add(ui, alpha)
+    ui.open(alpha / "a.txt")
+    ui.eval(
+        "seen = []\n"
+        "@command\n"
+        "def hop():\n"
+        "    seen.append(ed.buffer.name)\n"
+        "    ed.frame.switch(ed.workspaces.get('beta'))\n"
+        "    seen.append((ed.buffer.name, ed.view.buffer.name, ed.window.buffer.name))\n"
+        "    ed.buffer.insert(0, 'from the command: ')\n"
+    )
+    ui.call("hop")
+    assert value(ui, "seen") == ["a.txt", ("a.txt", "a.txt", "a.txt")]
+    assert value(ui, "ed.buffers.get('a.txt').text") == "from the command: a.txt\n"
+    assert value(ui, "ed.buffers.get('b.txt').text") == "b.txt\n"
+    assert state(ui)["project"] == "beta"
+    # Outside the command there is no pin: the frame's focused view is what is meant.
+    assert value(ui, "ed.buffer.name") == "b.txt"
+    # And the edit is one undo step in the buffer it was made in.
+    ui.keys("C-c", "p", "n")
+    ui.keys("C-/")
+    assert value(ui, "ed.buffers.get('a.txt').text") == "a.txt\n"
+
+
+def test_killing_the_scratch_buffer_does_not_leave_it_in_a_layout_put_away(
+    ui: HeadlessUI, tmp_path: Path
+) -> None:
+    add(ui, tree(tmp_path / "empty"))  # both projects' windows show *scratch*
+    ui.keys("C-x", "k")
+    here = state(ui)["windows"][0][0]
+    assert here.startswith("*scratch*") and here in value(ui, "[b.name for b in ed.buffers]")
+    ui.keys("C-c", "p", "n")
+    there = state(ui)["windows"][0][0]
+    # A buffer that is registered, not the one that was killed.
+    assert there in value(ui, "[b.name for b in ed.buffers]")
+    assert value(ui, "ed.buffers.get(_f.window.buffer.name) is _f.window.buffer") is True
+    ui.type("usable")
+    assert value(ui, "_f.window.buffer.text") == "usable"
+
+
+def test_a_panel_tab_put_away_is_closed_when_its_buffer_is_killed(
+    ui: HeadlessUI, tmp_path: Path
+) -> None:
+    alpha = tree(tmp_path / "alpha", "a.txt")
+    add(ui, alpha)
+    ui.open(alpha / "a.txt")
+    ui.eval(
+        "_out = ed.buffers.new('*output of something*'); _out.insert(0, 'output')\n"
+        "ed.show(_out, 'output'); ed.show(ed.buffers.get('*messages*'), 'messages')\n"
+        "ed.show(_out, 'output', focus=True)"
+    )
+    assert state(ui)["focus"] == "*output of something*"
+    ui.keys("C-c", "p", "n")  # alpha is put away with the keyboard in that tab
+    ui.eval("ed.buffers.kill(_out)")
+    ui.keys("C-c", "p", "b")
+    # The tab has gone, as it would have were it on screen; no file took its place.
+    tabs = value(ui, "[t.buffer.name for t in _f.panels['bottom'].tabs]")
+    assert tabs == ["*messages*"]
+    assert state(ui)["windows"] == [("a.txt", 0)] and state(ui)["focus"] == "*messages*"
+    assert value(ui, "all(v.buffer.name in ed.buffers for v in _f.views.values())")
+
+
+def test_buffer_choices_are_remembered(ui: HeadlessUI) -> None:
+    ui.eval("ed.buffers.new('first'); ed.buffers.new('second')")
+    for name in ("first", "second"):
+        ui.keys("C-x", "b")
+        ui.type(name)
+        ui.keys("<return>")
+    ui.keys("C-x", "b", "M-p", "M-p")
+    assert value(ui, "ed.frame.focus.buffer.text") == "first"
+    ui.keys("C-g")
