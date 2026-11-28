@@ -561,6 +561,8 @@ class Frame:
         self.sent_workbench: dict[str, Any] = {}
         # A side-by-side diff on show in this frame, if there is one (WORKSPACE 8).
         self.diff: Any = None
+        # Whether the layout a session kept for a frame has been given to this one.
+        self.session_applied = False
         editor.frames[self.id] = self
         self.schedule_update()
 

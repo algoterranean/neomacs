@@ -30,6 +30,8 @@ export interface WorkbenchHost {
   reveal(path: string): void;
   /** The entries of a directory of a project, for the file tree. */
   listFiles(workspace: number, directory: string): Promise<FileEntry[]>;
+  /** Which directories of a project are open in the file tree, for the engine to keep. */
+  folders(workspace: number, open: string[]): void;
   /** The window's title bar is the meta bar, with the window's buttons at its left. */
   ownTitleBar: boolean;
 }
@@ -120,6 +122,7 @@ export class Workbench {
       command: (name, args) => host.command(name, args),
       contextMenu: (items) => host.contextMenu(items),
       reveal: (path) => host.reveal(path),
+      folders: (workspace, open) => host.folders(workspace, open),
     });
     const files = el("div", "nm-details-pane nm-files-pane", "Files");
     const filesHeading = this.heading("Files");

@@ -258,7 +258,7 @@ Engine to frontend, in `redraw`:
 | Event | Meaning |
 |---|---|
 | `["regions", {name: {"shown": bool, "width": ems}}]` | Which regions are shown: `meta`, `project`, `details`, `options`, `status`, and `bottom` for the bottom panel. The sidebars have a width. |
-| `["workspaces", [{"id", "name", "root", "current", "unsaved"}]]` | The project list, in order. |
+| `["workspaces", [{"id", "name", "root", "current", "unsaved", "folders"}]]` | The project list, in order. `folders` is the directories open in the project's file tree, as a frontend last reported them: a frontend that has not shown the project yet opens those. |
 | `["status", left, right]` | The status bar's items at each end: `{"text", "command", "title"}`, the last two optional. Clicking an item with a `command` runs it. The middle of the bar is the `message` events there have always been. |
 | `["git", {"top", "branch", "upstream", "ahead", "behind", "staged", "changes", "untracked", "conflicted"} or null]` | The repository the current project is in; `null` when it is in none, or git has not answered yet. Each list is of `{"path", "state"}`, the path from the repository's `top`; a state is `modified`, `added`, `deleted`, `renamed`, `copied`, `untracked` or `conflicted`. |
 | `["files_changed", workspace]` | Listings the frontend holds for this project may be out of date: ask again. |
@@ -277,6 +277,7 @@ Frontend to engine:
 | `files.list(workspace, directory)` | request | The entries of a directory, given relative to the project's root (`""` is the root): `[{"name", "kind", "git", "ignored"}]`. `kind` is `directory` or `file`; `git` is `conflicted`, `modified`, `staged`, `untracked` or null. |
 | `ui.region(name, shown, width)` | notification | The user hid, showed or resized a region. Either of the last two may be `null` for "as it is". |
 | `ui.status(side, index)` | notification | The user clicked an item of the status bar. The engine runs the command it put there, in the view the bar describes; the frontend names no command. |
+| `ui.folders(workspace, open)` | notification | The directories now open in a project's file tree, each from its root. The engine keeps them for the session and does nothing else with them. |
 | `ui.tab(view, action, index, to)` | notification | `activate`, `close`, or `move` (to the place `to`) the tab at `index` of the window `view`. |
 | `engine.call(command, args)` | request | Everything else: `project.switch`, `git.stage`, `files.rename` and the rest are commands. |
 
@@ -582,8 +583,8 @@ Built as section 5.4 describes, with these details.
   on a file, any key with a modifier, or a press of the mouse gives it
   back. While the tree has it the engine is not told of bare keys.
 - **Which folders are open** is kept by the frontend for each project,
-  for as long as the window lives. It is not the engine's yet, so W-6 has
-  nothing of it to restore.
+  for as long as the window lives, and reported to the engine, which
+  keeps it for the session (W-6).
 - **Stale** is said after a save, after a file command, when the window
   gets the keyboard back, and by `files.refresh`. Not after a shell
   command, nor a git one: there are none of those yet (W-5).
@@ -672,3 +673,57 @@ Built as sections 5.5 and 8 describe, with these details.
   Electron window (their commands are tested in the engine); a commit
   that needs signing, or hooks; very large repositories; the look in a
   visible window; anything on Linux or Windows.
+
+### W-6: session restore
+
+Built as section 9 describes, with these details.
+
+- **Where things are.** `neomacs/session.py`. The file is `session.json`
+  in the data directory, readable by its owner only.
+- **What is kept.** The projects in order, with the files open in each
+  and the folders open in each one's file tree. For each frame: which
+  project it was showing, its regions (shown, and how wide), and for
+  every project it had laid out, the window tree with its ratios, each
+  window's tabs in order with the cursor's line and column in each, which
+  tab was showing, and which window had the keyboard.
+- **What is not.** Text. Buffers without a file (the scratch buffer,
+  help, messages): a tab for one is not made again, and a window that had
+  nothing else shows the scratch buffer. Selections beyond the cursor,
+  extra cursors, how far a window was scrolled (it is shown with the
+  cursor in view). A diff. A panel's tabs, since they are the editor's
+  own buffers; where each panel was docked and how big comes back when
+  something is next shown in it. The size and place of the Electron
+  window itself.
+- **When it is written.** The engine looks every `session_delay` seconds
+  (2 by default) and writes if what it would write has changed, and
+  writes once more as it stops. An engine that is killed leaves what it
+  last wrote.
+- **A layout is applied before anything else is told of a new frame,** so
+  that what is said then (unsaved text to be had back) is said last and
+  is what the user is left looking at.
+- **With no frame attached nothing is known of windows:** the layouts
+  last taken with one are kept as they were.
+- **What has gone.** A file that is no longer there is left out of the
+  tabs; a window with no tab left is not made, and its neighbours have
+  its room; a project whose directory has gone is left out with its
+  files. One message names them, to the first frame.
+- **A frontend that shows one window** (the terminal) is given the window
+  that had the keyboard, with its tabs.
+- **A file that cannot be read as a session** (damaged, or of a format
+  this version does not know) is passed over, and the editor starts as
+  if there were none.
+- **Two engines on one data directory** each write the one file; the last
+  to write is what the next start reads. Nothing guards against that.
+- **`session_restore`** off stops the reading. The file is still written.
+- **Verified:** 8 engine tests, each starting an engine a second time on
+  the first one's data directory: projects, files, two windows with
+  their tabs, cursors and ratios, the regions, the project not showing;
+  written while running, and read after a kill; files and a project that
+  have gone; the option, and `--safe`; a frontend with one window; two
+  frames each getting its own, and a third getting none; the folders of
+  the file tree; four damaged files. In `npm run smoke`, one new check
+  (the tree reports its open folders and opens the ones the engine
+  kept), and the existing check that kills the engine now finds the
+  window's files restored in the engine that replaces it.
+- **Not verified:** quitting and starting the real application by hand;
+  a session of many hundreds of files; anything on Linux or Windows.

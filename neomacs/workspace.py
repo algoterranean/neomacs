@@ -53,6 +53,9 @@ class Workspace:
         self.root = root  # None for "No project"
         # Frame id -> how that frame had it laid out when it last showed it.
         self.arrangements: dict[int, Arrangement] = {}
+        # The directories open in the file tree, from the root, as a frontend
+        # last said (WORKSPACE 5.4).  Kept here so that a session can keep them.
+        self.folders: set[str] = set()
 
     @property
     def removable(self) -> bool:

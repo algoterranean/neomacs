@@ -153,6 +153,8 @@ export interface WorkspaceInfo {
   root: string | null;
   current: boolean;
   unsaved: number;
+  /** The directories open in its file tree, from its root, as the engine has them kept. */
+  folders?: string[];
 }
 
 /** An item of the status bar.  One with a `command` runs it when clicked. */

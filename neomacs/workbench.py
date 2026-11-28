@@ -77,6 +77,7 @@ def describe_workspaces(frame: Frame) -> list[dict[str, Any]]:
             "root": str(workspace.root) if workspace.root is not None else None,
             "current": workspace is frame.workspace,
             "unsaved": unsaved.get(workspace.id, 0),
+            "folders": sorted(workspace.folders),
         }
         for workspace in workspaces
     ]
