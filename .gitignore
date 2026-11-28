@@ -9,3 +9,6 @@ node_modules/
 .ruff_cache/
 .hypothesis/
 frontend/out/
+
+# Local secrets: never committed.
+.env
