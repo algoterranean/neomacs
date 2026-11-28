@@ -97,6 +97,10 @@ const workspace = new MainArea({
   splitResized: (split, ratios) => {
     void rpc.call("view.split_resized", split, ratios).catch((error: unknown) => console.error(error));
   },
+  tabsOf: (view) => frame.views.get(view)?.info.tabs,
+  tabAction: (view, action, index, to) => {
+    rpc.notify("ui.tab", view, action, index, to ?? null);
+  },
   positionRect: (view, line, offset) => {
     const model = frame.views.get(view);
     const element = model ? elements.get(model) : undefined;
@@ -212,6 +216,7 @@ function syncViews(): void {
     const model = frame.views.get(id);
     if (model) live.add(model);
   }
+  workspace.syncTabs();
   const main = frame.mainView;
   mainElement = (main ? elements.get(main) : undefined) ?? null;
   if (mainElement) status(null);
@@ -517,6 +522,7 @@ window.neomacsDebug = {
           rect: rect(e.root),
           focused: e.root.classList.contains("nm-focused"),
           modeline: e.snapshot()["modeline"],
+          tabs: workspace.tabsDrawn(e.model.id),
           inPanel: e.root.closest(".nm-panel")?.getAttribute("data-name") ?? null,
           inline: e.root.closest(".nm-inline-minibuffer") !== null,
           // The text of its lines, without the gutter.

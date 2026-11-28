@@ -204,13 +204,11 @@ class Workspaces:
             # not be left on a buffer that has gone.
             for frame in list(editor.frames.values()):
                 for view in list(frame.views.values()):
-                    if view.buffer is not buffer:
-                        continue
                     panel: Any = getattr(view, "panel", None)
-                    if panel is not None:
+                    if panel is None:
+                        view.forget(buffer, self._instead(frame.workspace, buffer))
+                    elif view.buffer is buffer:
                         panel.close(view)
-                    else:
-                        view.show(self._instead(frame.workspace, buffer))
             editor.buffers.kill(buffer)
         workspaces_changed.run()
         editor.update_frames()
@@ -226,7 +224,9 @@ class Workspaces:
 
         def clear(views: Any, owner: Workspace) -> None:
             for view in list(views):
-                if view.buffer not in mine:
+                # A window may have one of them as a tab without showing it.
+                held = [b for b in getattr(view, "tabs", ()) if b in mine]
+                if view.buffer not in mine and not held:
                     continue
                 others = [b for b in self.buffers(owner) if b not in mine]
                 replacement = others[-1] if others else scratch
@@ -235,8 +235,11 @@ class Workspaces:
                 panel: Any = getattr(view, "panel", None)
                 if panel is not None and view in panel.tabs and view.id in view.frame.views:
                     panel.close(view)
-                else:
+                elif panel is not None:
                     view.show(replacement)
+                else:
+                    for buffer in held or [view.buffer]:
+                        view.forget(buffer, replacement)
 
         for frame in list(self.editor.frames.values()):
             clear(frame.views.values(), frame.workspace)
@@ -289,11 +292,12 @@ class Workspaces:
         shows it shows something else, and a panel tab that shows it is closed,
         as each would be were the layout on show."""
         for view in list(arrangement.views.values()):
-            if view.buffer is not buffer:
-                continue
             panel: Any = getattr(view, "panel", None)
             if panel is None:
-                view.show(self._instead(workspace, buffer))
+                # A window loses the tab, whether or not it was the one showing.
+                view.forget(buffer, self._instead(workspace, buffer))
+                continue
+            if view.buffer is not buffer:
                 continue
             if view in panel.tabs:
                 index = panel.tabs.index(view)
@@ -312,7 +316,12 @@ class Workspaces:
             view.selections.detach()
 
     def replace_killed(self, buffer: Buffer) -> None:
-        """BUFFER is being killed: see to the layouts that are not on screen."""
+        """BUFFER is being killed: see to the layouts that are not on screen,
+        and to the tabs of the windows that are."""
+        for frame in list(self.editor.frames.values()):
+            for view in list(frame.views.values()):
+                if getattr(view, "panel", None) is None and buffer in getattr(view, "tabs", ()):
+                    view.forget(buffer, self._instead(frame.workspace, buffer))
         for workspace in self:
             for arrangement in workspace.arrangements.values():
                 self._stored_away(arrangement, workspace, buffer)
@@ -331,16 +340,18 @@ class Workspaces:
             if frame.workspace is owner:
                 continue
             for view in list(frame.views.values()):
+                panel: Any = getattr(view, "panel", None)
                 if view.buffer is not buffer:
+                    if panel is None:
+                        view.forget(buffer, buffer)  # a tab that was not showing
                     continue
                 if view is frame.focus:
                     selections = view.selections
                     following.append((frame, view, selections.ranges(), selections.primary_index))
-                panel: Any = getattr(view, "panel", None)
                 if panel is not None:
                     panel.close(view)
                 else:
-                    view.show(self._instead(frame.workspace, buffer))
+                    view.forget(buffer, self._instead(frame.workspace, buffer))
         for workspace in self:
             if workspace is owner:
                 continue

@@ -58,8 +58,9 @@ async def switch_buffer(name: str = "", everywhere: Annotated[Any, RawPrefix] = 
 
 @command(name="buffers.kill")
 def kill_buffer() -> None:
-    """Kill the buffer that has the keyboard.  A window showing it shows
-    another instead; a panel tab showing it is closed."""
+    """Kill the buffer that has the keyboard.  Its tab goes from every window;
+    a window showing it shows the tab beside it, or another buffer; a panel
+    tab showing it is closed."""
     buffer = ed.buffer
     scratch = ed.buffers.get("*scratch*")
     if buffer is scratch and len(ed.buffers) == 1:
@@ -71,13 +72,11 @@ def kill_buffer() -> None:
         if replacement is None or replacement is buffer:
             replacement = ed.buffers.new("*scratch*")
         for view in list(frame.views.values()):
-            if view.buffer is not buffer:
-                continue
             panel: Any = getattr(view, "panel", None)
-            if panel is not None:
+            if panel is None:
+                view.forget(buffer, replacement)  # a window loses the tab too
+            elif view.buffer is buffer:
                 panel.close(view)
-            else:
-                view.show(replacement)
     ed.buffers.kill(buffer)  # windows of layouts that are not on screen are seen to there
 
 

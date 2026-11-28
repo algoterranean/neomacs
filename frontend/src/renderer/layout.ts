@@ -4,7 +4,7 @@
 // on the user's say-so: an action is sent to the engine and the page waits for
 // the `layout` event that answers it.
 
-import type { PanelInfo } from "./model.ts";
+import type { PanelInfo, TabInfo } from "./model.ts";
 
 export type Anchor = string | { view: number; line: number; offset: number };
 
@@ -13,6 +13,10 @@ export interface LayoutHost {
   viewRoot(id: number): HTMLElement | null;
   panelAction(panel: number, action: string, arg?: string | number): void;
   splitResized(split: number, ratios: number[]): void;
+  /** The tabs of a window, as the engine last gave them; undefined when it has none to draw. */
+  tabsOf(view: number): TabInfo[] | undefined;
+  /** The user acted on a tab of a window: "activate", "close", or "move" it to the place `to`. */
+  tabAction(view: number, action: string, index: number, to?: number): void;
   /** Where a position in a view is on screen, for a panel that floats beside it. */
   positionRect(view: number, line: number, offset: number): DOMRect | null;
 }
@@ -57,6 +61,8 @@ export class MainArea {
   private key = "";
   private placed: number[] = [];
   private floats: { el: HTMLDivElement; panel: PanelInfo }[] = [];
+  /** The tab strip of each window on show, and the tabs it was last drawn from. */
+  private strips = new Map<number, { el: HTMLDivElement; drawn: TabInfo[] | undefined | null }>();
   /** Counts rebuilds of the DOM, so tests can tell that nothing was rebuilt. */
   rebuilds = 0;
 
@@ -82,6 +88,7 @@ export class MainArea {
     this.rebuilds += 1;
     this.placed = [];
     this.floats = [];
+    this.strips.clear();
     if (!layout) {
       this.root.replaceChildren();
       this.floating.replaceChildren();
@@ -121,6 +128,17 @@ export class MainArea {
     if (node[0] === "win") {
       const el = div("nm-window");
       el.dataset["view"] = String(node[1]);
+      // The window's tabs go above its text (WORKSPACE 7); `syncTabs` fills them in.
+      const strip = div("nm-tabs nm-window-tabs");
+      strip.setAttribute("role", "tablist");
+      strip.setAttribute("aria-label", "Tabs");
+      strip.hidden = true;
+      // A wheel that only turns up and down still moves along the strip.
+      strip.addEventListener("wheel", (e) => {
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) strip.scrollLeft += e.deltaY;
+      }, { passive: true });
+      this.strips.set(node[1] as number, { el: strip, drawn: null });
+      el.append(strip);
       this.place(node[1] as number, el);
       return el;
     }
@@ -137,6 +155,117 @@ export class MainArea {
       el.append(cell);
     });
     return el;
+  }
+
+  /**
+   * Make each window's tab strip match the tabs the engine last gave for it.
+   * Called before the views are drawn, since a strip that appears takes room
+   * from the text under it.
+   */
+  syncTabs(): void {
+    for (const [view, strip] of this.strips) {
+      const tabs = this.host.tabsOf(view);
+      // The engine sends a new list whenever anything in it changes.
+      if (tabs === strip.drawn) continue;
+      strip.drawn = tabs;
+      strip.el.hidden = tabs === undefined;
+      strip.el.replaceChildren(...(tabs ?? []).map((tab, index) => this.windowTab(view, strip.el, tab, index)));
+      const active = strip.el.querySelector<HTMLElement>(".nm-tab-active");
+      if (active) {
+        // Keep the tab that is showing in sight when there are more than fit.
+        const left = active.offsetLeft - strip.el.offsetLeft;
+        if (left < strip.el.scrollLeft) strip.el.scrollLeft = left;
+        else if (left + active.offsetWidth > strip.el.scrollLeft + strip.el.clientWidth) strip.el.scrollLeft = left + active.offsetWidth - strip.el.clientWidth;
+      }
+    }
+  }
+
+  private windowTab(view: number, strip: HTMLDivElement, tab: TabInfo, index: number): HTMLElement {
+    const button = div("nm-tab" + (tab.active ? " nm-tab-active" : "") + (tab.modified ? " nm-tab-modified" : ""));
+    button.dataset["index"] = String(index);
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", tab.active ? "true" : "false");
+    button.title = tab.path ?? tab.title;
+    const title = document.createElement("span");
+    title.className = "nm-tab-title";
+    title.textContent = tab.title; // text, never markup
+    const dot = document.createElement("span");
+    dot.className = "nm-tab-dot";
+    dot.textContent = "●";
+    dot.setAttribute("aria-label", "Not saved");
+    const close = document.createElement("span");
+    close.className = "nm-tab-close";
+    close.textContent = "×";
+    close.title = "Close";
+    close.setAttribute("role", "button");
+    close.setAttribute("aria-label", `Close ${tab.title}`);
+    close.addEventListener("pointerdown", (e) => e.stopPropagation());
+    close.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.host.tabAction(view, "close", index);
+    });
+    button.append(title, dot, close);
+    // A middle click closes the tab.
+    button.addEventListener("auxclick", (e) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      this.host.tabAction(view, "close", index);
+    });
+    // A press and release shows the tab; a press and a pull along the strip moves it.
+    button.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const from = event.clientX;
+      let moved = false;
+      const place = (x: number): number => {
+        // The place the tab would take: before the first tab whose middle is right of the pointer.
+        const others = [...strip.querySelectorAll<HTMLElement>(".nm-tab")];
+        let to = 0;
+        for (const other of others) {
+          if (other === button) continue;
+          const box = other.getBoundingClientRect();
+          if (x > box.left + box.width / 2) to += 1;
+        }
+        return to;
+      };
+      drag(
+        event,
+        (e) => {
+          moved ||= Math.abs(e.clientX - from) > 6;
+          if (!moved) return;
+          button.classList.add("nm-dragging");
+          button.style.transform = `translateX(${e.clientX - from}px)`;
+        },
+        (e) => {
+          button.classList.remove("nm-dragging");
+          button.style.transform = "";
+          if (e.type === "pointercancel") return;
+          if (!moved) {
+            this.host.tabAction(view, "activate", index);
+            return;
+          }
+          const to = place(e.clientX);
+          if (to !== index) this.host.tabAction(view, "move", index, to);
+        },
+      );
+    });
+    return button;
+  }
+
+  /** The tabs drawn over a window, for tests: what each says and where it is. */
+  tabsDrawn(view: number): { title: string; active: boolean; modified: boolean; rect: number[]; close: number[] }[] | null {
+    const strip = this.strips.get(view);
+    if (!strip || strip.el.hidden) return null;
+    const rect = (el: Element | null) => {
+      const r = el?.getBoundingClientRect();
+      return r ? [r.left, r.top, r.width, r.height] : [0, 0, 0, 0];
+    };
+    return [...strip.el.querySelectorAll<HTMLElement>(".nm-tab")].map((tab) => ({
+      title: tab.querySelector(".nm-tab-title")?.textContent ?? "",
+      active: tab.classList.contains("nm-tab-active"),
+      modified: tab.classList.contains("nm-tab-modified"),
+      rect: rect(tab),
+      close: rect(tab.querySelector(".nm-tab-close")),
+    }));
   }
 
   /** The bar between cells `index` and `index + 1`: drag it to share their space differently. */

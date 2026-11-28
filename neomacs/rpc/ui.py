@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from neomacs.errors import RpcError
+from neomacs.errors import NoFrame, RpcError
 from neomacs.rpc.api import CAPABILITIES, PROTOCOL, method
 from neomacs.rpc.protocol import Connection
-from neomacs.window import Frame, Split
+from neomacs.window import Frame, Split, Window
 
 PROTOCOL_MISMATCH = -32001
 NO_SUCH_FRAME = -32002
@@ -254,6 +254,34 @@ def panel(conn: Connection, panel: int, action: str, arg: Any = None) -> None:
         frame.schedule_update()
     else:
         raise RpcError(f"unknown panel action: {action}")
+    conn.editor.last_frame = frame
+
+
+@method("ui.tab")
+def tab(conn: Connection, view: int, action: str, index: Any, to: Any = None) -> None:
+    """The user acted on a tab of a window (WORKSPACE 7): `activate` it,
+    `close` it, or `move` it to the place TO.  INDEX is the tab's place in
+    the strip the frontend was last sent."""
+    frame = _frame(conn)
+    window = frame.views.get(view)
+    if not isinstance(window, Window) or window not in frame.windows():
+        raise RpcError(f"no such window: {view}")
+    if not isinstance(index, int) or not 0 <= index < len(window.tabs):
+        raise RpcError(f"window {view} has no tab {index}")
+    if action == "activate":
+        window.show(window.tabs[index])
+        frame.focus_view(window)
+    elif action == "close":
+        try:
+            frame.close_tab(window, window.tabs[index])
+        except NoFrame:
+            frame.show_message("This is the only tab")
+    elif action == "move":
+        if not isinstance(to, int) or not 0 <= to < len(window.tabs):
+            raise RpcError(f"window {view} has no place {to}")
+        window.move_tab(index, to)
+    else:
+        raise RpcError(f"unknown tab action: {action}")
     conn.editor.last_frame = frame
 
 

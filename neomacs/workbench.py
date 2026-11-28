@@ -32,6 +32,13 @@ Option(
     "Whether a new window shows the meta bar, the sidebars and the status bar. "
     "Each can be shown and hidden in a window afterwards.",
 )
+Option(
+    "tabs",
+    bool,
+    True,
+    "Whether each window has a strip of tabs above it, one for each buffer "
+    "that has been shown in it.",
+)
 
 
 def default_regions(editor: Editor) -> dict[str, dict[str, Any]]:
