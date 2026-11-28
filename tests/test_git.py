@@ -559,3 +559,43 @@ def test_the_frontend_is_told_where_head_is(ui: HeadlessUI, repo: Path) -> None:
     assert ui.model.git["head"] == before  # staging is not committing
     ui.call("git.commit", "second")
     wait_for(lambda: (ui.idle(), (ui.model.git or {}).get("head") != before)[1], "HEAD moving")
+
+
+def test_git_is_not_left_running_when_reading_a_version_is_given_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+    import stat
+
+    from neomacs import git
+
+    # A git that says where it is and then never finishes.
+    fake = tmp_path / "bin" / "git"
+    fake.parent.mkdir()
+    pid_file = tmp_path / "pid"
+    fake.write_text(f"#!/bin/sh\necho $$ > {pid_file}\nexec sleep 60\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{fake.parent}{os.pathsep}{os.environ['PATH']}")
+
+    def running() -> bool:
+        try:
+            os.kill(int(pid_file.read_text()), 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    async def cancelled() -> None:
+        task = asyncio.ensure_future(git.show(tmp_path, ":x"))
+        while not pid_file.exists() or not pid_file.read_text().strip():
+            await asyncio.sleep(0.01)
+        assert running()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancelled())
+    assert not running()
+    pid_file.unlink()
+    monkeypatch.setattr(git, "_TIMEOUT", 0.3)
+    assert asyncio.run(git.show(tmp_path, ":x")) is None  # timed out
+    assert not running()

@@ -229,9 +229,19 @@ async def show(directory: Path, what: str) -> str | None:
             stderr=asyncio.subprocess.DEVNULL,
             env={**os.environ, **_ENV},
         )  # fmt: skip
-        data, _ = await asyncio.wait_for(process.communicate(), _TIMEOUT)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - no git to run
         return None
+    try:
+        data, _ = await asyncio.wait_for(process.communicate(), _TIMEOUT)
+    except TimeoutError:
+        return None
+    finally:
+        # Timed out, or the command waiting was cancelled: git does not outlive it.
+        if process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.shield(process.wait())
     if process.returncode != 0:
         return None
     # Read as a file's bytes are, so that the two sides of a diff differ
