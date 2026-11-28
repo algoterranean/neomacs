@@ -49,7 +49,8 @@ function drag(event: PointerEvent, move: (e: PointerEvent) => void, done: (e: Po
   target.addEventListener("pointercancel", onUp);
 }
 
-export class Workspace {
+/** The main area: the window tree and the panels around it.  ("Workspace" is the engine's word for a project.) */
+export class MainArea {
   readonly root: HTMLDivElement;
   private floating: HTMLDivElement;
   private host: LayoutHost;

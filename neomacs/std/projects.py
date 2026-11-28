@@ -23,10 +23,13 @@ def _names(text: str) -> list[Candidate]:
     return rank(found, text) if text else found
 
 
-async def _ask(prompt: str) -> Workspace:
-    name = await ed.minibuffer.read(
-        prompt, completer=FunctionCompleter(_names), history="projects", submit_selects=True
-    )
+async def _ask(prompt: str, given: int | str = "") -> Workspace:
+    """The project GIVEN names, by its id or its name; asked for if none is given."""
+    name: int | str = given
+    if not given:
+        name = await ed.minibuffer.read(
+            prompt, completer=FunctionCompleter(_names), history="projects", submit_selects=True
+        )
     workspace = ed.workspaces.get(name)
     if workspace is None:
         raise NeomacsError(f"There is no project called {name}")
@@ -42,10 +45,10 @@ def add_project(path: Annotated[Path, Ask.file("Add project (a directory): ")]) 
 
 
 @command(name="project.switch")
-async def switch_project() -> None:
+async def switch_project(project: int | str = "") -> None:
     """Show another project.  This one's windows and buffers are left as they
     are, to come back to."""
-    workspace = await _ask("Switch to project: ")
+    workspace = await _ask("Switch to project: ", project)
     ed.frame.switch(workspace)
     ed.message(f"Project {workspace.name}")
 
@@ -73,20 +76,30 @@ def previous_project() -> None:
 
 
 @command(name="project.rename")
-async def rename_project() -> None:
-    """Change the name the current project is shown by."""
-    workspace = ed.frame.workspace
+async def rename_project(project: int | str = "", name: str = "") -> None:
+    """Change the name a project is shown by: the current one, unless another is named."""
+    workspace = await _ask("Rename project: ", project) if project else ed.frame.workspace
     if not workspace.removable:
         raise NeomacsError(f"{workspace.name} cannot be renamed")
-    name = await ed.minibuffer.read(f"Rename project {workspace.name} to: ", initial=workspace.name)
+    if not name:
+        name = await ed.minibuffer.read(
+            f"Rename project {workspace.name} to: ", initial=workspace.name
+        )
     ed.workspaces.rename(workspace, name)
     ed.message(f"Project {workspace.name}")
 
 
 @command(name="project.remove")
-async def remove_project() -> None:
+async def remove_project(project: int | str = "") -> None:
     """Take a project out of the list.  Its buffers are closed; its files are
     not touched.  Refused while it has unsaved buffers."""
-    workspace = await _ask("Remove project: ")
+    workspace = await _ask("Remove project: ", project)
     ed.workspaces.remove(workspace)
     ed.message(f"Removed the project {workspace.name}")
+
+
+@command(name="project.move")
+async def move_project(project: int | str = "", index: int = 0) -> None:
+    """Put a project at another place in the list."""
+    workspace = await _ask("Move project: ", project)
+    ed.workspaces.move(workspace, int(index))

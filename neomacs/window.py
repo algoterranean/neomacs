@@ -484,6 +484,12 @@ class Frame:
         # the panels and the focus above are its; the layouts of the others
         # are kept with them until they are shown again.
         self.workspace: Workspace = editor.workspaces.none
+        # The regions around the main area: which are shown, and how wide
+        # (WORKSPACE 5.1).  Kept here so that a command or a key can toggle one.
+        from neomacs import workbench
+
+        self.regions: dict[str, dict[str, Any]] = workbench.default_regions(editor)
+        self.sent_workbench: dict[str, Any] = {}
         editor.frames[self.id] = self
         self.schedule_update()
 
@@ -497,6 +503,11 @@ class Frame:
         return self.attached and not self.stalled and (self._scheduled or bool(self._in_flight))
 
     # -- focus, minibuffers, messages -----------------------------------------
+
+    @property
+    def draws_workbench(self) -> bool:
+        """Whether the frontend draws the meta bar, sidebars and status bar."""
+        return "workbench" in self.capabilities
 
     @property
     def draws_panels(self) -> bool:
@@ -865,6 +876,7 @@ class Frame:
             self._sent_menu = None
             self._popup_dirty = True
             self._popup_shown = False
+            self.sent_workbench = {}
             for view in self.views.values():
                 view.reset_sync()
         ui_faces: dict[str, int] | None = None
@@ -879,9 +891,16 @@ class Frame:
         if layout != self._sent_layout:
             body.append(["layout", layout])
             self._sent_layout = layout
-        if self.title != self._sent_title:
-            body.append(["title", self.title])
-            self._sent_title = self.title
+        # The project's name is the first thing in the window's title.
+        workspace = self.workspace
+        title = f"{workspace.name} - {self.title}" if workspace.removable else self.title
+        if title != self._sent_title:
+            body.append(["title", title])
+            self._sent_title = title
+        if self.draws_workbench:
+            from neomacs import workbench
+
+            workbench.sync(self, body)
         self._sync_chrome(body)
         for view in list(self.views.values()):
             view.sync(body)

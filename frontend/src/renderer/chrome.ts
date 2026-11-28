@@ -9,7 +9,8 @@ export class Chrome {
   private promptSlot: HTMLDivElement;
   private popup: HTMLDivElement;
   private previewSlot: HTMLDivElement;
-  private strip: HTMLDivElement;
+  /** The latest message and the keys typed so far.  It sits in the status bar. */
+  readonly strip: HTMLDivElement;
   private messageEl: HTMLSpanElement;
   private keysEl: HTMLSpanElement;
   private toasts: HTMLDivElement;
@@ -18,7 +19,7 @@ export class Chrome {
   private searchLabel: HTMLSpanElement;
   private searchSlot: HTMLDivElement;
 
-  constructor(root: HTMLElement) {
+  constructor() {
     const div = (className: string) => {
       const el = document.createElement("div");
       el.className = className;
@@ -62,7 +63,7 @@ export class Chrome {
     this.searchSlot = div("nm-searchbox-input");
     this.searchBox.append(this.searchLabel, this.searchSlot);
     this.main.append(this.palette, this.searchBox, this.toasts);
-    root.replaceChildren(this.main, this.strip);
+    // Where these go in the window is the workbench's business.
   }
 
   /**

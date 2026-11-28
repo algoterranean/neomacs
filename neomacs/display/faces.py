@@ -56,6 +56,10 @@ DARK: dict[str, Attrs] = {
     "divider": {"fg": "#333333"},
     "accent": {"fg": "#0e639c"},
     "scrollbar": {"fg": "#4a4a4a"},
+    # The regions of the workbench (WORKSPACE 5).
+    "metabar": {"fg": "#cccccc", "bg": "#323233"},
+    "sidebar": {"fg": "#cccccc", "bg": "#252526"},
+    "statusbar": {"fg": "#c8c8c8", "bg": "#2d2d2d"},
 }
 
 LIGHT: dict[str, Attrs] = {
@@ -90,6 +94,9 @@ LIGHT: dict[str, Attrs] = {
     "divider": {"fg": "#d8dee4"},
     "accent": {"fg": "#0969da"},
     "scrollbar": {"fg": "#c1c7cd"},
+    "metabar": {"fg": "#1f2328", "bg": "#dfe3e8"},
+    "sidebar": {"fg": "#1f2328", "bg": "#f3f4f6"},
+    "statusbar": {"fg": "#1f2328", "bg": "#e6e9ed"},
 }
 
 # Every theme, by name.  Evaluating this module again must not lose the ones
@@ -103,7 +110,7 @@ DEFAULT_THEME = "dark"
 UI_FACES = (
     "selection", "cursor", "gutter", "placeholder", "modeline",
     "popup", "popup-selected", "toast", "chrome-border", "divider", "accent", "scrollbar",
-    "error", "warning",
+    "error", "warning", "metabar", "sidebar", "statusbar",
 )  # fmt: skip
 
 

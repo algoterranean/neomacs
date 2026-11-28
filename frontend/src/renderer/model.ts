@@ -129,7 +129,34 @@ export interface PanelInfo {
   active: number | null;
 }
 
+/** A region of the workbench (WORKSPACE 5.1): shown or not, and how wide in ems if it has a width. */
+export interface RegionState {
+  shown: boolean;
+  width?: number;
+}
+
+/** A project, as the project sidebar lists it. */
+export interface WorkspaceInfo {
+  id: number;
+  name: string;
+  root: string | null;
+  current: boolean;
+  unsaved: number;
+}
+
+/** An item of the status bar.  One with a `command` runs it when clicked. */
+export interface StatusItem {
+  text: string;
+  command?: string;
+  title?: string;
+}
+
 export class FrameModel {
+  // The workbench, as the engine last described it (WORKSPACE 6).
+  regions: Record<string, RegionState> = {};
+  workspaces: WorkspaceInfo[] = [];
+  statusLeft: StatusItem[] = [];
+  statusRight: StatusItem[] = [];
   faces = new Map<number, FaceAttrs>();
   // Images and other resources by id.  Drawing them is stage F3.
   resources = new Map<number, { kind: string; source: Record<string, unknown> }>();
@@ -208,6 +235,16 @@ export class FrameModel {
           break;
         case "face_define":
           this.faces.set(a[0] as number, a[1] as FaceAttrs);
+          break;
+        case "regions":
+          this.regions = a[0] as Record<string, RegionState>;
+          break;
+        case "workspaces":
+          this.workspaces = a[0] as WorkspaceInfo[];
+          break;
+        case "status":
+          this.statusLeft = a[0] as StatusItem[];
+          this.statusRight = a[1] as StatusItem[];
           break;
         case "ui_faces":
           this.uiFaces = a[0] as Record<string, number>;

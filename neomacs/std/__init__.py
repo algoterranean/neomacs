@@ -23,6 +23,7 @@ from neomacs.std import (
     shell,
     structure,
     windows,
+    workbench,
 )
 
 __all__ = [
@@ -44,6 +45,7 @@ __all__ = [
     "recovery",
     "shell",
     "windows",
+    "workbench",
 ]
 
 global_map.default = "self_insert"
@@ -106,6 +108,7 @@ _BINDINGS = {
     "C-x b": "buffers.switch", "C-x k": "buffers.kill",
     "C-c p p": "project.switch", "C-c p a": "project.add",
     "C-c p n": "project.next", "C-c p b": "project.previous",
+    "s-b": "view.toggle_details_sidebar", "s-P": "execute_command",
     "M-x": "execute_command", "M-!": "shell_command",
     "C-x 5 2": "new_frame",
     "C-x C-c": "engine.exit",
@@ -162,6 +165,11 @@ MENU = [
     ("View/Close Window", "delete_window"),
     ("View/Next Window or Panel", "other_view"),
     ("View/Toggle Panel", "panel.toggle"),
+    ("View/Project Sidebar", "view.toggle_project_sidebar"),
+    ("View/Details Sidebar", "view.toggle_details_sidebar"),
+    ("View/Options Sidebar", "view.toggle_options_sidebar"),
+    ("View/Status Bar", "view.toggle_status_bar"),
+    ("View/Only the Text", "view.toggle_workbench"),
     ("View/Messages", "show_messages"),
     ("View/Theme…", "theme.select"),
     ("Help/Describe Key…", "describe_key"),

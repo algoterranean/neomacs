@@ -96,6 +96,10 @@ class FrameModel:
         self.last_window: int | None = None
         self.title = ""
         self.resets = 0
+        # The workbench (WORKSPACE 6), for a frontend that claimed it.
+        self.regions: dict[str, dict[str, Any]] = {}
+        self.workspaces: list[dict[str, Any]] = []
+        self.status: tuple[list[dict[str, Any]], list[dict[str, Any]]] = ([], [])
         # Minibuffers shown outside the text: view id -> (host, options).
         self.minibuffers: dict[int, tuple[dict[str, Any], dict[str, Any]]] = {}
         self.popup: dict[str, Any] | None = None
@@ -192,6 +196,12 @@ class FrameModel:
                     self.last_window = self.focus
             elif name == "title":
                 self.title = args[0]
+            elif name == "regions":
+                self.regions = args[0]
+            elif name == "workspaces":
+                self.workspaces = args[0]
+            elif name == "status":
+                self.status = (args[0], args[1])
             elif name == "focus":
                 self.focus = args[0]
                 if self.focus in self.windows():

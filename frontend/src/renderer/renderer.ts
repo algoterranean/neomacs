@@ -5,9 +5,10 @@ import { Chrome } from "./chrome.ts";
 import { FaceSheet } from "./faces.ts";
 import { overBudget, Perf } from "./perf.ts";
 import { applyTheme, themeVariables } from "./theme.ts";
+import { Workbench } from "./workbench.ts";
 import type { Position } from "./geometry.ts";
 import { Input } from "./input.ts";
-import { type Layout, Workspace } from "./layout.ts";
+import { type Layout, MainArea } from "./layout.ts";
 import { FrameModel, type RedrawEvent, type Run, type ViewModel } from "./model.ts";
 import { Mouse } from "./mouse.ts";
 import { type Json, RemoteError, Rpc } from "./protocol.ts";
@@ -38,6 +39,10 @@ interface Host {
   onMenuCommand(callback: (command: string) => void): void;
   openFrame(options: unknown): void;
   pathsOf(files: File[]): string[];
+  chooseDirectory(): Promise<string | null>;
+  contextMenu(items: { id: string; label: string }[]): Promise<string | null>;
+  reveal(path: string): void;
+  platform: string;
 }
 
 declare global {
@@ -52,7 +57,7 @@ const root = document.getElementById("root") as HTMLDivElement;
 const rpc = new Rpc((line) => host.send(line));
 const faces = new FaceSheet(document);
 const perf = new Perf();
-const chrome = new Chrome(root);
+const chrome = new Chrome();
 // Views and regions are labelled, and messages announced (FRONTEND 1): enough
 // to find one's way with a screen reader, not a full treatment.
 root.setAttribute("role", "application");
@@ -80,7 +85,7 @@ let shownMessage: { text: string; kind: string } | null = null;
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
 const input = new Input(root, rpc, { mac, optionIsMeta: true }, () => focusedElement(), (ms) => perf.key(ms));
 
-const workspace = new Workspace({
+const workspace = new MainArea({
   viewRoot: (id) => {
     const model = frame.views.get(id);
     return model ? elementFor(model, false).root : null;
@@ -100,6 +105,20 @@ const workspace = new Workspace({
   },
 });
 chrome.main.prepend(workspace.root, workspace.floatingLayer);
+
+// The frame around the main area (WORKSPACE 5).  A click there is a command
+// for the engine; it is sent as a notification, since one that asks the user
+// something does not answer until they have.
+const workbench = new Workbench(root, chrome.main, chrome.strip, {
+  command: (name, args = []) => rpc.notify("engine.call", name, args),
+  statusItem: (side, index) => rpc.notify("ui.status", side, index),
+  refocus: () => root.focus({ preventScroll: true }),
+  region: (name, shown, width) => rpc.notify("ui.region", name, shown, width),
+  chooseDirectory: () => host.chooseDirectory(),
+  contextMenu: (items) => host.contextMenu(items),
+  reveal: (path) => host.reveal(path),
+  ownTitleBar: host.platform === "darwin",
+});
 
 ViewElement.onUserScroll = () => {
   perf.scrolled = true;
@@ -286,6 +305,7 @@ function render(): void {
     chrome.setMessage(frame.message.text, frame.message.kind);
   }
   chrome.setKeys(frame.keys);
+  workbench.update(frame);
   input.cursorMoved();
   if (document.title !== frame.title && frame.title) document.title = frame.title;
   // Have the style and layout work done now, so that it is counted here and
@@ -425,7 +445,7 @@ async function attach(state: ConnectState): Promise<void> {
   }
   // "panels": this frontend draws window splits and panels (ENGINE 8.5).
   // "places": the parts of the window a minibuffer can be shown in besides the prompt (ENGINE 7.5).
-  const options: { [key: string]: Json } = { protocol: PROTOCOL, capabilities: ["panels"], places: [SEARCH_PLACE, CHOOSER_PLACE] };
+  const options: { [key: string]: Json } = { protocol: PROTOCOL, capabilities: ["panels", "workbench"], places: [SEARCH_PLACE, CHOOSER_PLACE] };
   let reply: Json;
   try {
     if (state.frame !== null && state.token !== null) {
@@ -475,6 +495,7 @@ window.neomacsDebug = {
     view: mainElement?.snapshot() ?? null,
     selections: mainElement?.model.selections ?? [],
     chrome: chrome.snapshot(),
+    workbench: workbench.snapshot(),
     input: { keys: input.keysSent, texts: input.textsSent, editContext: input.hasEditContext },
     activeIsRoot: document.activeElement === root,
     attaches,

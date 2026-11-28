@@ -22,6 +22,12 @@ const SOURCES: [string, string, "fg" | "bg"][] = [
   ["--nm-scroll", "scrollbar", "fg"],
   ["--nm-error", "error", "fg"],
   ["--nm-warning", "warning", "fg"],
+  ["--nm-meta", "metabar", "bg"],
+  ["--nm-meta-fg", "metabar", "fg"],
+  ["--nm-sidebar", "sidebar", "bg"],
+  ["--nm-sidebar-fg", "sidebar", "fg"],
+  ["--nm-status", "statusbar", "bg"],
+  ["--nm-status-fg", "statusbar", "fg"],
 ];
 
 /** Whether a colour is nearer white than black.  Only #rgb and #rrggbb are judged. */
