@@ -19,6 +19,8 @@ export interface FileTreeHost {
   command(name: string, args?: (string | number | boolean | null)[]): void;
   contextMenu(items: { id: string; label: string }[]): Promise<string | null>;
   reveal(path: string): void;
+  /** Tell the engine which directories of a project are open, so that it can keep them. */
+  folders(workspace: number, open: string[]): void;
 }
 
 interface Row {
@@ -48,7 +50,9 @@ export class FileTree {
   // For the project on show: the listing of each directory read so far.
   private listings = new Map<string, FileEntry[]>();
   // For every project seen: which of its directories are open.
-  private expanded = new Map<number, Set<string>>();
+  // Keyed by the project's directory, which is the same project to any engine;
+  // the ids an engine gives projects start again with each engine.
+  private expanded = new Map<string, Set<string>>();
   private rows: Row[] = [];
   private rowEls = new Map<string, HTMLDivElement>();
   private selected: string | null = null;
@@ -87,10 +91,11 @@ export class FileTree {
   }
 
   private get open(): Set<string> {
-    const id = this.workspace?.id ?? -1;
+    const id = this.workspace?.root ?? "";
     let set = this.expanded.get(id);
     if (!set) {
-      set = new Set();
+      // First sight of this project: the folders the engine kept for it, if any.
+      set = new Set(this.workspace?.folders ?? []);
       this.expanded.set(id, set);
     }
     return set;
@@ -138,7 +143,7 @@ export class FileTree {
         // It has gone, or cannot be read: it is not open any more.
         if (epoch !== this.epoch) return;
         this.listings.delete(directory);
-        this.open.delete(directory);
+        if (this.open.delete(directory)) this.report();
         this.render();
       },
     );
@@ -228,11 +233,19 @@ export class FileTree {
       // Closing a directory closes those inside it too.
       for (const other of [...this.open]) if (other === path || other.startsWith(`${path}/`)) this.open.delete(other);
     }
+    this.report();
     this.render();
+  }
+
+  /** The engine keeps which folders are open, for the next time the editor starts. */
+  private report(): void {
+    const workspace = this.workspace;
+    if (workspace && workspace.root !== null) this.host.folders(workspace.id, [...this.open].sort());
   }
 
   private collapseAll(): void {
     this.open.clear();
+    this.report();
     this.render();
   }
 
@@ -246,7 +259,10 @@ export class FileTree {
   private newIn(command: string, row: Row | null = this.rows.find((r) => r.path === this.selected) ?? null): void {
     if (!this.workspace || this.workspace.root === null) return;
     const directory = this.targetDirectory(row);
-    if (directory) this.open.add(directory);
+    if (directory && !this.open.has(directory)) {
+      this.open.add(directory);
+      this.report();
+    }
     this.setActive(false); // the name is asked for in the prompt
     this.host.command(command, [this.absolute(directory)]);
   }

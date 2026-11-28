@@ -253,6 +253,12 @@ class View:
         self._sent_selections = None
         self._sent_modeline = None
         self._reveal = (min(top, self.buffer.line_count), 0, "top")
+        if self.viewport is None:
+            # Never shown yet (a window a session has just made, say): there
+            # is no place it was scrolled to, so it is shown with its cursor in view.
+            line, offset = self.buffer.line_offset(self.cursor.pos)
+            if line > 1:
+                self._reveal = (line, offset, "center")
 
     def _lines(self, first: int, last: int) -> list[Any]:
         faces = self.frame.editor.faces
@@ -561,6 +567,8 @@ class Frame:
         self.sent_workbench: dict[str, Any] = {}
         # A side-by-side diff on show in this frame, if there is one (WORKSPACE 8).
         self.diff: Any = None
+        # Whether the layout a session kept for a frame has been given to this one.
+        self.session_applied = False
         editor.frames[self.id] = self
         self.schedule_update()
 

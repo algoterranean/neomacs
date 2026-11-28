@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from neomacs.dispatch import Dispatcher
     from neomacs.journal import Journal
     from neomacs.proc import Completed, Process
+    from neomacs.session import Session
     from neomacs.text.buffer import Buffer
     from neomacs.timers import Timer
     from neomacs.window import Frame, View, Window
@@ -89,6 +90,7 @@ class Editor:
         self.startup_problems: list[str] = []
         # Unsaved text is kept here while the engine serves (ENGINE 11.1).
         self.journal: Journal | None = None
+        self.session: Session | None = None
         self._init_state()
 
     def _init_state(self) -> None:
@@ -562,6 +564,14 @@ class Editor:
             # loaded before any connection is opened, on a socket or on
             # stdio, so that no client is served by an engine half configured.
             await startup.load_user_code(self)
+            # What was open last time (WORKSPACE 9), likewise before anyone
+            # is served.  The user's code has had its say on whether.
+            from neomacs import session
+
+            self.session = session.Session(self, paths.data_dir() / session.FILE)
+            if self.options.session_restore:
+                self.guard("restoring the session", self.session.restore)
+            self.session.start()
             if listen is not None:
                 listener = Listener(listen, self._accept_from_thread)
                 self.listen_path = listen
@@ -582,6 +592,8 @@ class Editor:
             for process in list(self.processes):
                 process.kill()
             self.guard("closing the recovery journal", self.journal.close)
+            if self.session is not None:
+                self.guard("writing the session", self.session.close)
             for task in list(self._tasks):
                 task.cancel()
             self.debugger.uninstall()

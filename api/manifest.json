@@ -1367,6 +1367,13 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.session.Session",
+   "kind": "class",
+   "signature": "(editor: 'Editor', path: 'Path') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.syntax.buffer.BufferSyntax",
    "kind": "class",
    "signature": "(buffer: 'Buffer') -> 'None'",

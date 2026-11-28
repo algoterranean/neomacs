@@ -1302,6 +1302,21 @@ export async function runSmoke(
           { opened, visited },
         );
 
+        // The engine is told which folders are open, to keep them for next time; and a
+        // project it has folders kept for is shown with them open.
+        const kept = await pyText("sorted(_wa.folders)");
+        await control.eval(
+          `(_wd / 'gamma' / 'inner').mkdir(parents=True)\n(_wd / 'gamma' / 'inner' / 'leaf.txt').write_text('leaf\\n')\n` +
+            `_wg = ed.workspaces.add(_wd / 'gamma')\n_wg.folders = {'inner'}\n_wf.switch(_wg)`,
+        );
+        await frames(8);
+        await settle();
+        const seeded = await paths();
+        await control.eval("_wf.switch(_wa)\ned.workspaces.remove(_wg)");
+        await frames(8);
+        await settle();
+        check("files.open_folders_are_kept_by_the_engine_and_come_back", kept === "['sub']" && JSON.stringify(seeded) === '["inner/","inner/leaf.txt"]', { kept, seeded });
+
         // With the keyboard, the arrows move through it and the engine hears none of it.
         const keysBefore = await sentKeys();
         const textBefore = await pyText("_wf.window.buffer.text");
@@ -1847,14 +1862,15 @@ export async function runSmoke(
     type("alive");
     for (let i = 0; i < 60; i++) {
       await new Promise((resolve) => setTimeout(resolve, 50));
-      if (((await fresh?.eval("ed.buffers.get('*scratch*').text")) as string) === "'alive'") break;
+      if (((await fresh?.eval("'alive' in next(iter(ed.frames.values())).focus.buffer.text")) as string) === "True") break;
     }
-    const revived = (await fresh?.eval("(len(ed.frames), ed.buffers.get('*scratch*').text, ed.buffers.get('keys') is None)")) as string;
+    // (What the window shows is what the session kept, which need not be the scratch buffer.)
+    const revived = (await fresh?.eval("(len(ed.frames), 'alive' in next(iter(ed.frames.values())).focus.buffer.text, ed.buffers.get('keys') is None)")) as string;
     check(
       "f4.engine_gone_and_restarted",
-      shell.engineRestarts === 1 && shell.engine() !== oldEngine && revived === "(1, 'alive', True)" &&
+      shell.engineRestarts === 1 && shell.engine() !== oldEngine && revived === "(1, True, True)" &&
         shell.lastEngineGoneDetail.includes("The engine stopped (SIGKILL)") &&
-        (await js<string>("document.querySelector('.nm-window .nm-content').textContent")) === "alive",
+        (await js<boolean>("[...document.querySelectorAll('.nm-window .nm-content')].some((c) => c.textContent.includes('alive'))")),
       { restarts: shell.engineRestarts, revived, detail: shell.lastEngineGoneDetail.slice(0, 80) },
     );
   } catch (error) {

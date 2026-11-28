@@ -70,6 +70,12 @@ def attach(conn: Connection, options: dict[str, Any] | None = None) -> dict[str,
     conn.intercept = spot_interrupt
     from neomacs.hooks import ui_attached
 
+    # The layout a session kept for this frame, before anything else is told
+    # of the frame: what it then sees is the frame as it will be shown, and
+    # what it says (unsaved text to be had back) is said last.
+    session = editor.session
+    if session is not None:
+        editor.guard("restoring the session's windows", session.attach, frame)
     ui_attached.run(frame)
     return {
         "frame": frame.id,
@@ -217,6 +223,27 @@ async def files_list(conn: Connection, workspace: int, directory: str = "") -> A
         return await filetree.list_directory(conn.editor, found, str(directory))
     except (OSError, ValueError) as error:
         raise RpcError(str(error)) from None
+
+
+@method("ui.folders")
+def folders(conn: Connection, workspace: int, open_folders: list[str]) -> None:
+    """The directories now open in the file tree of a project, each from the
+    project's root (WORKSPACE 6).  Kept for the session; nothing is done with them."""
+    from neomacs import filetree
+
+    found = conn.editor.workspaces.get(int(workspace))
+    if found is None or found.root is None:
+        return
+    kept: set[str] = set()
+    for folder in list(open_folders)[:2000]:
+        try:
+            filetree.inside(found.root, str(folder))
+        except ValueError:
+            continue
+        kept.add(str(folder))
+    if kept != found.folders:
+        found.folders = kept
+        conn.editor.update_frames()
 
 
 @method("ui.region")

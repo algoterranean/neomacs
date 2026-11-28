@@ -122,6 +122,7 @@ const workbench = new Workbench(root, chrome.main, chrome.strip, {
   chooseDirectory: () => host.chooseDirectory(),
   contextMenu: (items) => host.contextMenu(items),
   reveal: (path) => host.reveal(path),
+  folders: (workspace, open) => rpc.notify("ui.folders", workspace, open),
   listFiles: (workspace, directory) => rpc.call("files.list", workspace, directory) as unknown as Promise<FileEntry[]>,
   ownTitleBar: host.platform === "darwin",
 });

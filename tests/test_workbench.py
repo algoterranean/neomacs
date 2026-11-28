@@ -43,7 +43,7 @@ def test_a_frontend_that_draws_the_workbench_is_told_what_is_in_it(ui: HeadlessU
     assert ui.model.regions["project"]["width"] == 11.0 and "width" not in ui.model.regions["meta"]
     assert ui.model.workspaces == [
         {"id": ui.model.workspaces[0]["id"], "name": "No project", "root": None, "current": True,
-         "unsaved": 0}
+         "unsaved": 0, "folders": []}
     ]  # fmt: skip
     left, right = ui.model.status
     assert texts(left) == ["No project"] and left[0]["command"] == "project.switch"
