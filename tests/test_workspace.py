@@ -409,11 +409,17 @@ def test_a_command_that_switches_projects_keeps_the_buffer_it_started_in(
 def test_killing_the_scratch_buffer_does_not_leave_it_in_a_layout_put_away(
     ui: HeadlessUI, tmp_path: Path
 ) -> None:
-    add(ui, tree(tmp_path / "empty"))  # both projects' windows show *scratch*
+    (tmp_path / "empty").mkdir()
+    add(ui, tmp_path / "empty")
+    # Both projects' windows show *scratch*: this one's, and the one put away.
+    assert state(ui) == {
+        "project": "empty", "windows": [("*scratch*", 0)], "focus": "*scratch*", "panels": [],
+    }  # fmt: skip
     ui.keys("C-x", "k")
     here = state(ui)["windows"][0][0]
     assert here.startswith("*scratch*") and here in value(ui, "[b.name for b in ed.buffers]")
     ui.keys("C-c", "p", "n")
+    assert state(ui)["project"] == "No project"
     there = state(ui)["windows"][0][0]
     # A buffer that is registered, not the one that was killed.
     assert there in value(ui, "[b.name for b in ed.buffers]")
@@ -453,3 +459,37 @@ def test_buffer_choices_are_remembered(ui: HeadlessUI) -> None:
     ui.keys("C-x", "b", "M-p", "M-p")
     assert value(ui, "ed.frame.focus.buffer.text") == "first"
     ui.keys("C-g")
+
+
+def test_a_command_that_saves_into_another_project_goes_on_with_the_same_buffer(
+    ui: HeadlessUI, tmp_path: Path
+) -> None:
+    alpha, beta = tree(tmp_path / "alpha", "a.txt", "stays.txt"), tree(tmp_path / "beta", "b.txt")
+    add(ui, beta)
+    add(ui, alpha)
+    ui.open(alpha / "stays.txt")
+    ui.open(alpha / "a.txt")
+    ui.keys("C-f", "C-<space>", "C-f", "C-f")  # a selection, to be kept
+    before = value(ui, "(_f.focus.selections.ranges(), _f.focus.buffer.name)")
+    assert before == ([(1, 3)], "a.txt")
+    target = beta / "moved.txt"
+    ui.eval(
+        "seen = []\n"
+        "@command\n"
+        f"def save_elsewhere():\n"
+        f"    ed.buffer.save({str(target)!r})\n"
+        "    seen.append((ed.buffer.name, str(ed.buffer.file), ed.view.buffer.name))\n"
+        "    ed.buffer.insert(len(ed.buffer), 'added by the command after saving\\n')\n"
+    )
+    ui.call("save_elsewhere")
+    # The command went on with the buffer it saved, not the one that took its place.
+    assert value(ui, "seen") == [("a.txt", str(target.resolve()), "a.txt")]
+    assert value(ui, "ed.buffers.get('a.txt').text").endswith("added by the command after saving\n")
+    assert value(ui, "ed.buffers.get('stays.txt').text") == "stays.txt\n"
+    # It is shown in its new project with the selection it had.
+    assert state(ui)["project"] == "beta" and state(ui)["focus"] == "a.txt"
+    assert value(ui, "_f.focus.selections.ranges()") == [(1, 3)]
+    # The command that does this for the user says where it went.
+    ui.call("files.save_as", str(alpha / "back.txt"))
+    assert ui.message == f"Wrote {(alpha / 'back.txt').resolve()}"
+    assert state(ui)["project"] == "alpha"

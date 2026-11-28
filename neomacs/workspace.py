@@ -324,7 +324,9 @@ class Workspaces:
         owner = self.of(buffer)
         if owner is None:
             return
-        following: list[Frame] = []
+        # For each frame that was working in the buffer: the view it was
+        # working in, and where its selections were.
+        following: list[tuple[Frame, View, list[tuple[int, int]], int]] = []
         for frame in list(self.editor.frames.values()):
             if frame.workspace is owner:
                 continue
@@ -332,7 +334,8 @@ class Workspaces:
                 if view.buffer is not buffer:
                     continue
                 if view is frame.focus:
-                    following.append(frame)
+                    selections = view.selections
+                    following.append((frame, view, selections.ranges(), selections.primary_index))
                 panel: Any = getattr(view, "panel", None)
                 if panel is not None:
                     panel.close(view)
@@ -344,10 +347,18 @@ class Workspaces:
             for arrangement in workspace.arrangements.values():
                 self._stored_away(arrangement, workspace, buffer)
         from neomacs import panels
+        from neomacs.editor import pins_var
 
-        for frame in following:
+        for frame, left, ranges, primary in following:
             frame.switch(owner)
-            panels.place(frame, buffer, "document", focus=True)
+            view = panels.place(frame, buffer, "document", focus=True)
+            # The cursor and what was selected go with the text.
+            view.selections.set(ranges, primary)
+            # A command doing this is still working on the buffer it saved,
+            # which is now in this view: what it has pinned moves with it.
+            pins: Any = pins_var.get()
+            if pins is not None and pins[0] is left:
+                pins_var.set((view, frame.window, buffer))
 
 
 def _workspaces() -> Workspaces | None:
