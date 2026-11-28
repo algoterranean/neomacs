@@ -113,9 +113,12 @@ async def run_status_item(frame: Frame, side: str, index: int) -> None:
     target = described_view(frame)
     # A question that was being asked is given up: the user has turned to
     # something else, and a prompt left open with the keyboard elsewhere
-    # could not be answered or dismissed by typing.
-    for minibuffer in list(frame.prompts):
-        minibuffer.close()
+    # could not be answered or dismissed by typing.  That goes for a box in
+    # a named place (the search, the kill ring's chooser) as much as for one
+    # in the prompt area, and for whichever has the keyboard now.
+    for minibuffer in list(frame.minibuffers.values()):
+        if minibuffer.host[0] in ("prompt", "place") or minibuffer.view is frame.focus:
+            minibuffer.close()
     if target.id in frame.views and frame.focus is not target:
         frame.focus_view(target)  # what is asked next is asked about this view
     await frame.editor.dispatcher.call(frame, command, [])

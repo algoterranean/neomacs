@@ -227,3 +227,28 @@ def test_the_bar_describes_the_view_with_the_keyboard_and_a_click_acts_there(
         ui.client.notify("ui.status", side, index)
     ui.idle()
     assert ui.prompt is None
+
+
+def test_a_click_on_the_bar_gives_up_a_search_in_a_place_of_its_own(tmp_path: Path) -> None:
+    """A box in a named place is not among the frame's prompts; it is given
+    up all the same, or it would stay open with the keyboard elsewhere."""
+    (tmp_path / "long.txt").write_text("".join(f"line {i}\n" for i in range(1, 41)))
+    attach = {**WORKBENCH, "places": ["search"]}
+    with running_engine() as path, HeadlessUI(path, rows=14, cols=70, attach=attach) as ui:
+        ui.eval(f"_f = ed.frames[{ui.frame_id}]")
+        ui.open(tmp_path / "long.txt")
+        ui.keys("C-s")
+        ui.type("line")
+        assert ui.prompt is None and len(ui.model.minibuffers) == 1
+        assert value(ui, "[m.host[0] for m in _f.minibuffers.values()]") == ["place"]
+        ui.client.notify("ui.status", "right", 0)
+        ui.idle()
+        # The search has gone; the only question open is the one the click asked.
+        assert ui.prompt == "Go to line: "
+        assert value(ui, "[m.host[0] for m in _f.minibuffers.values()]") == ["prompt"]
+        ui.type("30")
+        ui.keys("<return>")
+        assert value(ui, "_f.window.buffer.line_of(_f.window.cursor.pos)") == 30
+        assert ui.model.minibuffers == {} and value(ui, "_f.focus is _f.window") is True
+        ui.type("x")  # the keyboard is the window's again
+        assert value(ui, "_f.window.buffer.text.splitlines()[29]") == "xline 30"
