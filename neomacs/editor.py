@@ -148,6 +148,10 @@ class Editor:
         # listings a frontend holds may be stale, and git's answers by root.
         self.files_generation = 0
         self.files_status: dict[Any, Any] = {}
+        # What git says of each project's repository, by project id, as the
+        # git panel is told it (WORKSPACE 5.5); and the generation it was asked at.
+        self.git_states: dict[int, dict[str, Any] | None] = {}
+        self.git_asked: dict[int, int] = {}
         from neomacs.ext.registry import Extensions
 
         self.extensions = Extensions(self)

@@ -329,6 +329,8 @@ export class ViewElement {
     content.className = "nm-content";
     // Paragraph attributes (ENGINE 4.3).  Numbers only, in ems of the default face.
     const attrs = line[0];
+    // A face for the whole row: its background runs from edge to edge (a diff's marks).
+    if (typeof attrs["face"] === "number") el.classList.add(`f${attrs["face"]}`);
     const em = (value: unknown) => (typeof value === "number" && value >= 0 && value < 200 ? `${value}em` : "");
     if (attrs["align"] === "center" || attrs["align"] === "right") content.style.textAlign = attrs["align"];
     if (em(attrs["indent"])) content.style.paddingLeft = em(attrs["indent"]);

@@ -100,7 +100,10 @@ def viewport(conn: Connection, view: int, first: int, last: int, page_lines: int
     target = frame.views.get(view)
     if target is None:
         return
+    before = target.viewport
     target.viewport = (max(1, int(first)), max(1, int(last)), max(1, int(page_lines)))
+    if frame.diff is not None and (before is None or before[0] != target.viewport[0]):
+        frame.diff.scrolled(target)  # the other side of a diff keeps up (WORKSPACE 8)
     frame.schedule_update()
 
 

@@ -100,6 +100,7 @@ class FrameModel:
         self.regions: dict[str, dict[str, Any]] = {}
         self.workspaces: list[dict[str, Any]] = []
         self.status: tuple[list[dict[str, Any]], list[dict[str, Any]]] = ([], [])
+        self.git: dict[str, Any] | None = None  # the project's repository, as last told
         self.files_changed = 0  # times told that file listings may be stale
         # Minibuffers shown outside the text: view id -> (host, options).
         self.minibuffers: dict[int, tuple[dict[str, Any], dict[str, Any]]] = {}
@@ -203,6 +204,8 @@ class FrameModel:
                 self.workspaces = args[0]
             elif name == "status":
                 self.status = (args[0], args[1])
+            elif name == "git":
+                self.git = args[0]
             elif name == "files_changed":
                 self.files_changed += 1
             elif name == "focus":

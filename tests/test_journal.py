@@ -117,6 +117,10 @@ def test_unsaved_text_is_offered_back_after_the_engine_is_killed(tmp_path: Path)
         assert value(ui.client, "ed.buffer.name") == "*scratch*"
         assert value(ui.client, "ed.buffer.text").endswith("scratch work")
         assert value(ui.client, "ed.buffers.get('*recover*').text") == "Nothing to recover.\n"
+        # The recovered text is this engine's unsaved text now.  Its journal
+        # is written a moment after the edit: wait for that, or the engine
+        # may be gone first and leave nothing for the next to offer.
+        wait_for(lambda: "scratch work" in texts(data).get("*scratch*", ""))
         ui.client.notify("input.key", "C-x")
         ui.client.notify("input.key", "C-c")
 

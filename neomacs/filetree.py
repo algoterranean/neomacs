@@ -14,7 +14,9 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from neomacs import git
+from neomacs.hooks import ui_attached
 from neomacs.text.buffer import Buffer, after_save
+from neomacs.workspace import workspace_changed
 
 if TYPE_CHECKING:
     from neomacs.editor import Editor
@@ -28,6 +30,7 @@ def changed(editor: Editor) -> None:
     """Listings that frontends hold may be out of date: have them ask again."""
     editor.files_generation += 1
     editor.update_frames()
+    schedule_git(editor)
 
 
 def inside(root: Path, directory: str) -> Path:
@@ -40,7 +43,7 @@ def inside(root: Path, directory: str) -> Path:
     return root.joinpath(*relative.parts)
 
 
-async def _status(editor: Editor, root: Path) -> git.Status | None:
+async def status(editor: Editor, root: Path) -> git.Status | None:
     """The git state under ROOT, asked of git once for each time the files
     changed.  A tree with many folders open asks for them all at once: they
     share the one question, answered or not yet."""
@@ -68,7 +71,7 @@ async def list_directory(
     if root is None:
         return []
     target = inside(root, directory)
-    status = await _status(editor, root)
+    state = await status(editor, root)
     prefix = "" if directory in ("", ".") else directory.strip("/") + "/"
     entries: list[dict[str, Any]] = []
     with os.scandir(target) as found:
@@ -84,14 +87,48 @@ async def list_directory(
                 {
                     "name": entry.name,
                     "kind": "directory" if is_directory else "file",
-                    "git": status.of(path, is_directory) if status is not None else None,
-                    "ignored": status.is_ignored(path) if status is not None else False,
+                    "git": state.of(path, is_directory) if state is not None else None,
+                    "ignored": state.is_ignored(path) if state is not None else False,
                 }
             )
             if len(entries) >= MAX_ENTRIES:
                 break
     entries.sort(key=lambda e: (e["kind"] != "directory", e["name"].casefold(), e["name"]))
     return entries
+
+
+def schedule_git(editor: Editor) -> None:
+    """See that what git says of each project on show is asked for again, if
+    the files have changed since it last was (WORKSPACE 5.5)."""
+    generation = editor.files_generation
+    for frame in list(editor.frames.values()):
+        workspace = frame.workspace
+        if not frame.draws_workbench or editor.git_asked.get(workspace.id) == generation:
+            continue
+        editor.git_asked[workspace.id] = generation
+        if workspace.root is None:
+            editor.git_states[workspace.id] = None
+            continue
+        task = _ask_git(editor, workspace, generation)
+        editor.start_task(task, name="git status", frame=frame)
+
+
+async def _ask_git(editor: Editor, workspace: Workspace, generation: int) -> None:
+    root = workspace.root
+    if root is None:
+        return
+    found = await status(editor, root)
+    if editor.git_asked.get(workspace.id) != generation:
+        return  # asked again since: that answer is the one to show, not this
+    repository = found.repository if found is not None else None
+    described = repository.describe() if repository is not None else None
+    if editor.git_states.get(workspace.id, 0) != described:
+        editor.git_states[workspace.id] = described
+        editor.update_frames()
+
+
+def _shown(frame: Any) -> None:
+    schedule_git(frame.editor)
 
 
 def _saved(buffer: Buffer) -> None:
@@ -103,3 +140,5 @@ def _saved(buffer: Buffer) -> None:
 
 
 after_save.add(_saved)
+workspace_changed.add(_shown)
+ui_attached.add(_shown)

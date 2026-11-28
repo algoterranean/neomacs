@@ -38,7 +38,7 @@ export class Input {
   private composing = false;
   keysSent = 0;
   /** Asked about every key before it is sent: true means it was taken, and the engine is not told. */
-  intercept: ((event: KeyboardEvent) => boolean) | null = null;
+  intercept: ((event: KeyboardEvent) => boolean | "native") | null = null;
   textsSent = 0;
 
   constructor(
@@ -56,7 +56,9 @@ export class Input {
       "keydown",
       (event) => {
         const began = performance.now();
-        if (this.intercept?.(event)) {
+        const taken = this.intercept?.(event) ?? false;
+        if (taken === "native") return; // a text field of the frontend's own: the key is the browser's
+        if (taken) {
           // A widget of the frontend's own has the keyboard for now.
           event.preventDefault();
           event.stopPropagation();

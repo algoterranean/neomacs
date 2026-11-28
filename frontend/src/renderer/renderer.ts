@@ -420,10 +420,27 @@ rpc.onNotification("ui.focus", (what) => {
   if (what === "files") workbench.focusFiles();
 });
 // While the file tree has the keyboard, bare keys are its own.
-input.intercept = (event) => workbench.files.key(event);
-// A press of the mouse anywhere is the end of that.
-window.addEventListener("mousedown", () => workbench.files.setActive(false), true);
+// While the commit message is being typed, keys are that box's, as they are any text field's.
+input.intercept = (event) => {
+  if (workbench.git.typing) return workbench.git.key(event) ? true : "native";
+  return workbench.files.key(event);
+};
+// A press of the mouse anywhere is the end of both.
+window.addEventListener(
+  "mousedown",
+  (event) => {
+    workbench.files.setActive(false);
+    // (A press on the text does not move the browser's focus by itself: the page prevents that.)
+    if (workbench.git.typing && !(event.target instanceof HTMLTextAreaElement)) root.focus({ preventScroll: true });
+  },
+  true,
+);
 host.onMenuCommand((command) => {
+  if (workbench.git.typing) {
+    // The commit message is being typed: Cut, Paste, Undo and the like are about it.
+    if (workbench.git.edit(command, () => host.clipboardRead("clipboard"))) return;
+    root.focus({ preventScroll: true }); // any other command is the editor's, and takes the keyboard
+  }
   if (command === "yank") {
     // The menu's Paste: what is on the clipboard, sent as a paste.
     void host.clipboardRead("clipboard").then((text) => rpc.notify("input.paste", text, "clipboard"));

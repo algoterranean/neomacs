@@ -52,6 +52,9 @@ def build_line(buffer: Buffer, line: int, faces: FaceTable, providers: Iterable[
             pieces.append((max(span.start, start), min(span.end, end), span.priority, props))
     if gutter:
         attrs["gutter"] = {column: mark for column, (_, mark) in gutter.items()}
+    if isinstance(attrs.get("face"), str):
+        # A face for the whole row, its background from edge to edge.
+        attrs["face"] = faces.id_for(attrs["face"])
 
     if not pieces:
         return [attrs, [[0, text, 0]] if text else []]
