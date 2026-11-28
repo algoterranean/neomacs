@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -140,6 +141,41 @@ def test_a_project_below_the_top_of_its_repository(ui: HeadlessUI, project: Path
     assert states(listing(ui, workspace)) == {"util": None, "main.py": "modified"}
 
 
+def test_a_project_that_is_all_new_to_git_or_ignored_by_it(ui: HeadlessUI, project: Path) -> None:
+    (project / ".gitignore").write_text("docs/\n")
+    run_git(project, "init", "-q")
+    run_git(project, "add", ".gitignore", "b.txt")
+    run_git(project, "commit", "-q", "-m", "first")
+    new = add(ui, project / "src")  # nothing under it is tracked
+    assert states(listing(ui, new)) == {"util": "untracked", "main.py": "untracked"}
+    assert states(listing(ui, new, "util")) == {"deep.py": "untracked"}
+    out = add(ui, project / "docs")
+    assert states(listing(ui, out)) == {"guide.md": "ignored"}
+
+
+def test_folders_asked_for_at_once_share_one_question_of_git(ui: HeadlessUI, project: Path) -> None:
+    run_git(project, "init", "-q")
+    workspace = add(ui, project)
+    ui.eval(
+        "from neomacs import git as _git\n_asked = []\n_real = _git.status\n"
+        "async def _counting(directory):\n    _asked.append(directory)\n    return await _real(directory)\n"
+        "_git.status = _counting"
+    )
+    ui.call("files.refresh")
+    with ThreadPoolExecutor(4) as pool:  # four requests on the wire together
+        replies = list(
+            pool.map(lambda d: listing(ui, workspace, d), ("", "src", "src/util", "docs"))
+        )
+    assert [len(reply) for reply in replies] == [5, 2, 1, 1]
+    assert value(ui, "len(_asked)") == 1
+    listing(ui, workspace)  # answered already: not asked again
+    assert value(ui, "len(_asked)") == 1
+    ui.call("files.refresh")
+    listing(ui, workspace)
+    assert value(ui, "len(_asked)") == 2
+    ui.eval("_git.status = _real")
+
+
 def test_git_status_is_read_as_git_writes_it() -> None:
     output = "\0".join(
         [
@@ -168,6 +204,11 @@ def test_git_status_is_read_as_git_writes_it() -> None:
     # Under a prefix: the rest is left out, and the paths are from there.
     inner = git.parse("1 .M N... 1 1 1 a b sub/x.txt\0? other.txt\0", "sub/")
     assert inner.states == {"x.txt": "modified"}
+    # The project is inside a directory git lists whole: all of it is that.
+    new = git.parse("? top/\x00", "top/sub/")
+    assert new.of("a.txt") == "untracked" and new.of("d", True) == "untracked"
+    out = git.parse("! top/sub/\x00", "top/sub/")
+    assert out.is_ignored("a.txt") and out.of("a.txt") is None
     # The most pressing state inside is the directory's.
     mixed = git.parse("? d/a\x001 M. N... 1 1 1 a b d/b\x00u UU N... 1 1 1 1 a b c d/c\x00")
     assert mixed.of("d", True) == "conflicted"
@@ -259,6 +300,17 @@ def test_renaming_takes_the_buffers_along(ui: HeadlessUI, project: Path) -> None
     assert ui.message == "Renamed src to lib"
     answer(ui, "files.rename", [str(project / "A.txt")], "old.txt")
     assert ui.message == "old.txt exists already" and (project / "A.txt").exists()
+    # A name no file has yet, but a buffer is visiting: refused, or the two
+    # buffers would save over each other.
+    ui.open(project / "unborn.txt")
+    ui.type("not saved yet")
+    answer(ui, "files.rename", [str(project / "A.txt")], "unborn.txt")
+    assert ui.message == "The buffer unborn.txt is visiting unborn.txt already"
+    assert (project / "A.txt").exists() and not (project / "unborn.txt").exists()
+    ui.open(project / "newdir" / "inside.txt")
+    answer(ui, "files.rename", [str(project / "docs")], "newdir")  # a buffer below the new name
+    assert ui.message == "The buffer inside.txt is visiting newdir already"
+    assert (project / "docs").is_dir()
 
 
 def test_deleting_asks_first_and_moves_to_the_trash(

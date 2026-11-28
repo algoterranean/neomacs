@@ -27,6 +27,10 @@ class Status:
 
     states: dict[str, str] = field(default_factory=dict[str, str])
     ignored: set[str] = field(default_factory=set[str])
+    # The directory itself, or one above it, is new to git or ignored by it:
+    # then so is everything in it, and git lists nothing inside.
+    all_untracked: bool = False
+    all_ignored: bool = False
 
     def _under(self, path: str, names: set[str] | dict[str, str]) -> str | None:
         """The entry of NAMES that is PATH or a directory above it."""
@@ -40,11 +44,13 @@ class Status:
         return None
 
     def is_ignored(self, path: str) -> bool:
-        return self._under(path, self.ignored) is not None
+        return self.all_ignored or self._under(path, self.ignored) is not None
 
     def of(self, path: str, directory: bool = False) -> str | None:
         """The state of the file PATH, or of the most pressing thing in the
         directory PATH; None when nothing there has changed."""
+        if self.all_untracked:
+            return "untracked"
         found = self._under(path, self.states)
         if found is not None:
             return self.states[found]  # itself, or a directory above that is all new
@@ -79,6 +85,13 @@ def parse(output: str, prefix: str = "") -> Status:
             path, xy = record[2:], kind * 2
         else:
             continue  # a header, or the empty end
+        if path.endswith("/") and prefix.startswith(path):
+            # A directory at or above PREFIX, listed whole.
+            if kind == "!":
+                status.all_ignored = True
+            elif kind == "?":
+                status.all_untracked = True
+            continue
         if not path.startswith(prefix):
             continue
         path = path[len(prefix) :]

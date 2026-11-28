@@ -109,6 +109,11 @@ async def rename(path: str = "") -> None:
         return
     new = _named(old.parent, name)
     visiting = _visiting(old)
+    # A buffer may be visiting the new name though no file has it yet: two
+    # buffers on one file would each overwrite the other's work.
+    taken = [b for b in _visiting(new) if b not in visiting]
+    if taken:
+        raise NeomacsError(f"The buffer {taken[0].name} is visiting {_shown(new)} already")
     new.parent.mkdir(parents=True, exist_ok=True)
     old.rename(new)
     for buffer in visiting:

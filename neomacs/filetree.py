@@ -8,6 +8,7 @@ command, when the window gets the keyboard back, and when the user asks.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -40,15 +41,21 @@ def inside(root: Path, directory: str) -> Path:
 
 
 async def _status(editor: Editor, root: Path) -> git.Status | None:
-    """The git state under ROOT, asked of git once for each time the files changed."""
-    cache: dict[Path, tuple[int, git.Status | None]] = editor.files_status
+    """The git state under ROOT, asked of git once for each time the files
+    changed.  A tree with many folders open asks for them all at once: they
+    share the one question, answered or not yet."""
+    cache: dict[Path, tuple[int, asyncio.Future[git.Status | None]]] = editor.files_status
     held = cache.get(root)
     generation = editor.files_generation
-    if held is not None and held[0] == generation:
-        return held[1]
-    found = await git.status(root)
-    cache[root] = (generation, found)
-    return found
+    loop = asyncio.get_running_loop()
+    if held is not None and held[0] == generation and held[1].get_loop() is loop:
+        asked = held[1]
+        if not (asked.done() and (asked.cancelled() or asked.exception() is not None)):
+            # Shielded: one asker giving up does not take the answer from the rest.
+            return await asyncio.shield(asked)
+    asked = loop.create_task(git.status(root))
+    cache[root] = (generation, asked)
+    return await asyncio.shield(asked)
 
 
 async def list_directory(
