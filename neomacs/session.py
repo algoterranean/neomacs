@@ -16,6 +16,7 @@ the first frame that attaches, the second's to the second.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import os
 import threading
@@ -90,6 +91,12 @@ class Session:
         self._projects: list[Workspace | None] = []  # by their place in what was read
         self.missing: list[str] = []
         self._told = False
+        # Files a window's tabs may still have opened that their project's list did not.
+        self._visits_left = MAX_FILES
+        # Writes are numbered in the order they were decided on the owner
+        # thread; one is passed over if a later one has been done already.
+        self._order = itertools.count(1)
+        self._done = 0
 
     # -- taking ----------------------------------------------------------------------
 
@@ -108,6 +115,7 @@ class Session:
                 "children": [self._tree(child) for child in node.children],
             }
         tabs = [tab for tab in (self._tab(node, b) for b in node.tabs) if tab is not None]
+        tabs = tabs[-MAX_FILES:]
         active = str(node.buffer.file) if node.buffer.file is not None else None
         return {"tabs": tabs, "active": active}
 
@@ -210,14 +218,20 @@ class Session:
         try:
             text = json.dumps(self.take(), indent=1)
             if text != self._written:
-                await self.editor.in_thread(self._replace, text)
+                await self.editor.in_thread(self._replace, text, next(self._order))
         except OSError as exc:
             self.editor.note_once(f"The session could not be written: {exc}")
         finally:
             self._busy = False
 
-    def _replace(self, text: str) -> None:
+    def _replace(self, text: str, order: int) -> None:
+        """Write TEXT, unless something decided later has been written already:
+        a write in a worker thread must not land on top of the last one made
+        as the engine stops."""
         with self._io:
+            if order < self._done:
+                return
+            self._done = order
             _write(self.path, text)
             self._written = text
 
@@ -228,9 +242,9 @@ class Session:
             self._timer.cancel()
             self._timer = None
         with contextlib.suppress(OSError):
-            text = json.dumps(self.take(), indent=1)
-            if text != self._written:
-                self._replace(text)
+            # Always, and numbered last: a write still under way in a worker
+            # thread is of an older state, and is passed over when it gets here.
+            self._replace(json.dumps(self.take(), indent=1), next(self._order))
 
     # -- reading ---------------------------------------------------------------------
 
@@ -272,11 +286,17 @@ class Session:
         return workspace
 
     def _buffer(self, file: str, workspace: Workspace | None = None) -> Buffer | None:
-        """The buffer for FILE, visited if it is still there to visit."""
+        """The buffer for FILE, visited if it is still there to visit.  For a
+        tab (no WORKSPACE given), only while there are visits left to make:
+        a file's being a tab does not get it past the limit on files."""
         path = Path(file)
         existing = self.editor.buffers.find_file(path)
         if existing is not None:
             return existing
+        if workspace is None:
+            if self._visits_left <= 0:
+                return None
+            self._visits_left -= 1
         if not path.is_file():
             if file not in self.missing:
                 self.missing.append(file)
@@ -287,7 +307,9 @@ class Session:
             self.missing.append(file)
             return None
         if workspace is not None:
-            self.editor.workspaces.adopt(buffer, workspace)
+            # Not `adopt`: made with no frame attached, it was taken for no
+            # project's, and a file outside every root has only this to go by.
+            self.editor.workspaces.assign(buffer, workspace)
         return buffer
 
     # -- a frame attaches ----------------------------------------------------------------
@@ -346,21 +368,28 @@ class Session:
         from neomacs.panels import Panel
 
         first = frame.window
-        made: list[Window] = []
+        # One for each window that was, in order: the window made for it, or
+        # None if nothing of it was left to show.
+        made: list[Window | None] = []
         tree = saved.get("tree")
+        not_one = frame.draws_panels  # the saved place counts every window that was
         if not frame.draws_panels:
             # One window is all this frontend shows: the one that had the keyboard.
             leaves = self._leaves(tree)
             tree = leaves[min(int(saved.get("window", 0)), len(leaves) - 1)] if leaves else None
         root = self._build(frame, tree, made)
-        if root is None or not made:
+        windows = [window for window in made if window is not None]
+        if root is None or not windows:
             return  # nothing of it is left to show
         frame.root = root
-        focus = made[min(max(0, int(saved.get("window", 0))), len(made) - 1)]
+        # The window that had the keyboard, if it is one of those made; the
+        # first, if it is not.  Its place is among the windows that were.
+        place = int(saved.get("window", 0)) if not_one else 0
+        focus = made[place] if 0 <= place < len(made) else None
+        focus = focus if focus is not None else windows[0]
         frame.window = focus
         frame.focus = focus
-        if first not in made:
-            first.close()
+        first.close()
         for panel in saved.get("panels", []):
             name = str(panel["name"])
             if frame.draws_panels and name not in frame.panels:
@@ -380,7 +409,7 @@ class Session:
             return found
         return [node] if isinstance(node, dict) else []
 
-    def _build(self, frame: Frame, node: Any, made: list[Window]) -> Any:
+    def _build(self, frame: Frame, node: Any, made: list[Window | None]) -> Any:
         """The window tree NODE describes, or None if nothing in it can be shown."""
         from neomacs.window import Split, Window
 
@@ -410,6 +439,7 @@ class Session:
             if buffer is not None and all(buffer is not other for other, _, _ in tabs):
                 tabs.append((buffer, int(tab[1]), int(tab[2])))
         if not tabs:
+            made.append(None)
             return None
         window = Window(frame, tabs[0][0])
         active = tabs[0][0]
@@ -421,5 +451,7 @@ class Session:
             if str(buffer.file) == saved.get("active"):
                 active = buffer
         window.show(active)
+        # (It has not been shown to a frontend yet: when it is, it is shown
+        # with its cursor in view.  See `View.reset_sync`.)
         made.append(window)
         return window

@@ -253,6 +253,12 @@ class View:
         self._sent_selections = None
         self._sent_modeline = None
         self._reveal = (min(top, self.buffer.line_count), 0, "top")
+        if self.viewport is None:
+            # Never shown yet (a window a session has just made, say): there
+            # is no place it was scrolled to, so it is shown with its cursor in view.
+            line, offset = self.buffer.line_offset(self.cursor.pos)
+            if line > 1:
+                self._reveal = (line, offset, "center")
 
     def _lines(self, first: int, last: int) -> list[Any]:
         faces = self.frame.editor.faces

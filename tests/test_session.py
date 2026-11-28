@@ -270,3 +270,92 @@ def test_a_damaged_file_is_passed_over(tmp_path: Path, tree: Path) -> None:
             assert state(ui)["projects"] == ["No project"]
             assert state(ui)["windows"] == [(["*scratch*"], "*scratch*", (1, 0))]
             stop(ui)
+
+
+# -- faults found in review --------------------------------------------------------------
+
+
+def test_a_file_outside_every_project_comes_back_in_the_one_it_was_opened_in(
+    tmp_path: Path, tree: Path
+) -> None:
+    data = tmp_path / "data"
+    stray = tmp_path / "elsewhere" / "stray.txt"
+    stray.parent.mkdir()
+    stray.write_text("stray\n")
+    owner = "ed.workspaces.of(ed.buffers.get('stray.txt')).name"
+    with engine(data) as ui:
+        ui.call("project.add", str(tree / "alpha"))
+        ui.eval(f"_f.window.show(ed.buffers.visit({str(stray)!r}))")
+        assert value(ui, owner) == "alpha"
+        stop(ui)
+    with engine(data) as ui:
+        assert value(ui, owner) == "alpha"
+        assert state(ui)["windows"] == [(["stray.txt"], "stray.txt", (1, 0))]
+        stop(ui)
+    with engine(data) as ui:  # and it is written back as alpha's, not as nobody's
+        assert value(ui, owner) == "alpha"
+
+
+def test_the_keyboard_goes_back_to_its_window_though_another_has_gone(
+    tmp_path: Path, tree: Path
+) -> None:
+    data = tmp_path / "data"
+    with engine(data) as ui:
+        ui.call("project.add", str(tree / "alpha"))
+        for name in ("one.txt", "two.txt", "three.txt"):
+            ui.open(tree / "alpha" / name)
+            ui.eval("_f.window.tabs[:] = [_f.window.buffer]")
+            if name != "three.txt":
+                ui.keys("C-x", "3")
+        ui.eval("_f.focus_view(_f.windows()[1])")
+        assert [w[1] for w in state(ui)["windows"]] == ["one.txt", "two.txt", "three.txt"]
+        assert state(ui)["focus"] == "two.txt"
+        stop(ui)
+    (tree / "alpha" / "one.txt").unlink()  # the first window has nothing left to show
+    with engine(data) as ui:
+        now = state(ui)
+        assert [w[1] for w in now["windows"]] == ["two.txt", "three.txt"]
+        assert now["focus"] == "two.txt"  # not the window that now has its place
+    (
+        tree / "alpha" / "two.txt"
+    ).unlink()  # the one that had the keyboard: the first is the fallback
+    with engine(data) as ui:
+        assert state(ui)["focus"] == "three.txt"
+
+
+def test_a_restored_cursor_is_in_view(tmp_path: Path, tree: Path) -> None:
+    data = tmp_path / "data"
+    with engine(data) as ui:
+        ui.call("project.add", str(tree / "alpha"))
+        ui.open(tree / "alpha" / "one.txt")
+        ui.eval("_f.window.selections.set([(_f.window.buffer.position(28, 2),) * 2])")
+        stop(ui)
+    with engine(data) as ui:
+        assert state(ui)["windows"] == [(["one.txt"], "one.txt", (28, 2))]
+        first, last, _ = value(ui, "_f.window.viewport")
+        assert first > 1 and first <= 28 <= last  # one window, one tab: still brought into view
+
+
+def test_a_write_decided_earlier_does_not_replace_a_later_one(tmp_path: Path, tree: Path) -> None:
+    data = tmp_path / "data"
+    with engine(data) as ui:
+        wait_for(lambda: (data / "session.json").exists(), "the session being written")
+        ui.eval(
+            "_s = ed.session; _s._closed = True\n"
+            "_early, _late = next(_s._order), next(_s._order)\n"
+            "_s._replace('the later state', _late)\n_s._replace('an earlier state', _early)"
+        )
+        assert (data / "session.json").read_text() == "the later state"
+
+
+def test_tabs_do_not_open_more_files_than_the_limit(tmp_path: Path, tree: Path) -> None:
+    data = tmp_path / "data"
+    with engine(data) as ui:
+        ui.call("project.add", str(tree / "alpha"))
+        path = str(tree / "alpha" / "one.txt")
+        ui.eval("ed.session._visits_left = 1")
+        assert value(ui, f"ed.session._buffer({path!r}).name") == "one.txt"
+        other = str(tree / "alpha" / "two.txt")
+        assert value(ui, f"ed.session._buffer({other!r})") is None  # none left to make
+        assert value(ui, f"ed.session._buffer({path!r}).name") == "one.txt"  # open already
+        assert value(ui, "ed.session.missing") == []  # it is there; it was only not opened

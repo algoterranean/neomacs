@@ -50,7 +50,9 @@ export class FileTree {
   // For the project on show: the listing of each directory read so far.
   private listings = new Map<string, FileEntry[]>();
   // For every project seen: which of its directories are open.
-  private expanded = new Map<number, Set<string>>();
+  // Keyed by the project's directory, which is the same project to any engine;
+  // the ids an engine gives projects start again with each engine.
+  private expanded = new Map<string, Set<string>>();
   private rows: Row[] = [];
   private rowEls = new Map<string, HTMLDivElement>();
   private selected: string | null = null;
@@ -89,11 +91,11 @@ export class FileTree {
   }
 
   private get open(): Set<string> {
-    const id = this.workspace?.id ?? -1;
+    const id = this.workspace?.root ?? "";
     let set = this.expanded.get(id);
     if (!set) {
       // First sight of this project: the folders the engine kept for it, if any.
-      set = new Set(this.workspace?.id === id ? (this.workspace.folders ?? []) : []);
+      set = new Set(this.workspace?.folders ?? []);
       this.expanded.set(id, set);
     }
     return set;

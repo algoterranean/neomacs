@@ -276,6 +276,12 @@ class Workspaces:
             workspace = frame.workspace if frame is not None else self.none
         buffer.locals[_OWNER] = workspace
 
+    def assign(self, buffer: Buffer, workspace: Workspace) -> None:
+        """Say that BUFFER was opened in WORKSPACE, whatever was noted before.
+        (A file under a project's root is that project's all the same.)"""
+        if not _editors_own(buffer):
+            buffer.locals[_OWNER] = workspace
+
     def _fallback(self, but: Buffer) -> Buffer:
         """A buffer any window can show: the scratch buffer, or another like
         it if that is the one going."""
