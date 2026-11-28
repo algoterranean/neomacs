@@ -18,6 +18,15 @@ export interface ViewInfo {
   gutter: { id: string; kind: string; side?: string; mode?: string; width?: number }[];
   margins?: { left: number; right: number };
   max_width?: number | null;
+  /** A window's tabs (WORKSPACE 7): absent when the engine has none to draw. */
+  tabs?: TabInfo[];
+}
+
+export interface TabInfo {
+  title: string;
+  modified: boolean;
+  active: boolean;
+  path?: string;
 }
 
 export class ProtocolError extends Error {}

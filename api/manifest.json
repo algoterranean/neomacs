@@ -2032,6 +2032,13 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.window.Frame.close_tab",
+   "kind": "method",
+   "signature": "(self, window: 'Window', buffer: 'Buffer | None' = None) -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.window.Frame.delete",
    "kind": "method",
    "signature": "(self) -> 'None'",
@@ -2175,6 +2182,20 @@
    "name": "neomacs.window.Window",
    "kind": "class",
    "signature": "(frame: 'Frame', buffer: 'Buffer') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Window.move_tab",
+   "kind": "method",
+   "signature": "(self, index: 'int', to: 'int') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.window.Window.show",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer') -> 'None'",
    "tier": "provisional",
    "since": "0.1"
   },

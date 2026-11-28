@@ -32,6 +32,13 @@ Option(
     "Whether a new window shows the meta bar, the sidebars and the status bar. "
     "Each can be shown and hidden in a window afterwards.",
 )
+Option(
+    "tabs",
+    bool,
+    True,
+    "Whether each window has a strip of tabs above it, one for each buffer "
+    "that has been shown in it.",
+)
 
 
 def default_regions(editor: Editor) -> dict[str, dict[str, Any]]:
@@ -96,6 +103,17 @@ def described_view(frame: Frame) -> Any:
     return frame.window if focus.id in frame.minibuffers else focus
 
 
+def give_up_questions(frame: Frame) -> None:
+    """The user has turned to something else with the mouse: a question that
+    was being asked is given up.  A prompt left open with the keyboard
+    elsewhere could not be answered or dismissed by typing.  That goes for a
+    box in a named place (the search, the kill ring's chooser) as much as for
+    one in the prompt area, and for whichever has the keyboard now."""
+    for minibuffer in list(frame.minibuffers.values()):
+        if minibuffer.host[0] in ("prompt", "place") or minibuffer.view is frame.focus:
+            minibuffer.close()
+
+
 async def run_status_item(frame: Frame, side: str, index: int) -> None:
     """A status item was clicked: run its command in the view the bar describes.
 
@@ -111,14 +129,7 @@ async def run_status_item(frame: Frame, side: str, index: int) -> None:
     if not command:
         return
     target = described_view(frame)
-    # A question that was being asked is given up: the user has turned to
-    # something else, and a prompt left open with the keyboard elsewhere
-    # could not be answered or dismissed by typing.  That goes for a box in
-    # a named place (the search, the kill ring's chooser) as much as for one
-    # in the prompt area, and for whichever has the keyboard now.
-    for minibuffer in list(frame.minibuffers.values()):
-        if minibuffer.host[0] in ("prompt", "place") or minibuffer.view is frame.focus:
-            minibuffer.close()
+    give_up_questions(frame)
     if target.id in frame.views and frame.focus is not target:
         frame.focus_view(target)  # what is asked next is asked about this view
     await frame.editor.dispatcher.call(frame, command, [])

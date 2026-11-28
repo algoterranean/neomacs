@@ -22,6 +22,7 @@ from neomacs.std import (
     search,
     shell,
     structure,
+    tabs,
     windows,
     workbench,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "prompts",
     "recovery",
     "shell",
+    "tabs",
     "windows",
     "workbench",
 ]
@@ -95,6 +97,10 @@ _BINDINGS = {
     "C-x p p": "panel.toggle", "C-x p o": "panel.focus",
     "C-x p n": "panel.next_tab", "C-x p k": "panel.close_tab", "C-x p d": "panel.dock",
     "C-x p f": "panel.float", "C-h e": "show_messages",
+    # tabs
+    "s-w": "tabs.close", "s-}": "tabs.next", "s-{": "tabs.previous",
+    "C-x t n": "tabs.next", "C-x t p": "tabs.previous", "C-x t k": "tabs.close",
+    "C-x t <left>": "tabs.move_left", "C-x t <right>": "tabs.move_right",
     # cursors
     "C-M-<down>": "add_cursor_below", "C-M-<up>": "add_cursor_above",
     "C-M-n": "add_cursor_below", "C-M-p": "add_cursor_above",
@@ -164,11 +170,15 @@ MENU = [
     ("View/Split Right", "split_window_right"),
     ("View/Close Window", "delete_window"),
     ("View/Next Window or Panel", "other_view"),
+    ("View/Next Tab", "tabs.next"),
+    ("View/Previous Tab", "tabs.previous"),
+    ("View/Close Tab", "tabs.close"),
     ("View/Toggle Panel", "panel.toggle"),
     ("View/Project Sidebar", "view.toggle_project_sidebar"),
     ("View/Details Sidebar", "view.toggle_details_sidebar"),
     ("View/Options Sidebar", "view.toggle_options_sidebar"),
     ("View/Status Bar", "view.toggle_status_bar"),
+    ("View/Tabs", "view.toggle_tabs"),
     ("View/Only the Text", "view.toggle_workbench"),
     ("View/Messages", "show_messages"),
     ("View/Theme…", "theme.select"),

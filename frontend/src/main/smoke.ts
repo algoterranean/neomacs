@@ -105,7 +105,7 @@ export async function runSmoke(
     // nothing else, and measures where things are.  Those checks run with the
     // bars and sidebars hidden; the workbench has checks of its own further on.
     await control.eval(
-      `ed.options.workbench = False\n` +
+      `ed.options.workbench = False\ned.options.tabs = False\n` +
         `for _r in ed.frames[${frame}].regions.values(): _r['shown'] = False\n` +
         `ed.update_frames()`,
     );
@@ -645,7 +645,8 @@ export async function runSmoke(
 
     // ---------------------------------------------------------------------------
     // Step 10 (F3, F4): the whole interface.
-    interface Shown { id: number; name: string; rect: number[]; focused: boolean; modeline: string; inPanel: string | null; inline: boolean; text: string }
+    interface TabShown { title: string; active: boolean; modified: boolean; rect: number[]; close: number[] }
+    interface Shown { id: number; name: string; rect: number[]; focused: boolean; modeline: string; tabs: TabShown[] | null; inPanel: string | null; inline: boolean; text: string }
     interface PanelShown { id: number; name: string; floating: boolean; rect: number[]; tabs: string[]; active: string | null }
     interface Arrangement { views: Shown[]; panels: PanelShown[]; dividers: number[][]; workspace: number[] }
     const arrangement = () => js<Arrangement>("window.neomacsDebug.arrangement()");
@@ -1270,6 +1271,106 @@ export async function runSmoke(
       await settle();
       const back = await mainRect();
       check("workbench.hidden_again", back[0] === 0 && back[1] === 0 && back[2] === 1000 && (await bench()).projects.length === 1, back);
+    }
+
+    // -- editor tabs: a strip above each window (WORKSPACE 7) --
+    {
+      const mid = (r: number[]) => [(r[0] ?? 0) + (r[2] ?? 0) / 2, (r[1] ?? 0) + (r[3] ?? 0) / 2] as [number, number];
+      const windows = async () => (await arrangement()).views.filter((v) => v.inPanel === null && !v.inline && v.tabs !== null);
+      const drawn = async (index = 0) => ((await windows())[index]?.tabs ?? []).map((t) => (t.active ? `[${t.title}]` : t.title) + (t.modified ? "*" : ""));
+      const tabAt = async (title: string, index = 0) => ((await windows())[index]?.tabs ?? []).find((t) => t.title === title) as TabShown;
+      const noStrips = (await windows()).length === 0 && (await js<number>("document.querySelectorAll('.nm-window-tabs:not([hidden])').length")) === 0;
+      await control.eval(
+        `import tempfile, pathlib\n_td = pathlib.Path(tempfile.mkdtemp()).resolve()\n_tw = ${win}\n_tb0 = _tw.buffer\n_tabs0 = list(_tw.tabs)\n` +
+          `for _n in ('one.txt', 'two.txt', 'three.txt'):\n    (_td / _n).write_text('in ' + _n + '\\n')\n    _tw.show(ed.buffers.visit(_td / _n))\n` +
+          `_tw.tabs[:] = [b for b in _tw.tabs if b.file and b.file.parent == _td]\ned.options.tabs = True\ned.update_frames()`,
+      );
+      await settle();
+      const first = (await windows())[0] as Shown;
+      const strip = await js<number[]>(`(() => { const r = document.querySelector('.nm-window-tabs').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })()`);
+      const stripRole = await js<string | null>("document.querySelector('.nm-window-tabs').getAttribute('role')");
+      await shot("15-tabs");
+      check(
+        "tabs.a_strip_above_the_window_names_its_buffers",
+        noStrips && JSON.stringify(await drawn()) === '["one.txt","two.txt","[three.txt]"]' && stripRole === "tablist" &&
+          (strip[3] ?? 0) > 10 && Math.abs((strip[1] ?? 0) + (strip[3] ?? 0) - (first.rect[1] ?? 0)) < 1.5 && first.text.trim() === "in three.txt",
+        { noStrips, drawn: await drawn(), strip, view: first.rect, text: first.text },
+      );
+
+      // A click shows the tab; typing marks it; the mark goes when the text is saved.
+      await mouseAt(...mid((await tabAt("one.txt")).rect));
+      const clicked = { drawn: await drawn(), buffer: await pyText("_tw.buffer.name"), text: ((await windows())[0] as Shown).text };
+      type("x");
+      await settle();
+      const marked = await drawn();
+      await control.eval("_tw.buffer.save()");
+      await settle();
+      check(
+        "tabs.a_click_shows_a_tab_and_unsaved_text_marks_it",
+        JSON.stringify(clicked.drawn) === '["[one.txt]","two.txt","three.txt"]' && clicked.buffer === "'one.txt'" && clicked.text.trim() === "in one.txt" &&
+          JSON.stringify(marked) === '["[one.txt]*","two.txt","three.txt"]' && JSON.stringify(await drawn()) === '["[one.txt]","two.txt","three.txt"]',
+        { clicked, marked, saved: await drawn() },
+      );
+
+      // Pulled along the strip, a tab takes the place it is let go at.
+      const from = mid((await tabAt("one.txt")).rect);
+      const last = (await tabAt("three.txt")).rect;
+      await dragFrom(from[0], from[1], (last[0] ?? 0) + (last[2] ?? 0) - 3, from[1]);
+      const pulled = { drawn: await drawn(), engine: await pyText("[b.name for b in _tw.tabs]") };
+      check(
+        "tabs.dragging_a_tab_moves_it",
+        JSON.stringify(pulled.drawn) === '["two.txt","three.txt","[one.txt]"]' && pulled.engine === "['two.txt', 'three.txt', 'one.txt']",
+        pulled,
+      );
+
+      // The close button, a middle click, and the key each close a tab; the buffers stay open.
+      await mouseAt(...mid((await tabAt("one.txt")).close));
+      const closed = await drawn();
+      const two = mid((await tabAt("two.txt")).rect);
+      contents.sendInputEvent({ type: "mouseDown", x: Math.round(two[0]), y: Math.round(two[1]), button: "middle", clickCount: 1 });
+      contents.sendInputEvent({ type: "mouseUp", x: Math.round(two[0]), y: Math.round(two[1]), button: "middle", clickCount: 1 });
+      await frames(4);
+      await settle();
+      const middled = await drawn();
+      await control.eval("_tw.show(ed.buffers.visit(_td / 'two.txt'))");
+      await settle();
+      press("w", ["meta"]);
+      await settle();
+      const keyed = { drawn: await drawn(), open: await pyText("sorted(b.name for b in ed.buffers if b.file and b.file.parent == _td)"), alive: !contents.isDestroyed() };
+      check(
+        "tabs.the_button_a_middle_click_and_the_key_close_a_tab",
+        JSON.stringify(closed) === '["two.txt","[three.txt]"]' && JSON.stringify(middled) === '["[three.txt]"]' &&
+          JSON.stringify(keyed.drawn) === '["[three.txt]"]' && keyed.open === "['one.txt', 'three.txt', 'two.txt']" && keyed.alive,
+        { closed, middled, keyed },
+      );
+
+      // Each window has its own strip, and a click on a tab takes the keyboard there.
+      await control.eval("_tw.show(ed.buffers.visit(_td / 'one.txt'))\n_tw2 = _tw.frame.split(_tw, 'h')\n_tw2.show(ed.buffers.visit(_td / 'two.txt'))");
+      await settle();
+      const both = [await drawn(0), await drawn(1)];
+      await mouseAt(...mid((await tabAt("three.txt", 0)).rect));
+      const there = { drawn: [await drawn(0), await drawn(1)], focus: await pyText("_tw.frame.focus is _tw"), activeIsRoot: (await js<{ activeIsRoot: boolean }>("window.neomacsDebug.snapshot()")).activeIsRoot };
+      check(
+        "tabs.each_window_has_its_own",
+        JSON.stringify(both) === '[["three.txt","[one.txt]"],["one.txt","[two.txt]"]]' &&
+          JSON.stringify(there.drawn) === '[["[three.txt]","one.txt"],["one.txt","[two.txt]"]]' && there.focus === "True" && there.activeIsRoot,
+        { both, there },
+      );
+
+      // Hidden, they give their room back.
+      await control.call("engine.call", "view.toggle_tabs", []);
+      await settle();
+      const hidden = await js<number>("document.querySelectorAll('.nm-window-tabs:not([hidden])').length");
+      // Hidden means no room taken: each window's text starts where the window does.
+      const room = await js<number[]>(
+        `[...document.querySelectorAll('.nm-window')].map((w) => Math.max(w.querySelector('.nm-window-tabs').getBoundingClientRect().height, w.querySelector('.nm-view').getBoundingClientRect().top - w.getBoundingClientRect().top))`,
+      );
+      await control.eval(
+        `_tw.frame.delete_window(_tw2)\n_tw.show(_tb0)\n_tw.tabs[:] = _tabs0\n` +
+          `for _b in list(ed.buffers):\n    if _b.file and _b.file.parent == _td: ed.buffers.kill(_b)\ned.update_frames()`,
+      );
+      await settle();
+      check("tabs.hidden_again", hidden === 0 && room.length === 2 && room.every((r) => r === 0) && (await pyText("ed.options.tabs")) === "False" && (await arrangement()).views.filter((v) => !v.inline && v.inPanel === null).length === 1, { hidden, room });
     }
 
     // -- the kill ring chooser: a list with a preview beside it (KILLRING 7) --

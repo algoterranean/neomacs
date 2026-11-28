@@ -755,6 +755,67 @@ body {
   background: var(--nm-border, #454545);
 }
 
+/* A window's tabs (WORKSPACE 7): more than fit can be scrolled along. */
+.nm-window-tabs {
+  overflow-x: auto;
+  scrollbar-width: none;
+  font-size: 0.9em;
+  border-bottom: 1px solid var(--nm-border, #454545);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* `display: flex` above would otherwise outdo the `hidden` attribute, and
+   the border would still take a pixel. */
+.nm-window-tabs[hidden] {
+  display: none;
+}
+
+.nm-window-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.nm-window-tabs .nm-tab {
+  flex: none;
+  padding: 0.3em 1ch;
+  cursor: default;
+  border-top: 2px solid transparent;
+}
+
+.nm-window-tabs .nm-tab-active {
+  border-top-color: var(--nm-accent, #007acc);
+}
+
+.nm-window-tabs .nm-tab:hover {
+  opacity: 1;
+}
+
+.nm-window-tabs .nm-tab.nm-dragging {
+  opacity: 0.8;
+  z-index: 1;
+  position: relative;
+}
+
+/* One mark at the right of a tab: a dot while the buffer is unsaved, the
+   close button otherwise and whenever the pointer is over the tab. */
+.nm-tab-dot {
+  display: none;
+  padding: 0 0.3ch;
+  font-size: 0.8em;
+}
+
+.nm-window-tabs .nm-tab-modified:not(:hover) .nm-tab-dot {
+  display: inline;
+}
+
+.nm-window-tabs .nm-tab-modified:not(:hover) .nm-tab-close {
+  display: none;
+}
+
+.nm-window-tabs .nm-tab:not(.nm-tab-active):not(:hover) .nm-tab-close {
+  visibility: hidden;
+}
+
 .nm-tab-tools {
   margin-left: auto;
   display: flex;

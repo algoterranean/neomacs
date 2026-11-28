@@ -262,7 +262,9 @@ Engine to frontend, in `redraw`:
 | `["git", {"branch", "ahead", "behind", "staged", "changes", "untracked", "conflicted"} or null]` | The current project's git state; `null` when it is not in a repository. Each list is of `{"path", "state"}`. |
 | `["files_changed", workspace]` | Listings the frontend holds for this project may be out of date: ask again. |
 
-`win_info` gains `tabs`: `[{"title", "modified", "active"}]` (section 7).
+`win_info` gains `tabs`: `[{"title", "modified", "active", "path"}]`, the last
+only for a buffer with a file (section 7). It is absent when the `tabs`
+option is off.
 
 Frontend to engine:
 
@@ -271,7 +273,7 @@ Frontend to engine:
 | `files.list(workspace, directory)` | request | The entries of a directory: `[{"name", "kind", "git", "ignored"}]`. |
 | `ui.region(name, shown, width)` | notification | The user hid, showed or resized a region. Either of the last two may be `null` for "as it is". |
 | `ui.status(side, index)` | notification | The user clicked an item of the status bar. The engine runs the command it put there, in the view the bar describes; the frontend names no command. |
-| `ui.tab(view, action, index, to)` | notification | `activate`, `close`, or `move` a tab. |
+| `ui.tab(view, action, index, to)` | notification | `activate`, `close`, or `move` (to the place `to`) the tab at `index` of the window `view`. |
 | `engine.call(command, args)` | request | Everything else: `project.switch`, `git.stage`, `files.rename` and the rest are commands. |
 
 The protocol version does not change: all of this belongs to a new
@@ -285,7 +287,8 @@ capability.
   left. Closing the last tab of a window removes the window if it is not
   the only one, and otherwise shows an empty buffer. Closing a tab does not
   kill the buffer; a buffer in no window's tabs stays open until killed.
-- `tabs.next`, `tabs.previous` (`s-}`, `s-{`), `tabs.move`.
+- `tabs.next`, `tabs.previous` (`s-}`, `s-{`), `tabs.move_left`,
+  `tabs.move_right`.
 - Splitting a window gives the new one a single tab, the buffer it shows.
 - Killing a buffer removes it from every window's tabs.
 - Panels keep their own tab strips (ENGINE 8.5), unchanged.
@@ -492,3 +495,49 @@ Built as sections 5.1 to 5.3, 5.6 and 5.7 describe, with these differences.
   buttons inset) was not seen in a visible window; off screen there are no
   such buttons. Nothing was tried on Linux or Windows.
 
+### W-3: editor tabs
+
+Built as section 7 describes, with these details.
+
+- **Where things are.** Engine: `Window.tabs`, `Window.move_tab` and
+  `Frame.close_tab` in `neomacs/window.py`; the commands in
+  `neomacs/std/tabs.py`; `ui.tab` in `neomacs/rpc/ui.py`. Electron: the
+  strip is drawn by `MainArea` in `frontend/src/renderer/layout.ts`.
+- **Commands and keys.** `tabs.next` (`s-}`, `C-x t n`), `tabs.previous`
+  (`s-{`, `C-x t p`), `tabs.close` (`s-w`, `C-x t k`), `tabs.move_left` and
+  `tabs.move_right` (`C-x t <left>`, `C-x t <right>`), `tabs.close_others`.
+  There is no single `tabs.move`. They work in every frontend: the terminal
+  draws no strip, but its windows have tabs all the same.
+- **The untouched scratch buffer is a stand-in.** A window that has nothing
+  but the empty, unmodified `*scratch*` gives that tab up to the first
+  buffer shown in it, so a new window or project does not start with a
+  scratch tab beside the first file. Once typed in, it is a tab like any
+  other.
+- **Closing the last tab of the only window** shows `*scratch*`. If that
+  is the tab being closed, nothing happens and a message says so.
+- **A buffer that goes loses its tab everywhere:** killed by the command or
+  by a program, in windows on screen and in the layouts of projects put
+  away. A window that was showing it shows the tab to its left. The same
+  when a buffer is saved into another project, or a new project takes in
+  files that were open.
+- **The `tabs` option** (on by default) says whether the strips are drawn;
+  `view.toggle_tabs` flips it. With it off `win_info` carries no `tabs`.
+- **A tab also carries `path`** when its buffer has a file, shown when the
+  pointer rests on it.
+- **In the strip,** a tab shows a dot in place of its close button while
+  its buffer is unsaved, and the button when the pointer is over it. More
+  tabs than fit can be scrolled along, and the one showing is kept in
+  sight. A click on a tab gives its window the keyboard.
+- **The frontend names a tab by its place** in the strip it was last sent.
+  A click that crosses with a change to the strip can therefore act on the
+  wrong tab; nothing guards against that yet.
+- **Verified:** 11 engine tests through the reference frontend (order,
+  the stand-in, stepping, moving, closing, splits, killing, `ui.tab`, the
+  capability and the option, projects, save-as); 6 checks in `npm run
+  smoke` with real clicks and keys in the Electron window (the strip and
+  where it is, a click, the unsaved mark, dragging to reorder, the close
+  button, a middle click, `s-w`, a strip per window, hiding). A picture of
+  the strip was saved and looked at.
+- **Not verified:** the strip with more tabs than fit, and the look in a
+  visible window. Nothing was tried on Linux or Windows, where `s-w` and
+  the others need the Super key.

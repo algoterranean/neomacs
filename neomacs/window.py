@@ -130,6 +130,12 @@ class View:
         self._reveal = (line, offset, "center") if line > 1 else (1, 0, "top")
         self.frame.schedule_update()
 
+    def forget(self, buffer: Buffer, instead: Buffer) -> None:
+        """BUFFER can no longer be shown here (it is being killed, or has
+        gone to another project): if this view shows it, show INSTEAD."""
+        if self.buffer is buffer:
+            self.show(instead)
+
     @provisional("0.1")
     def reveal(self, pos: int | None = None, align: str = "nearest") -> None:
         """Ask the frontend to scroll so POS (default: the cursor) is visible."""
@@ -376,7 +382,63 @@ class View:
 
 @provisional("0.1")
 class Window(View):
-    """A view in the frame's window tree.  It has a modeline."""
+    """A view in the frame's window tree.  It has a modeline, and tabs: the
+    buffers that have been shown in it, of which it shows one (WORKSPACE 7)."""
+
+    def __init__(self, frame: Frame, buffer: Buffer) -> None:
+        super().__init__(frame, buffer)
+        self.tabs: list[Buffer] = [buffer]
+
+    @provisional("0.1")
+    def show(self, buffer: Buffer) -> None:
+        """Display BUFFER in this window, as a new tab if it has none here."""
+        if buffer not in self.tabs:
+            only = self.tabs[0] if len(self.tabs) == 1 else None
+            if only is not None and _is_stand_in(only):
+                # A window with nothing in it yet shows the scratch buffer.
+                # That is a stand-in, not something the user opened: the
+                # first buffer shown takes its place.
+                self.tabs = [buffer]
+            else:
+                self.tabs.append(buffer)
+            self.frame.schedule_update()
+        super().show(buffer)
+
+    def forget(self, buffer: Buffer, instead: Buffer) -> None:
+        """Take BUFFER out of the tabs.  If it was showing, the tab to its
+        left is shown, or INSTEAD when it was the only one."""
+        if buffer not in self.tabs:
+            return
+        index = self.tabs.index(buffer)
+        self.tabs.pop(index)
+        if self.buffer is buffer:
+            self.show(self.tabs[max(0, index - 1)] if self.tabs else instead)
+        self.frame.schedule_update()
+
+    @provisional("0.1")
+    def move_tab(self, index: int, to: int) -> None:
+        """Move the tab at INDEX so that it is at TO."""
+        if not (0 <= index < len(self.tabs) and 0 <= to < len(self.tabs)):
+            raise IndexError(f"no such tab: {index} to {to}")
+        self.tabs.insert(to, self.tabs.pop(index))
+        self.frame.schedule_update()
+
+    def info(self) -> dict[str, Any]:
+        info = super().info()
+        frame = self.frame
+        if frame.draws_workbench and frame.editor.options.get("tabs", True):
+            tabs: list[dict[str, Any]] = []
+            for buffer in self.tabs:
+                tab: dict[str, Any] = {
+                    "title": buffer.name,
+                    "modified": bool(buffer.modified),
+                    "active": buffer is self.buffer,
+                }
+                if buffer.file is not None:
+                    tab["path"] = str(buffer.file)
+                tabs.append(tab)
+            info["tabs"] = tabs
+        return info
 
     def modeline(self) -> list[list[Any]] | None:
         buf = self.buffer
@@ -400,6 +462,11 @@ class Window(View):
         return [
             [None, f" {vcs.BRANCH_SYMBOL} {branch} ", self.frame.editor.faces.id_for("modeline")]
         ]
+
+
+def _is_stand_in(buffer: Buffer) -> bool:
+    """Whether BUFFER is the scratch buffer as it was made: empty and untouched."""
+    return buffer.name == "*scratch*" and len(buffer) == 0 and not buffer.modified
 
 
 class Split:
@@ -645,6 +712,27 @@ class Frame:
             self._popup_dirty = True
         window.close()
         self.schedule_update()
+
+    @provisional("0.1")
+    def close_tab(self, window: Window, buffer: Buffer | None = None) -> None:
+        """Close WINDOW's tab for BUFFER (default: the one it shows).  The
+        buffer stays open.  When it was the window's last tab the window goes
+        too, unless it is the only window, which shows the scratch buffer."""
+        buffer = window.buffer if buffer is None else buffer
+        if buffer not in window.tabs:
+            raise ValueError(f"{window!r} has no tab for {buffer.name}")
+        if len(window.tabs) > 1:
+            window.forget(buffer, buffer)  # there is another tab: the stand-in is not used
+            return
+        if len(self.windows()) > 1:
+            self.delete_window(window)
+            return
+        scratch = self.editor.buffers.get("*scratch*")
+        if scratch is None:
+            scratch = self.editor.buffers.new("*scratch*")
+        if scratch is buffer:
+            raise NoFrame("the only tab of the only window cannot be closed")
+        window.forget(buffer, scratch)
 
     @provisional("0.1")
     def views_in_order(self) -> list[View]:
