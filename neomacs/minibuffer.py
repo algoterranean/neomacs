@@ -92,7 +92,19 @@ class Minibuffer:
         self.submit_selects = submit_selects
         self.host: tuple[Any, ...] = ()
         self.candidates: list[Candidate] = []
+        # How many candidates are kept of those the completer finds.
+        self.max_candidates: int | None = MAX_CANDIDATES
         self.selected = 0
+        # The candidate that the last submit took, if it took one.
+        self.chosen: Candidate | None = None
+        # A view shown beside the minibuffer where the frontend has a place
+        # for one: what the highlighted candidate is, at more length.
+        self.preview: View | None = None
+        self.on_select = Hook(
+            "minibuffer-select",
+            "Run with (candidate or None) when the highlighted candidate changes.",
+            register=False,
+        )
         self.on_submit = Hook(
             "minibuffer-submit", "Run with (text) on each submit.", register=False
         )
@@ -139,6 +151,7 @@ class Minibuffer:
             "max_lines": self.max_lines,
             "placeholder": self.placeholder,
             "masked": self.masked,
+            **({"preview": self.preview.id} if self.preview is not None else {}),
         }
 
     # -- submitting -------------------------------------------------------------
@@ -146,18 +159,26 @@ class Minibuffer:
     @provisional("0.1")
     def submit(self) -> None:
         text = self.text
+        self.chosen = None
         if self.candidates and self.selected >= 0:
             # A candidate is highlighted: because this prompt always has one
             # (commands, buffers), or because the user moved to it.  It is what
             # Return means, unless what was typed is itself a candidate.
             chosen = self.candidates[min(self.selected, len(self.candidates) - 1)]
-            exact = self.submit_selects and any(c.text == text for c in self.candidates)
+            # (A candidate that stands for something is chosen by where the
+            # highlight is, never by what its text happens to be.)
+            exact = (
+                self.submit_selects
+                and chosen.value is None
+                and any(c.text == text for c in self.candidates)
+            )
             if not exact:
                 if chosen.annotation == "directory" and not self.submit_selects:
                     # A directory is somewhere to go on from, not an answer.
                     self.text = chosen.text
                     return
                 text = chosen.text
+                self.chosen = chosen
         if self.history is not None and text:
             entries = self.frame.editor.histories.setdefault(self.history, [])
             if not entries or entries[-1] != text:
@@ -257,12 +278,20 @@ class Minibuffer:
             found = []
         if self.closed or self.text != text:
             return
-        self.candidates = list(found)[:MAX_CANDIDATES]
+        self.candidates = list(found)[: self.max_candidates]
         # Where Return takes the highlighted candidate, one always is.  Where
         # it takes what was typed (a file name may be a new one), none is
         # until the user moves to one: the highlight says what Return will do.
         self.selected = 0 if self.submit_selects else -1
         self.frame.popup_changed()
+        self.on_select.run(self.highlighted)
+
+    @property
+    def highlighted(self) -> Candidate | None:
+        """The candidate that is highlighted, if one is."""
+        if not self.candidates or self.selected < 0:
+            return None
+        return self.candidates[min(self.selected, len(self.candidates) - 1)]
 
     def select(self, delta: int) -> None:
         if not self.candidates:
@@ -272,6 +301,7 @@ class Minibuffer:
         else:
             self.selected = (self.selected + delta) % len(self.candidates)
         self.frame.popup_changed()
+        self.on_select.run(self.highlighted)
 
     def accept_candidate(self) -> bool:
         """Put the highlighted candidate in the minibuffer.  False if there is none."""

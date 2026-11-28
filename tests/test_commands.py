@@ -211,7 +211,9 @@ def test_yank_prefers_newer_text_from_the_system_clipboard(ui: HeadlessUI) -> No
     assert text(ui) == "from another program"
     ui.keys("C-y")  # nothing newer now: the same entry again
     assert text(ui) == "from another program" * 2
-    assert ui.client.eval("ed.kill_ring.entries[-2:]") == "[['mine'], ['from another program']]"
+    assert ui.client.eval("[(e.pieces, e.source) for e in ed.kill_ring.entries[-2:]]") == (
+        "[(['mine'], 'kill'), (['from another program'], 'system')]"
+    )
 
 
 def test_yank_falls_back_when_the_frontend_does_not_answer(ui: HeadlessUI) -> None:

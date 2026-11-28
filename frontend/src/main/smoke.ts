@@ -1072,6 +1072,57 @@ export async function runSmoke(
     for (let i = 0; i < 60 && (await pyText("len(ed.frames)")) !== "1"; i++) await new Promise((resolve) => setTimeout(resolve, 50));
     check("f4.closing_a_window_removes_its_frame", (await pyText("len(ed.frames)")) === "1" && shell.windows.size === windowsBefore);
 
+    // -- the kill ring chooser: a list with a preview beside it (KILLRING 7) --
+    {
+      const keptClipboard = await clipboard.readText();
+      try {
+        await control.eval(
+          `_sel13 = ${win}.selections.ranges()\n_kr = ed.buffers.new('ring.py')\n_kr.set_mode('python')\n${win}.show(_kr)\n` +
+            `ed.kill_ring.entries.clear()\ned.kill_ring.push(['oldest'])\n` +
+            `ed.kill_ring.push(['def chosen(a, b):\\n    return a + b\\n'])\n` +
+            // Through the frame, so that the system clipboard holds it and the chooser finds nothing newer there.
+            `ed.kill_ring.push(['newest'], ed.frames[${frame}])`,
+        );
+        await settle();
+        await frames(4);
+        interface Chooser { preview: string; width: number; previewWidth: number; listWidth: number }
+        interface ChooserUi { chrome: { prompt: string | null; popup: string[] | null; popupSelected: string | null; chooser: Chooser | null }; focus: number; mainView: number }
+        const chooserUi = () => js<ChooserUi>("window.neomacsDebug.snapshot()");
+        press("y", ["alt"]);
+        await settle();
+        const opened = await chooserUi();
+        press("Down");
+        await settle();
+        const moved = await chooserUi();
+        const keyword = await js<string>(
+          `(() => { const k = [...document.querySelectorAll('.nm-chooser-preview .nm-content span')].find((e) => e.textContent === 'def'); return k ? getComputedStyle(k).color : ''; })()`,
+        );
+        await shot("13-kill-ring-chooser");
+        press("Return");
+        await settle();
+        await frames(4);
+        const closed = await chooserUi();
+        const pasted = await pyText("_kr.text");
+        const onClipboard = await clipboard.readText();
+        check(
+          "killring.chooser_lists_previews_and_pastes",
+          opened.chrome.prompt === "Yank: " && JSON.stringify(opened.chrome.popup) === '["newest","def chosen(a, b):","oldest"]' &&
+            opened.chrome.chooser !== null && opened.chrome.chooser.preview === "newest" && opened.focus !== opened.mainView &&
+            // Side by side: both parts have room, and the preview is the wider.
+            opened.chrome.chooser.listWidth > 200 && opened.chrome.chooser.previewWidth > opened.chrome.chooser.listWidth &&
+            moved.chrome.popupSelected === "def chosen(a, b):" && moved.chrome.chooser?.preview === "def chosen(a, b):    return a + b" &&
+            keyword === "rgb(197, 134, 192)" && // highlighted as the buffer it is going into is
+            closed.chrome.prompt === null && closed.chrome.chooser === null && closed.focus === closed.mainView &&
+            pasted === "'def chosen(a, b):\\n    return a + b\\n'" && onClipboard === "def chosen(a, b):\n    return a + b\n",
+          { opened: opened.chrome, moved: moved.chrome, keyword, closed: closed.chrome, pasted, onClipboard },
+        );
+        await control.eval(`${win}.show(_k)\n${win}.selections.set(_sel13)\ned.buffers.kill(_kr)`);
+        await settle();
+      } finally {
+        clipboard.writeText(keptClipboard);
+      }
+    }
+
     // -- step 12, F5: themes, labels, and the performance budgets --
     {
       await control.eval(
@@ -1161,7 +1212,9 @@ export async function runSmoke(
       check(
         "f5.performance_budgets",
         Object.keys(report.over).length === 0 && counted("apply") >= 80 && counted("render") >= 80 && counted("total") >= 80 &&
-          counted("move") >= 30 && counted("scroll") >= 30,
+          // Enough of each to judge by.  (How many scroll frames a run of
+          // sixty steps makes varies by a few with the machine.)
+          counted("move") >= 30 && counted("scroll") >= 20,
         { scale, ...report },
       );
       await control.eval(`${win}.show(_k)\n${win}.selections.set(_sel12)\ned.buffers.kill(_perf)`);

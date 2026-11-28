@@ -187,7 +187,12 @@ def drop(conn: Connection, paths: list[str], view: int, line: int = 1, offset: i
 def focus(conn: Connection, gained: bool) -> None:
     """The frontend's window gained or lost focus."""
     if gained:
-        conn.editor.last_frame = _frame(conn)
+        frame = _frame(conn)
+        editor = conn.editor
+        editor.last_frame = frame
+        # The user has been somewhere else, and may have copied something
+        # there: look, without anything waiting on the answer (KILLRING 5.2).
+        editor.start_task(editor.kill_ring.capture(frame), name="clipboard", frame=frame)
 
 
 @method("input.interrupt")

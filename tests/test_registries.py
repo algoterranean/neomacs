@@ -488,12 +488,23 @@ def test_kill_ring() -> None:
     ring = KillRing()
     assert ring.top is None
     ring.push(["", ""])  # nothing to keep
-    ring.push(["a", "b", "c"])
-    assert ring.top == ["a", "b", "c"]
-    assert ring.distribute(["a", "b", "c"], 3) == ["a", "b", "c"]
-    assert ring.distribute(["a", "b", "c"], 2) == ["a\nb\nc", "a\nb\nc"]
-    assert ring.distribute(["one"], 1) == ["one"]
-    assert asyncio.run(ring.current(None)) == ["a", "b", "c"]
+    entry = ring.push(["a", "b", "c"])
+    assert entry is not None and ring.top is entry and entry.pieces == ["a", "b", "c"]
+    assert (entry.text, entry.source) == ("a\nb\nc", "kill")
+    assert ring.distribute(entry, 3) == ["a", "b", "c"]
+    assert ring.distribute(entry, 2) == ["a\nb\nc", "a\nb\nc"]
+    one = ring.push(["one"], source="copy")
+    assert one is not None and ring.distribute(one, 1) == ["one"]
+    assert asyncio.run(ring.current(None)) is one
+    # Every kill is its own entry; the same thing again moves up, and is not there twice.
+    ring.push(["two"])
+    assert ring.push(["a", "b", "c"]) is entry
+    assert [e.pieces for e in ring.entries] == [["one"], ["two"], ["a", "b", "c"]]
+    ring.take(one)
+    assert ring.top is one and len(ring.entries) == 3
+    ring.remove(one)
+    ring.remove(one)  # not there: nothing to do
+    assert [e.text for e in ring.entries] == ["two", "a\nb\nc"]
 
 
 def test_menu_tree() -> None:

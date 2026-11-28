@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from neomacs.stability import provisional
 
@@ -16,6 +16,9 @@ from neomacs.stability import provisional
 class Candidate:
     text: str  # what accepting the candidate puts in place of the input
     annotation: str = ""  # shown beside it
+    # What the candidate stands for, where that is more than its text: two
+    # candidates may read the same and be different things.
+    value: Any = field(default=None, compare=False)
 
 
 @provisional("0.1")

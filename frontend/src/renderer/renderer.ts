@@ -15,6 +15,8 @@ import { ViewElement } from "./view.ts";
 
 const PROTOCOL = 1;
 const SEARCH_PLACE = "search";
+// A list to choose from with a preview of the highlighted item beside it (KILLRING 7.2).
+const CHOOSER_PLACE = "chooser";
 const NO_SUCH_FRAME = -32002;
 
 interface ConnectState {
@@ -208,13 +210,22 @@ function syncViews(): void {
       chrome.setSearch(runsText(shown.options["label"]), search.root);
       continue;
     }
-    if (shown.host["kind"] !== "prompt") continue;
+    const chooser = shown.host["kind"] === "place" && shown.host["name"] === CHOOSER_PLACE;
+    if (shown.host["kind"] !== "prompt" && !chooser) continue;
     live.add(model);
     prompt = elementFor(model, true);
     prompt.minLines = Number(shown.options["min_lines"] ?? 1);
     prompt.maxLines = shown.options["multiline"] ? Number(shown.options["max_lines"] ?? 10) : 1;
     label = runsText(shown.options["label"]);
-    chrome.setPrompt(label, prompt.root);
+    // The chooser is the prompt with a second view beside its list: the
+    // whole of whatever is highlighted.
+    const previewModel = chooser ? frame.views.get(Number(shown.options["preview"])) : undefined;
+    let preview: ViewElement | null = null;
+    if (previewModel) {
+      live.add(previewModel);
+      preview = elementFor(previewModel, false);
+    }
+    chrome.setPrompt(label, prompt.root, preview ? preview.root : null);
   }
   if (!prompt) chrome.setPrompt(null, null);
   if (!search) chrome.setSearch(null, null);
@@ -414,7 +425,7 @@ async function attach(state: ConnectState): Promise<void> {
   }
   // "panels": this frontend draws window splits and panels (ENGINE 8.5).
   // "places": the parts of the window a minibuffer can be shown in besides the prompt (ENGINE 7.5).
-  const options: { [key: string]: Json } = { protocol: PROTOCOL, capabilities: ["panels"], places: [SEARCH_PLACE] };
+  const options: { [key: string]: Json } = { protocol: PROTOCOL, capabilities: ["panels"], places: [SEARCH_PLACE, CHOOSER_PLACE] };
   let reply: Json;
   try {
     if (state.frame !== null && state.token !== null) {

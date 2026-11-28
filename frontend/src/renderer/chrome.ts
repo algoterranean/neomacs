@@ -8,6 +8,7 @@ export class Chrome {
   private label: HTMLSpanElement;
   private promptSlot: HTMLDivElement;
   private popup: HTMLDivElement;
+  private previewSlot: HTMLDivElement;
   private strip: HTMLDivElement;
   private messageEl: HTMLSpanElement;
   private keysEl: HTMLSpanElement;
@@ -36,7 +37,10 @@ export class Chrome {
     this.popup.setAttribute("role", "listbox");
     this.popup.setAttribute("aria-label", "Completions");
     this.popup.hidden = true;
-    this.palette.append(row, this.popup);
+    this.previewSlot = div("nm-chooser-preview");
+    this.previewSlot.setAttribute("aria-label", "Preview");
+    this.previewSlot.hidden = true;
+    this.palette.append(row, this.popup, this.previewSlot);
     this.strip = div("nm-strip");
     this.messageEl = document.createElement("span");
     this.messageEl.className = "nm-message";
@@ -61,10 +65,18 @@ export class Chrome {
     root.replaceChildren(this.main, this.strip);
   }
 
-  /** Show a prompt with this label around the given minibuffer view, or hide it. */
-  setPrompt(label: string | null, view: HTMLElement | null): void {
+  /**
+   * Show a prompt with this label around the given minibuffer view, or hide it.
+   * With `preview`, another view, it is a chooser: the list on one side and
+   * that view, showing the whole of the highlighted item, on the other.
+   */
+  setPrompt(label: string | null, view: HTMLElement | null, preview: HTMLElement | null = null): void {
     const shown = label !== null && view !== null;
     this.palette.hidden = !shown;
+    this.palette.classList.toggle("nm-chooser", shown && preview !== null);
+    this.previewSlot.hidden = !shown || preview === null;
+    if (!shown || preview === null) this.previewSlot.replaceChildren();
+    else if (this.previewSlot.firstChild !== preview) this.previewSlot.replaceChildren(preview);
     if (!shown) {
       this.promptSlot.replaceChildren();
       return;
@@ -149,6 +161,14 @@ export class Chrome {
   snapshot(): Record<string, unknown> {
     return {
       prompt: this.palette.hidden ? null : this.label.textContent,
+      chooser: this.palette.classList.contains("nm-chooser")
+        ? {
+            preview: this.previewSlot.querySelector(".nm-lines")?.textContent ?? "",
+            width: Math.round(this.palette.getBoundingClientRect().width),
+            previewWidth: Math.round(this.previewSlot.getBoundingClientRect().width),
+            listWidth: Math.round(this.popup.getBoundingClientRect().width),
+          }
+        : null,
       promptText: this.palette.hidden ? null : (this.promptSlot.querySelector(".nm-lines")?.textContent ?? ""),
       popup: this.popup.hidden ? null : [...this.popup.querySelectorAll(".nm-popup-text")].map((el) => el.textContent),
       popupSelected: this.popup.querySelector(".nm-selected .nm-popup-text")?.textContent ?? null,

@@ -2,6 +2,13 @@
  "format": 1,
  "names": [
   {
+   "name": "neomacs.clipboard.Entry",
+   "kind": "class",
+   "signature": "(pieces: 'list[str]', source: 'str' = 'kill', time: 'float' = <factory>) -> None",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.clipboard.KillRing",
    "kind": "class",
    "signature": "() -> 'None'",
@@ -9,30 +16,51 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.clipboard.KillRing.capture",
+   "kind": "method",
+   "signature": "(self, frame: 'Frame | None') -> 'Entry | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.clipboard.KillRing.current",
    "kind": "method",
-   "signature": "(self, frame: 'Frame | None') -> 'list[str] | None'",
+   "signature": "(self, frame: 'Frame | None') -> 'Entry | None'",
    "tier": "provisional",
    "since": "0.1"
   },
   {
    "name": "neomacs.clipboard.KillRing.distribute",
    "kind": "method",
-   "signature": "(self, entry: 'list[str]', count: 'int') -> 'list[str]'",
+   "signature": "(self, entry: 'Entry', count: 'int') -> 'list[str]'",
    "tier": "provisional",
    "since": "0.1"
   },
   {
    "name": "neomacs.clipboard.KillRing.push",
    "kind": "method",
-   "signature": "(self, pieces: 'list[str]', frame: 'Frame | None' = None) -> 'None'",
+   "signature": "(self, pieces: 'list[str]', frame: 'Frame | None' = None, *, source: 'str' = 'kill') -> 'Entry | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.clipboard.KillRing.remove",
+   "kind": "method",
+   "signature": "(self, entry: 'Entry') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.clipboard.KillRing.take",
+   "kind": "method",
+   "signature": "(self, entry: 'Entry', frame: 'Frame | None' = None) -> 'None'",
    "tier": "provisional",
    "since": "0.1"
   },
   {
    "name": "neomacs.clipboard.KillRing.top",
    "kind": "property",
-   "signature": "(self) -> 'list[str] | None'",
+   "signature": "(self) -> 'Entry | None'",
    "tier": "provisional",
    "since": "0.1"
   },
@@ -88,7 +116,7 @@
   {
    "name": "neomacs.completion.Candidate",
    "kind": "class",
-   "signature": "(text: 'str', annotation: 'str' = '') -> None",
+   "signature": "(text: 'str', annotation: 'str' = '', value: 'Any' = None) -> None",
    "tier": "provisional",
    "since": "0.1"
   },
