@@ -7,7 +7,9 @@ for that often: a listing is read when the file tree is.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -19,7 +21,8 @@ from neomacs import proc
 STATES = ("conflicted", "modified", "staged", "untracked")
 _TIMEOUT = 10.0
 # Looking must not write to the repository, nor wait for a prompt.
-_ENV = {"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
+# A path given to git is that file and no other: `*.txt` is a name, not a pattern.
+_ENV = {"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0", "GIT_LITERAL_PATHSPECS": "1"}
 
 
 # What the letters of git's two-letter state mean.
@@ -36,6 +39,7 @@ class Repository:
 
     top: Path
     branch: str | None = None  # None when HEAD is detached
+    head: str | None = None  # the commit HEAD is at; None before the first
     upstream: str | None = None
     ahead: int = 0
     behind: int = 0
@@ -43,6 +47,8 @@ class Repository:
     changes: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     untracked: list[str] = field(default_factory=list[str])
     conflicted: list[str] = field(default_factory=list[str])
+    # For a staged rename or copy: the name it has now -> the name it had.
+    renamed: dict[str, str] = field(default_factory=dict[str, str])
 
     def describe(self, limit: int = 2000) -> dict[str, Any]:
         """What a frontend is told (WORKSPACE 6).  A list longer than LIMIT is cut short."""
@@ -53,6 +59,7 @@ class Repository:
         return {
             "top": str(self.top),
             "branch": self.branch,
+            "head": self.head,
             "upstream": self.upstream,
             "ahead": self.ahead,
             "behind": self.behind,
@@ -128,7 +135,9 @@ def parse(output: str, prefix: str = "", top: Path | None = None) -> Status:
         elif kind == "2":
             fields = record.split(" ", 9)
             path, xy = fields[-1], fields[1]
-            index += 1  # the name it had before is a record of its own
+            if index < len(records):  # the name it had before is a record of its own
+                repository.renamed[path] = records[index]
+            index += 1
         elif kind == "u":
             path, xy = record.split(" ", 10)[-1], "UU"
         elif kind in ("?", "!"):
@@ -173,6 +182,8 @@ def _header(repository: Repository, record: str) -> None:
     words = record.split(" ")
     if words[1:2] == ["branch.head"] and len(words) > 2:
         repository.branch = None if words[2] == "(detached)" else words[2]
+    elif words[1:2] == ["branch.oid"] and len(words) > 2:
+        repository.head = None if words[2] == "(initial)" else words[2]
     elif words[1:2] == ["branch.upstream"] and len(words) > 2:
         repository.upstream = words[2]
     elif words[1:2] == ["branch.ab"] and len(words) > 3:
@@ -211,7 +222,21 @@ async def show(directory: Path, what: str) -> str | None:
     """The text of WHAT, as `git show` names things: `:path` is the index's
     version of a file, `HEAD:path` the last commit's.  None if there is none."""
     try:
-        found = await git(directory, "show", what)
+        process = await asyncio.create_subprocess_exec(
+            "git", "-C", str(directory), "show", what,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            env={**os.environ, **_ENV},
+        )  # fmt: skip
+        data, _ = await asyncio.wait_for(process.communicate(), _TIMEOUT)
     except Exception:  # noqa: BLE001
         return None
-    return found.stdout if found.returncode == 0 else None
+    if process.returncode != 0:
+        return None
+    # Read as a file's bytes are, so that the two sides of a diff differ
+    # only where the text does: line endings, a byte-order mark and the
+    # encoding are treated alike.
+    from neomacs.text.buffer import decode
+
+    return decode(data)[0]

@@ -109,14 +109,17 @@ def schedule_git(editor: Editor) -> None:
         if workspace.root is None:
             editor.git_states[workspace.id] = None
             continue
-        editor.start_task(_ask_git(editor, workspace), name="git status", frame=frame)
+        task = _ask_git(editor, workspace, generation)
+        editor.start_task(task, name="git status", frame=frame)
 
 
-async def _ask_git(editor: Editor, workspace: Workspace) -> None:
+async def _ask_git(editor: Editor, workspace: Workspace, generation: int) -> None:
     root = workspace.root
     if root is None:
         return
     found = await status(editor, root)
+    if editor.git_asked.get(workspace.id) != generation:
+        return  # asked again since: that answer is the one to show, not this
     repository = found.repository if found is not None else None
     described = repository.describe() if repository is not None else None
     if editor.git_states.get(workspace.id, 0) != described:

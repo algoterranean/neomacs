@@ -11,6 +11,8 @@ export interface GitRow {
 export interface GitInfo {
   top: string;
   branch: string | null;
+  /** The commit HEAD is at; null before the first. */
+  head: string | null;
   upstream: string | null;
   ahead: number;
   behind: number;
@@ -56,7 +58,9 @@ export class GitPanel {
   private hint: HTMLDivElement;
   private info: GitInfo | null = null;
   private drawn = "";
-  private committing = false; // a commit was asked for: the message goes when it has been made
+  // A commit was asked for, of this repository when HEAD was here: the
+  // message goes when HEAD has moved, which is when it has been made.
+  private committing: { top: string; head: string | null } | null = null;
 
   constructor(host: GitPanelHost) {
     this.host = host;
@@ -78,7 +82,10 @@ export class GitPanel {
     this.message.placeholder = "Message (⌘Enter or Ctrl+Enter)";
     this.message.setAttribute("aria-label", "Commit message");
     this.message.spellcheck = false;
-    this.message.addEventListener("input", () => this.enable());
+    this.message.addEventListener("input", () => {
+      this.committing = null; // written since: it is a new message, to be kept
+      this.enable();
+    });
     this.commitButton = el("button", "nm-git-commit-button");
     this.commitButton.type = "button";
     this.commitButton.textContent = "Commit";
@@ -119,8 +126,8 @@ export class GitPanel {
   }
 
   private commit(): void {
-    if (this.commitButton.disabled) return;
-    this.committing = true;
+    if (this.commitButton.disabled || !this.info) return;
+    this.committing = { top: this.info.top, head: this.info.head };
     this.host.command("git.commit", [this.message.value]);
     this.host.refocus();
   }
@@ -130,7 +137,6 @@ export class GitPanel {
     const key = JSON.stringify([info, project]);
     if (key === this.drawn) return;
     this.drawn = key;
-    const before = this.info;
     this.info = info;
     this.box.hidden = info === null;
     this.list.hidden = info === null;
@@ -138,9 +144,10 @@ export class GitPanel {
     this.hint.textContent = project ? "This project is not in a git repository." : "Add a project to see its changes.";
     this.branch.textContent = info === null ? "" : `${info.branch ?? "detached"}${info.ahead ? ` ↑${info.ahead}` : ""}${info.behind ? ` ↓${info.behind}` : ""}`;
     this.branch.title = info?.upstream ? `Follows ${info.upstream}` : "";
-    if (this.committing && info !== null && info.staged.length === 0 && (before?.staged.length ?? 0) > 0) {
-      // What was staged has been committed: the message has done its work.
-      this.committing = false;
+    if (this.committing && info !== null && info.top === this.committing.top && info.head !== this.committing.head) {
+      // The commit was made: the message has done its work.  (One that
+      // failed leaves HEAD where it was, and the message with it.)
+      this.committing = null;
       this.message.value = "";
     }
     this.enable();
@@ -216,6 +223,25 @@ export class GitPanel {
       }
     });
     return item;
+  }
+
+  /**
+   * An editing command chosen from the application menu while the message
+   * box has the keyboard: it is about the message, not the text behind.
+   * True if it was done here.
+   */
+  edit(command: string, clipboard: () => Promise<string>): boolean {
+    const own: Record<string, string> = { undo: "undo", redo: "redo", kill_selection: "cut", copy_selection: "copy", select_all: "selectAll" };
+    if (command === "yank") {
+      void clipboard().then((text) => {
+        if (this.typing) document.execCommand("insertText", false, text);
+      });
+      return true;
+    }
+    const action = own[command];
+    if (action === undefined) return false;
+    document.execCommand(action);
+    return true;
   }
 
   /** What is drawn, for tests. */

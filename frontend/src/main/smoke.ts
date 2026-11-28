@@ -1443,7 +1443,7 @@ export async function runSmoke(
           `Object.fromEntries([...document.querySelectorAll('.nm-window .nm-view')].map((v, i) => [i, [...new Set([...v.querySelectorAll('.nm-line')].map((l) => getComputedStyle(l).backgroundColor))]]))`,
         );
         const marks = await pyJson<{ old: number[]; fresh: number[] }>(
-          `{'old': sorted(_wf.diff.old_buffer.line_offset(s.start)[0] for s in _wf.diff.old_buffer.layer('diff')), 'fresh': sorted(_wf.diff.new_buffer.line_offset(s.start)[0] for s in _wf.diff.new_buffer.layer('diff'))}`,
+          `{'old': sorted(_wf.diff.old_buffer.line_offset(s.start)[0] for s in _wf.diff.old_buffer.layer(_wf.diff.layer)), 'fresh': sorted(_wf.diff.new_buffer.line_offset(s.start)[0] for s in _wf.diff.new_buffer.layer(_wf.diff.layer))}`,
         );
         await shot("18-diff");
         check(

@@ -20,12 +20,20 @@ from neomacs.hooks import post_command
 from neomacs.text.buffer import Buffer, decode
 
 
-async def _repository() -> git.Repository:
-    """The repository the frame's project is in, or the buffer's file, as it is now."""
+async def _repository(given: str | None = None) -> git.Repository:
+    """The repository a command is about, as it is now.  For one about a
+    file: the repository that file is in, which for the buffer's own file
+    need not be the project's.  For one about everything (GIVEN is None), or
+    a path from the top of the repository: the project's."""
     frame = ed.frame
     root = frame.workspace.root if frame is not None else None
-    if root is None and ed.buffer.file is not None:
-        root = ed.buffer.file.parent
+    file = ed.buffer.file
+    if given == "" and file is not None:
+        root = file.parent
+    elif given and Path(given).is_absolute():
+        root = Path(given).parent
+    elif root is None and file is not None:
+        root = file.parent
     if root is None:
         raise NeomacsError("There is no project, and the buffer has no file")
     editor = current()
@@ -87,7 +95,7 @@ def _reload(buffer: Buffer) -> None:
 @command(name="git.stage")
 async def stage(path: str = "") -> None:
     """Stage a file's changes for the next commit."""
-    repository = await _repository()
+    repository = await _repository(path)
     target = _path(repository, path)
     await _git(repository, "add", "--", target)
     _changed()
@@ -97,9 +105,12 @@ async def stage(path: str = "") -> None:
 @command(name="git.unstage")
 async def unstage(path: str = "") -> None:
     """Take a file's changes out of the next commit.  The file is not touched."""
-    repository = await _repository()
+    repository = await _repository(path)
     target = _path(repository, path)
-    await _git(repository, "reset", "-q", "--", target)
+    # A renamed file is staged under two names, the new one added and the
+    # old one deleted: both go, or the next commit would still delete it.
+    was = repository.renamed.get(target)
+    await _git(repository, "reset", "-q", "--", target, *([was] if was else []))
     _changed()
     ed.message(f"Unstaged {target}")
 
@@ -137,7 +148,7 @@ async def unstage_all() -> None:
 async def discard(path: str = "") -> None:
     """Throw away a file's changes that are not staged, after asking.  A file
     git has never seen is moved to the trash."""
-    repository = await _repository()
+    repository = await _repository(path)
     target = _path(repository, path)
     full = repository.top / target
     untracked = target in repository.untracked
@@ -210,7 +221,7 @@ async def diff(path: str = "", staged: bool = False) -> None:
     """Show what has changed in a file, side by side: at the left what git
     has, at the right the file.  With STAGED, the last commit at the left and
     what is staged at the right."""
-    repository = await _repository()
+    repository = await _repository(path)
     target = _path(repository, path)
     full = repository.top / target
     frame = ed.frame

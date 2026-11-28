@@ -607,6 +607,10 @@ class Frame:
 
         if workspace is self.workspace:
             return
+        # A diff is not put away with its project: its windows would come
+        # back with nothing keeping them a diff.
+        if self.diff is not None:
+            self.diff.end(close=True)
         # A prompt is a question asked in the project being left.
         for minibuffer in list(self.minibuffers.values()):
             minibuffer.close()
@@ -1081,6 +1085,8 @@ class Frame:
         if self._expiry_timer is not None:
             self._expiry_timer.cancel()
             self._expiry_timer = None
+        if self.diff is not None:
+            self.diff.end()  # or the file's buffer would go on telling it of edits
         for view in list(self.views.values()):
             view.close()
         self.editor.workspaces.forget_frame(self)

@@ -261,7 +261,7 @@ def marks(ui: HeadlessUI, which: str) -> list[tuple[int, str]]:
         ui,
         f"sorted((s.buffer.line_offset(s.start)[0] if hasattr(s, 'buffer') else "
         f"_f.diff.{which}_buffer.line_offset(s.start)[0], s.props['line']['face']) "
-        f"for s in _f.diff.{which}_buffer.layer('diff'))",
+        f"for s in _f.diff.{which}_buffer.layer(_f.diff.layer))",
     )
 
 
@@ -377,12 +377,24 @@ def test_closing_either_window_ends_the_diff(ui: HeadlessUI, repo: Path) -> None
     ui.keys("C-x", "0")  # the file's window
     assert value(ui, "_f.diff") is None
     assert value(ui, "ed.buffers.get('*b.txt (staged)*')") is None
-    assert value(ui, "list(ed.buffers.get('b.txt').layer('diff'))") == []
+    assert (
+        value(
+            ui,
+            "[s for l in ed.buffers.get('b.txt').layers for s in l if l.name.startswith('diff')]",
+        )
+        == []
+    )
     ui.call("git.diff", "b.txt")
     ui.eval("_f.focus_view(_f.diff.old)")
     ui.keys("C-x", "0")  # the old side's
     assert value(ui, "_f.diff") is None and windows(ui)[-1] == "b.txt"
-    assert value(ui, "list(ed.buffers.get('b.txt').layer('diff'))") == []
+    assert (
+        value(
+            ui,
+            "[s for l in ed.buffers.get('b.txt').layers for s in l if l.name.startswith('diff')]",
+        )
+        == []
+    )
     # The command made for it leaves the file's window as it was.
     ui.open(repo / "a.txt")
     ui.open(repo / "b.txt")
@@ -411,4 +423,139 @@ def test_what_cannot_be_compared(ui: HeadlessUI, repo: Path, tmp_path: Path) -> 
     outside = tmp_path / "outside.txt"
     outside.write_text("x\n")
     ui.call("git.diff", str(outside))
-    assert "is not in the repository" in ui.message
+    assert "is not in a git repository" in ui.message  # its own directory is asked about
+
+
+# -- faults found in review ----------------------------------------------------------------
+
+
+def test_a_name_is_that_file_and_not_a_pattern(ui: HeadlessUI, repo: Path) -> None:
+    (repo / "*.txt").write_text("star\n")
+    run_git(repo, "add", "--", ":(literal)*.txt")
+    run_git(repo, "commit", "-q", "-m", "a file with a star for a name")
+    (repo / "*.txt").write_text("star, changed\n")
+    (repo / "a.txt").write_text("alpha, changed\n")
+    add(ui, repo)
+    settled(ui, changes=[("*.txt", "modified"), ("a.txt", "modified")])
+    ui.call("git.stage", "*.txt")
+    settled(ui, staged=[("*.txt", "modified")], changes=[("a.txt", "modified")])
+    ui.call("git.unstage", "*.txt")
+    settled(ui, staged=[])
+    answer(ui, "git.discard", ["*.txt"], "y")
+    assert (repo / "*.txt").read_text() == "star\n"
+    assert (repo / "a.txt").read_text() == "alpha, changed\n"  # asked about one file: one file
+
+
+def test_unstaging_a_rename_unstages_both_its_names(ui: HeadlessUI, repo: Path) -> None:
+    run_git(repo, "mv", "a.txt", "renamed.txt")
+    add(ui, repo)
+    settled(ui, staged=[("renamed.txt", "renamed")])
+    ui.call("git.unstage", "renamed.txt")
+    settled(ui, staged=[], changes=[("a.txt", "deleted")], untracked=[("renamed.txt", "untracked")])
+    assert run_git(repo, "diff", "--cached", "--name-only") == ""  # nothing left to commit
+
+
+def test_line_endings_alone_are_not_a_difference(ui: HeadlessUI, repo: Path) -> None:
+    run_git(repo, "config", "core.autocrlf", "false")
+    (repo / "dos.txt").write_bytes(b"one\r\ntwo\r\nthree\r\n")
+    run_git(repo, "add", "dos.txt")
+    run_git(repo, "commit", "-q", "-m", "a file with CRLF line endings")
+    (repo / "dos.txt").write_bytes(b"one\r\nTWO\r\nthree\r\n")
+    add(ui, repo)
+    ui.call("git.diff", "dos.txt")
+    assert marks(ui, "old") == [(2, "diff-changed")] and marks(ui, "new") == [(2, "diff-changed")]
+    assert value(ui, "_f.diff.old_buffer.text") == "one\ntwo\nthree\n"
+
+
+def test_an_open_diff_does_not_go_on_comparing(ui: HeadlessUI, repo: Path) -> None:
+    (repo / "b.txt").write_text("one\nTWO\nthree\nfour\nfive\n")
+    add(ui, repo)
+    ui.call("git.diff", "b.txt")
+    ui.eval(
+        "_n = [0]\n_d = _f.diff\n_real = _d.compute\n"
+        "def _counting():\n    _n[0] += 1\n    _real()\n_d.compute = _counting"
+    )
+    time.sleep(0.8)  # longer than it waits after an edit
+    assert value(ui, "_n[0]") == 0  # its own marks are not an edit
+    ui.type("x")
+    wait_for(lambda: value(ui, "_n[0]") == 1, "comparing after an edit")
+    time.sleep(0.8)
+    assert value(ui, "_n[0]") == 1
+
+
+def test_a_diff_is_not_put_away_with_its_project(
+    ui: HeadlessUI, repo: Path, tmp_path: Path
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "o.txt").write_text("o\n")
+    (repo / "b.txt").write_text("one\nTWO\nthree\nfour\nfive\n")
+    add(ui, repo)
+    ui.call("git.diff", "b.txt")
+    assert len(windows(ui)) == 2
+    add(ui, other)  # which shows it
+    assert value(ui, "(_f.diff, ed.buffers.get('*b.txt (staged)*'))") == (None, None)
+    ui.call("project.switch", "repo")
+    assert windows(ui) == ["b.txt"]  # no window left over from the diff
+
+
+def test_a_frame_that_goes_takes_its_diff_and_leaves_anothers_alone(
+    ui: HeadlessUI, repo: Path
+) -> None:
+    (repo / "b.txt").write_text("one\nTWO\nthree\nfour\nfive\n")
+    add(ui, repo)
+    ui.call("git.diff", "b.txt")
+    second = value(ui, "ed.buffers.get('b.txt')._listeners and 0")  # the buffer is shared
+    assert second == 0
+    ui.eval(
+        "from neomacs import diff as _dm\n_b = ed.buffers.get('b.txt')\n"
+        "class _Conn:\n    closed = False\n    def notify(self, *a): pass\n"
+        "from neomacs.window import Frame as _Frame\n"
+        "_g = _Frame(ed.frames[next(iter(ed.frames))].editor, _Conn(), ['panels', 'workbench'])\n"
+        "_g.window.show(_b)\n_left = _g.split(_g.window, 'h', focus=False)\n"
+        "_old = ed.buffers.new('*theirs*', 'one\\ntwo\\nthree\\nfour\\nfive\\n')\n_left.show(_old)\n"
+        "_g.diff = _dm.Diff(_g, _left, _g.window, title='t', temporary=[_old])\n_gd = _g.diff"
+    )
+    # Two frames comparing one file: each has marks of its own on it.
+    assert value(ui, "_gd.layer != _f.diff.layer") is True
+    assert value(ui, "[len(list(_b.layer(d.layer))) for d in (_f.diff, _gd)]") == [1, 1]
+    ui.eval("_g.delete()")
+    assert value(ui, "(_gd.ended, _gd._changed in _b._listeners)") == (True, False)
+    assert value(ui, "ed.buffers.get('*theirs*')") is None
+    assert marks(ui, "new") == [(2, "diff-changed")]  # the first frame's are untouched
+    assert value(ui, "len(list(_b.layer(_gd.layer)))") == 0
+
+
+def test_a_command_about_the_buffers_file_is_about_its_repository(
+    ui: HeadlessUI, repo: Path, tmp_path: Path
+) -> None:
+    elsewhere = (tmp_path / "elsewhere").resolve()
+    elsewhere.mkdir()
+    (elsewhere / "e.txt").write_text("e\n")
+    run_git(elsewhere, "init", "-q", "-b", "main")
+    run_git(elsewhere, "add", ".")
+    run_git(elsewhere, "commit", "-q", "-m", "first")
+    (elsewhere / "e.txt").write_text("e, changed\n")
+    add(ui, repo)
+    # A file of another repository, opened while working in this project.
+    ui.eval(f"_f.window.show(ed.buffers.visit({str(elsewhere / 'e.txt')!r}))")
+    assert value(ui, "(_f.workspace.name, ed.buffer.name)") == ("repo", "e.txt")
+    ui.call("git.stage")
+    assert ui.message == "Staged e.txt"
+    assert run_git(elsewhere, "diff", "--cached", "--name-only").split() == ["e.txt"]
+    ui.call("git.diff", "", True)
+    assert windows(ui) == ["*e.txt (last commit)*", "*e.txt (staged)*"]
+
+
+def test_the_frontend_is_told_where_head_is(ui: HeadlessUI, repo: Path) -> None:
+    add(ui, repo)
+    settled(ui, staged=[])
+    assert ui.model.git is not None
+    before = ui.model.git["head"]
+    assert before == run_git(repo, "rev-parse", "HEAD").strip()
+    (repo / "a.txt").write_text("alpha, changed\n")
+    ui.call("git.stage", "a.txt")
+    settled(ui, staged=[("a.txt", "modified")])
+    assert ui.model.git["head"] == before  # staging is not committing
+    ui.call("git.commit", "second")
+    wait_for(lambda: (ui.idle(), (ui.model.git or {}).get("head") != before)[1], "HEAD moving")

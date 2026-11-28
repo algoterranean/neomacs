@@ -436,6 +436,11 @@ window.addEventListener(
   true,
 );
 host.onMenuCommand((command) => {
+  if (workbench.git.typing) {
+    // The commit message is being typed: Cut, Paste, Undo and the like are about it.
+    if (workbench.git.edit(command, () => host.clipboardRead("clipboard"))) return;
+    root.focus({ preventScroll: true }); // any other command is the editor's, and takes the keyboard
+  }
   if (command === "yank") {
     // The menu's Paste: what is on the clipboard, sent as a paste.
     void host.clipboardRead("clipboard").then((text) => rpc.notify("input.paste", text, "clipboard"));

@@ -60,6 +60,8 @@ class Diff:
         self._timer: Any = None
         self._followed: dict[int, float] = {}
         self.ended = False
+        # Marks of this diff only: another frame may be comparing the same file.
+        self.layer = f"{LAYER}:{frame.id}"
         self.new_buffer.add_listener(self._changed)
         self.compute()
 
@@ -71,7 +73,7 @@ class Diff:
         self.too_big = old.line_count + new.line_count > MAX_LINES
         self.blocks = [] if self.too_big else compare(old.text, new.text)
         for buffer, side in ((old, 0), (new, 1)):
-            layer = buffer.layer(LAYER)
+            layer = buffer.layer(self.layer)
             layer.clear()
             for tag, a1, a2, b1, b2 in self.blocks:
                 if tag == "equal":
@@ -93,6 +95,8 @@ class Diff:
         return [block for block in self.blocks if block[0] != "equal"]
 
     def _changed(self, change: Change) -> None:
+        if not change.text_changed:
+            return  # a redraw, such as the marks themselves ask for
         # Not at every key: once the typing has paused.
         if self._timer is not None:
             self._timer.cancel()
@@ -147,8 +151,8 @@ class Diff:
         frame = self.frame
         return (
             not self.ended
-            and frame.owns(self.old)
-            and frame.owns(self.new)
+            and self.old in frame.windows()
+            and self.new in frame.windows()
             and self.old.buffer is self.old_buffer
             and self.new.buffer is self.new_buffer
         )
@@ -166,7 +170,7 @@ class Diff:
             self._timer.cancel()
         self.new_buffer.remove_listener(self._changed)
         for buffer in (self.old_buffer, self.new_buffer):
-            buffer.layer(LAYER).clear()
+            buffer.layer(self.layer).clear()
         on_screen = self.old.id in frame.views and self.old in frame.windows()
         if close and on_screen and len(frame.windows()) > 1 and self.old.buffer is self.old_buffer:
             frame.delete_window(self.old)
