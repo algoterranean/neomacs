@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 
 from neomacs import paths
-from neomacs.commands import Ask, command
+from neomacs.commands import Ask, RawPrefix, command
+from neomacs.completion import all_buffers_completer, buffers_completer
 from neomacs.editor import ed
 from neomacs.errors import NeomacsError
 
@@ -38,8 +39,17 @@ def save_file_as(path: Annotated[Path, Ask.file("Write file: ")]) -> None:
 
 
 @command(name="buffers.switch")
-def switch_buffer(name: Annotated[str, Ask.buffer("Switch to buffer: ")]) -> None:
-    """Show the buffer called NAME in the current window, creating it if need be."""
+async def switch_buffer(name: str = "", everywhere: Annotated[Any, RawPrefix] = None) -> None:
+    """Show the buffer called NAME in the current window, creating one of
+    that name if need be.  Asked for, the choice is among this project's
+    buffers; with a prefix argument, among all of them, and one that is in
+    another project is shown there."""
+    if not name:
+        completer = all_buffers_completer if everywhere is not None else buffers_completer
+        prompt = "Switch to buffer: " if everywhere is None else "Switch to buffer (any project): "
+        name = await ed.minibuffer.read(
+            prompt, completer=completer, history="buffers", submit_selects=True
+        )
     buffer = ed.buffers.get(name)
     if buffer is None:
         buffer = ed.buffers.new(name)
@@ -51,12 +61,15 @@ def kill_buffer() -> None:
     """Kill the buffer that has the keyboard.  A window showing it shows
     another instead; a panel tab showing it is closed."""
     buffer = ed.buffer
-    others = [b for b in ed.buffers if b is not buffer and not b.name.startswith("*minibuffer")]
     scratch = ed.buffers.get("*scratch*")
-    replacement = others[-1] if others else scratch
-    if replacement is None or replacement is buffer:
+    if buffer is scratch and len(ed.buffers) == 1:
         raise NeomacsError("This is the only buffer")
     for frame in list(ed.frames.values()):
+        # What a window shows instead is another buffer of the same project.
+        others = [b for b in ed.workspaces.buffers(frame.workspace) if b is not buffer]
+        replacement = others[-1] if others else scratch
+        if replacement is None or replacement is buffer:
+            replacement = ed.buffers.new("*scratch*")
         for view in list(frame.views.values()):
             if view.buffer is not buffer:
                 continue
@@ -65,7 +78,7 @@ def kill_buffer() -> None:
                 panel.close(view)
             else:
                 view.show(replacement)
-    ed.buffers.kill(buffer)
+    ed.buffers.kill(buffer)  # windows of layouts that are not on screen are seen to there
 
 
 @command

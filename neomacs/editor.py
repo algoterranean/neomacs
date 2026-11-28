@@ -141,6 +141,9 @@ class Editor:
         self.timers = Timers(self)
         self.processes: set[Process] = set()  # started with `spawn` and still running
         self.projects = Projects(self)
+        from neomacs.workspace import Workspaces
+
+        self.workspaces = Workspaces(self)
         from neomacs.ext.registry import Extensions
 
         self.extensions = Extensions(self)
@@ -224,7 +227,7 @@ class Editor:
     def view(self) -> View:
         """The view a command was started in, or outside a command the frame's focused view."""
         pins = pins_var.get()
-        if pins is not None and pins[0].id in pins[0].frame.views:
+        if pins is not None and pins[0].frame.owns(pins[0]):
             return pins[0]
         return self._need_frame().focus
 
@@ -233,7 +236,7 @@ class Editor:
     def window(self) -> Window:
         """The main-area window: the focused one, or the last that was."""
         pins = pins_var.get()
-        if pins is not None and pins[1].id in pins[1].frame.views:
+        if pins is not None and pins[1].frame.owns(pins[1]):
             return pins[1]
         return self._need_frame().window
 
@@ -241,7 +244,7 @@ class Editor:
     @provisional("0.1")
     def buffer(self) -> Buffer:
         pins = pins_var.get()
-        if pins is not None and pins[0].id in pins[0].frame.views:
+        if pins is not None and pins[0].frame.owns(pins[0]):
             return pins[0].buffer
         return self._need_frame().focus.buffer
 
@@ -344,7 +347,14 @@ class Editor:
         where that is (ENGINE 8.5).  The view gets the keyboard only if FOCUS."""
         from neomacs import panels
 
-        return panels.place(self._need_frame(), buffer, role, focus=focus)
+        frame = self._need_frame()
+        if role == "document":
+            # A buffer is shown in its own project: one that belongs to
+            # another takes the frame there (WORKSPACE 4.1).
+            owner = self.workspaces.of(buffer)
+            if owner is not None and owner is not frame.workspace:
+                frame.switch(owner)
+        return panels.place(frame, buffer, role, focus=focus)
 
     # -- tasks ----------------------------------------------------------------
 

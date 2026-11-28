@@ -84,9 +84,32 @@ def _commands(text: str) -> list[Candidate]:
 
 
 def _buffers(text: str) -> list[Candidate]:
+    """The buffers of the project on show and the editor's own (WORKSPACE 4.3)."""
     from neomacs.editor import current
 
-    return rank((Candidate(b.name) for b in current().buffers), text)
+    editor = current()
+    frame = editor.frame
+    here = frame.workspace if frame is not None else None
+    found: list[Candidate] = []
+    for buffer in editor.buffers:
+        owner = editor.workspaces.of(buffer)
+        if here is None or owner is None or owner is here:
+            found.append(Candidate(buffer.name))
+    return rank(found, text)
+
+
+def _all_buffers(text: str) -> list[Candidate]:
+    """Every buffer, with the project of each that is in another."""
+    from neomacs.editor import current
+
+    editor = current()
+    frame = editor.frame
+    here = frame.workspace if frame is not None else None
+    found: list[Candidate] = []
+    for buffer in editor.buffers:
+        owner = editor.workspaces.of(buffer)
+        found.append(Candidate(buffer.name, owner.name if owner not in (None, here) else ""))
+    return rank(found, text)
 
 
 def _files(text: str) -> list[Candidate]:
@@ -110,4 +133,5 @@ def _files(text: str) -> list[Candidate]:
 
 commands_completer = FunctionCompleter(_commands)
 buffers_completer = FunctionCompleter(_buffers)
+all_buffers_completer = FunctionCompleter(_all_buffers)
 files_completer = FunctionCompleter(_files)

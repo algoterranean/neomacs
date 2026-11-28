@@ -1955,6 +1955,7 @@ neomacs/
   paths.py               where things are on disk (DISTRIBUTION 5)
   safeio.py              reading small files a project supplies, without waiting
   vcs.py                 the git branch a file is on
+  workspace.py           projects: several directories open at once (WORKSPACE.md)
   ext/                   extensions (EXTENSIONS.md)
     manifest.py  lock.py   extensions.toml and extensions.lock
     environment.py         the extensions environment; resolving and installing with uv

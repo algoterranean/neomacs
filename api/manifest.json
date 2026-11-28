@@ -2102,6 +2102,13 @@
    "since": "0.1"
   },
   {
+   "name": "neomacs.window.Frame.switch",
+   "kind": "method",
+   "signature": "(self, workspace: 'Workspace') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
    "name": "neomacs.window.Frame.views_in_order",
    "kind": "method",
    "signature": "(self) -> 'list[View]'",
@@ -2168,6 +2175,83 @@
    "name": "neomacs.window.Window",
    "kind": "class",
    "signature": "(frame: 'Frame', buffer: 'Buffer') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspace",
+   "kind": "class",
+   "signature": "(name: 'str', root: 'Path | None') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspaces",
+   "kind": "class",
+   "signature": "(editor: 'Editor') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspaces.add",
+   "kind": "method",
+   "signature": "(self, path: 'Path | str', name: 'str | None' = None) -> 'Workspace'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspaces.buffers",
+   "kind": "method",
+   "signature": "(self, workspace: 'Workspace') -> 'list[Buffer]'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspaces.containing",
+   "kind": "method",
+   "signature": "(self, path: 'Path') -> 'Workspace | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspaces.get",
+   "kind": "method",
+   "signature": "(self, key: 'int | str') -> 'Workspace | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspaces.move",
+   "kind": "method",
+   "signature": "(self, workspace: 'Workspace', index: 'int') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspaces.of",
+   "kind": "method",
+   "signature": "(self, buffer: 'Buffer') -> 'Workspace | None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspaces.remove",
+   "kind": "method",
+   "signature": "(self, workspace: 'Workspace') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspaces.rename",
+   "kind": "method",
+   "signature": "(self, workspace: 'Workspace', name: 'str') -> 'None'",
+   "tier": "provisional",
+   "since": "0.1"
+  },
+  {
+   "name": "neomacs.workspace.Workspaces.unsaved",
+   "kind": "method",
+   "signature": "(self, workspace: 'Workspace') -> 'list[Buffer]'",
    "tier": "provisional",
    "since": "0.1"
   }
