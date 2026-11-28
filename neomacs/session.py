@@ -115,8 +115,15 @@ class Session:
                 "children": [self._tree(child) for child in node.children],
             }
         tabs = [tab for tab in (self._tab(node, b) for b in node.tabs) if tab is not None]
-        tabs = tabs[-MAX_FILES:]
         active = str(node.buffer.file) if node.buffer.file is not None else None
+        if len(tabs) > MAX_FILES:
+            # The latest are kept, and the one showing whichever it is: it
+            # need not be among the latest, and is the one that matters most.
+            kept = tabs[-MAX_FILES:]
+            showing = next((tab for tab in tabs if tab[0] == active), None)
+            if showing is not None and showing not in kept:
+                kept = [showing, *kept[1:]] if MAX_FILES > 1 else [showing]
+            tabs = [tab for tab in tabs if tab in kept]
         return {"tabs": tabs, "active": active}
 
     def _arrangement(self, root: Any, window: Any, panels: dict[str, Any]) -> dict[str, Any]:

@@ -359,3 +359,21 @@ def test_tabs_do_not_open_more_files_than_the_limit(tmp_path: Path, tree: Path) 
         assert value(ui, f"ed.session._buffer({other!r})") is None  # none left to make
         assert value(ui, f"ed.session._buffer({path!r}).name") == "one.txt"  # open already
         assert value(ui, "ed.session.missing") == []  # it is there; it was only not opened
+
+
+def test_the_tab_that_is_showing_is_kept_when_tabs_are_over_the_limit(
+    tmp_path: Path, tree: Path
+) -> None:
+    data = tmp_path / "data"
+    with engine(data) as ui:
+        ui.call("project.add", str(tree / "alpha"))
+        for name in ("one.txt", "two.txt", "three.txt"):
+            ui.open(tree / "alpha" / name)
+        ui.open(tree / "alpha" / "one.txt")  # the first tab is the one showing
+        ui.eval("import neomacs.session as _sm; _sm.MAX_FILES = 2")
+        kept = value(ui, "ed.session.take()['frames'][0]['arrangements']['0']['tree']")
+        assert [Path(tab[0]).name for tab in kept["tabs"]] == ["one.txt", "three.txt"]
+        assert Path(kept["active"]).name == "one.txt"
+        ui.open(tree / "alpha" / "three.txt")  # one of the latest: nothing special to do
+        kept = value(ui, "ed.session.take()['frames'][0]['arrangements']['0']['tree']")
+        assert [Path(tab[0]).name for tab in kept["tabs"]] == ["two.txt", "three.txt"]
