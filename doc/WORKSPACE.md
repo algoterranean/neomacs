@@ -1,8 +1,8 @@
 # Projects and the workbench design
 
-Status: draft 2, 2026-11-27. Stage W-1 (projects in the engine) is built;
-section 13 says how it differs from what is described before it. Stages W-2
-to W-6 are not built. Section 2 holds the decisions taken. Nothing is open.
+Status: draft 2, 2026-11-27. Stages W-1 (projects in the engine) and W-2
+(the frame) are built; section 13 says how they differ from what is
+described before it. Stages W-3 to W-6 are not built. Section 2 holds the decisions taken. Nothing is open.
 
 This describes two things that arrive together: **projects**, each with its
 own buffers, windows and layout, and the **workbench**, the frame around the
@@ -256,9 +256,9 @@ Engine to frontend, in `redraw`:
 
 | Event | Meaning |
 |---|---|
-| `["regions", {name: {"shown": bool, "width": ems}}]` | Which sidebars and whether the bottom panel are shown. |
+| `["regions", {name: {"shown": bool, "width": ems}}]` | Which regions are shown: `meta`, `project`, `details`, `options`, `status`, and `bottom` for the bottom panel. The sidebars have a width. |
 | `["workspaces", [{"id", "name", "root", "current", "unsaved"}]]` | The project list, in order. |
-| `["status", left, middle, right]` | The status bar, as runs. A run may carry a `command` to run when clicked. |
+| `["status", left, right]` | The status bar's items at each end: `{"text", "command", "title"}`, the last two optional. Clicking an item with a `command` runs it. The middle of the bar is the `message` events there have always been. |
 | `["git", {"branch", "ahead", "behind", "staged", "changes", "untracked", "conflicted"} or null]` | The current project's git state; `null` when it is not in a repository. Each list is of `{"path", "state"}`. |
 | `["files_changed", workspace]` | Listings the frontend holds for this project may be out of date: ask again. |
 
@@ -269,7 +269,7 @@ Frontend to engine:
 | Method | Kind | Purpose |
 |---|---|---|
 | `files.list(workspace, directory)` | request | The entries of a directory: `[{"name", "kind", "git", "ignored"}]`. |
-| `ui.region(name, shown, width)` | notification | The user hid, showed or resized a region. |
+| `ui.region(name, shown, width)` | notification | The user hid, showed or resized a region. Either of the last two may be `null` for "as it is". |
 | `ui.tab(view, action, index, to)` | notification | `activate`, `close`, or `move` a tab. |
 | `engine.call(command, args)` | request | Everything else: `project.switch`, `git.stage`, `files.rename` and the rest are commands. |
 
@@ -436,4 +436,51 @@ Built as sections 4.1 to 4.4 describe, with these details.
   work in a project that is not showing; prompts; killing and removing; two
   frames with a project and a layout each. It was not run by hand in a real
   terminal.
+
+### W-2: the frame
+
+Built as sections 5.1 to 5.3, 5.6 and 5.7 describe, with these differences.
+
+- **Where things are.** Engine: `neomacs/workbench.py` (what the frontend
+  is told), `neomacs/std/workbench.py` (the toggles). Electron:
+  `frontend/src/renderer/workbench.ts`.
+- **The meta bar and the status bar can be hidden too,** not only the
+  sidebars: `view.toggle_meta_bar`, `view.toggle_status_bar`. With the
+  status bar hidden its strip is still there for messages, as the message
+  strip was. `view.toggle_workbench` hides everything around the main
+  area, or brings the default back.
+- **The `workbench` option** says whether a new window starts with the
+  regions shown. It is on by default.
+- **Status items are objects, not runs,** and the middle of the bar is not
+  in the `status` event: it is the message and the pending keys, which
+  arrive as they always have (section 6 is corrected).
+- **Clicks are notifications.** A click on a project, a toggle or a status
+  item sends `engine.call` without waiting for an answer, since a command
+  that asks the user something does not answer until they have.
+- **Keys.** `s-b` toggles the details sidebar and `s-P` opens the command
+  palette.
+- **Colours** are three new faces, `metabar`, `sidebar` and `statusbar`,
+  in both themes.
+- **The details and options sidebars are empty.** The details sidebar has
+  its two halves and their headings.
+- **Ahead and behind** are not in the status bar yet: they need git, which
+  is W-5. The branch is there.
+- **A fault this exposed, now fixed.** A geometry request that needed lines
+  the page did not hold asked for them and waited. Any update that arrived
+  meanwhile caused a render, which reported the real viewport again, and
+  the engine then did not send the lines. Updates were rare before the
+  status bar; with it they are not. A view now reports no viewport of its
+  own while such a request is waiting.
+- **Verified:** 8 engine tests through the reference frontend claiming the
+  capability; 10 checks in `npm run smoke` with real clicks and keys in the
+  Electron window (where each region is, switching by a click, the unsaved
+  mark, toggles by key and by button, resizing by dragging an edge, the
+  palette field and a status item running their commands, both themes,
+  labels). Pictures of the page in both themes were saved and looked at.
+- **Not verified:** the system dialog for adding a project, the context
+  menu on a project and dragging a project to reorder it are written and
+  were not exercised: the smoke test cannot drive native dialogs and menus.
+  The title-bar arrangement on macOS (hidden title bar, the window's
+  buttons inset) was not seen in a visible window; off screen there are no
+  such buttons. Nothing was tried on Linux or Windows.
 

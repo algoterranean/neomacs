@@ -24,6 +24,12 @@ contextBridge.exposeInMainWorld("neomacsHost", {
     ipcRenderer.on("neomacs:menu-command", (_event, command: string) => callback(command));
   },
   openFrame: (options: unknown) => ipcRenderer.send("neomacs:open-frame", options),
+  // The workbench's needs of the system (WORKSPACE 5): a directory dialog,
+  // context menus, and the file manager.
+  chooseDirectory: () => ipcRenderer.invoke("neomacs:choose-directory") as Promise<string | null>,
+  contextMenu: (items: { id: string; label: string }[]) => ipcRenderer.invoke("neomacs:context-menu", items) as Promise<string | null>,
+  reveal: (path: string) => ipcRenderer.send("neomacs:reveal", path),
+  platform: process.platform,
   /** The file-system paths of files dropped on the page. */
   pathsOf: (files: File[]) => files.map((file) => webUtils.getPathForFile(file)).filter((p) => p.length > 0),
 });

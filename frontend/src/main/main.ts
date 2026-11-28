@@ -2,7 +2,7 @@
 // It also holds what a sandboxed page may not: the clipboard, native menus and
 // dialogs, and the files behind image resources (FRONTEND 3, 8.4, 9, 10).
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, type Menu, net as electronNet, protocol, type WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net as electronNet, protocol, shell as systemShell, type WebContents } from "electron";
 import { existsSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -139,6 +139,9 @@ function createWindow(file: string | null): WindowState {
     height: 700,
     show: !smoke,
     backgroundColor: "#1e1e1e",
+    // On macOS the meta bar is the title bar: the window's own is hidden and
+    // its buttons sit inset at the bar's left (WORKSPACE 5.2).
+    ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" as const } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       sandbox: true,
@@ -216,6 +219,29 @@ ipcMain.on("neomacs:menu", (event, items: EngineMenuItem[]) => {
   if (!state || !Array.isArray(items)) return;
   state.menu = items;
   if (smoke || state.window.isFocused() || windows.size === 1) showMenuOf(state);
+});
+
+// What the workbench needs of the system (WORKSPACE 5).
+ipcMain.handle("neomacs:choose-directory", async (event) => {
+  const state = stateOf(event.sender);
+  if (!state) return null;
+  const chosen = await dialog.showOpenDialog(state.window, { title: "Add a project", properties: ["openDirectory", "createDirectory"] });
+  return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
+});
+ipcMain.handle("neomacs:context-menu", (event, items: unknown) => {
+  const state = stateOf(event.sender);
+  if (!state || !Array.isArray(items)) return null;
+  return new Promise<string | null>((resolve) => {
+    let chosen: string | null = null;
+    const template = (items as { id?: unknown; label?: unknown }[])
+      .filter((item) => typeof item.id === "string" && typeof item.label === "string")
+      .map((item) => ({ label: item.label as string, click: () => (chosen = item.id as string) }));
+    // `callback` runs when the menu closes, whether or not anything was chosen.
+    Menu.buildFromTemplate(template).popup({ window: state.window, callback: () => setTimeout(() => resolve(chosen), 0) });
+  });
+});
+ipcMain.on("neomacs:reveal", (event, target: unknown) => {
+  if (stateOf(event.sender) && typeof target === "string" && path.isAbsolute(target)) systemShell.showItemInFolder(target);
 });
 
 ipcMain.on("neomacs:open-frame", (event) => {

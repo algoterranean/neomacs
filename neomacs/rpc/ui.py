@@ -195,6 +195,18 @@ def focus(conn: Connection, gained: bool) -> None:
         editor.start_task(editor.kill_ring.capture(frame), name="clipboard", frame=frame)
 
 
+@method("ui.region")
+def region(
+    conn: Connection, name: str, shown: bool | None = None, width: float | None = None
+) -> None:
+    """The user showed, hid or resized a region of the workbench (WORKSPACE 6)."""
+    from neomacs import workbench
+
+    frame = _frame(conn)
+    if name in frame.regions:
+        workbench.set_region(frame, name, shown, width)
+
+
 @method("input.interrupt")
 def interrupt(conn: Connection) -> None:
     """Out-of-band cancel.  It is acted on from the reader thread (see `attach`);

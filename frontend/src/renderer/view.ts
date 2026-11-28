@@ -114,6 +114,7 @@ export class ViewElement {
   private seenStyle = -1;
   private extra: [number, number] | null = null; // lines a geometry request needs laid out
   private batchWaiters: (() => void)[] = [];
+  private askedFor = 0; // geometry requests waiting for lines that are not held
   private drawnDomFirst = -1;
   private lastCursor: { x: number; y: number } | null = null;
   private elements = new Map<Line, HTMLDivElement>();
@@ -627,6 +628,15 @@ export class ViewElement {
     const deadline = performance.now() + 250;
     first = Math.max(1, first);
     last = Math.min(this.model.lineCount, last);
+    try {
+      await this.waitForLines(first, last, deadline);
+    } finally {
+      if (this.askedFor > 0) this.askedFor -= 1;
+    }
+  }
+
+  private async waitForLines(first: number, last: number, deadline: number): Promise<void> {
+    let asked = false;
     for (;;) {
       let held = true;
       for (let n = first; n <= last; n++) if (!this.model.line(n)) held = false;
@@ -642,7 +652,15 @@ export class ViewElement {
       const remaining = deadline - performance.now();
       if (remaining <= 0) throw new Error(`lines ${first} to ${last} are not available`);
       const page = Math.max(1, Math.round(this.scroller.clientHeight / this.heights.estimate));
-      this.reported = null; // the next render reports the real viewport again
+      // While these lines are awaited, a render must not report what is
+      // really in view: the engine would take that as the newer word, and
+      // not send them.  Any batch brings a render, and batches come for
+      // reasons of their own (the status bar, a task ending).
+      if (!asked) {
+        asked = true;
+        this.askedFor += 1;
+      }
+      this.reported = null; // the first render afterwards reports the real viewport again
       this.onViewport([first, last, page]);
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, remaining);
@@ -745,6 +763,7 @@ export class ViewElement {
   }
 
   private report(scrollTop: number, page: number): void {
+    if (this.askedFor > 0) return; // a geometry request is waiting for other lines
     const first = this.heights.lineAt(scrollTop).line;
     const last = this.heights.lineAt(scrollTop + page - 1).line;
     const pageLines = Math.max(1, Math.round(page / this.heights.estimate));

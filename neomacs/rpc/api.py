@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 PROTOCOL = 1
 # What a frontend may say it can do when it attaches.  "panels": it draws
 # panels and window splits; without it everything is shown in one window.
-CAPABILITIES: list[str] = ["panels"]
+CAPABILITIES: list[str] = ["panels", "workbench"]
 
 _methods: dict[str, Callable[..., Any]] = {}
 

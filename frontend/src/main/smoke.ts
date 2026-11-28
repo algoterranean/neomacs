@@ -101,6 +101,15 @@ export async function runSmoke(
     const frame = state.frame as number;
     const win = `ed.frames[${frame}].window`;
 
+    // Most of what follows was written when the window was the main area and
+    // nothing else, and measures where things are.  Those checks run with the
+    // bars and sidebars hidden; the workbench has checks of its own further on.
+    await control.eval(
+      `ed.options.workbench = False\n` +
+        `for _r in ed.frames[${frame}].regions.values(): _r['shown'] = False\n` +
+        `ed.update_frames()`,
+    );
+
     // F0: connected, and the engine is who we think it is.
     const info = (await control.call("engine.api_info")) as { protocol: number; version: string };
     check("f0.api_info", info.protocol === 1, info.version);
@@ -1071,6 +1080,182 @@ export async function runSmoke(
     second?.window.destroy();
     for (let i = 0; i < 60 && (await pyText("len(ed.frames)")) !== "1"; i++) await new Promise((resolve) => setTimeout(resolve, 50));
     check("f4.closing_a_window_removes_its_frame", (await pyText("len(ed.frames)")) === "1" && shell.windows.size === windowsBefore);
+
+    // -- the workbench: regions, the project sidebar, the status bar (WORKSPACE W-2) --
+    {
+      type Box = [x: number, y: number, width: number, height: number];
+      interface Bench {
+        meta: Box | null; project: Box | null; details: Box | null; options: Box | null;
+        status: Box; statusPlain: boolean; files: Box; git: Box; centre: string;
+        toggles: Record<string, boolean>;
+        projects: { name: string; current: boolean; unsaved: boolean; rect: Box }[];
+        statusLeft: string[]; statusRight: string[];
+      }
+      const bench = async () => (await js<{ workbench: Bench }>("window.neomacsDebug.snapshot()")).workbench;
+      const mainRect = () => js<Box>(`(() => { const r = document.querySelector('.nm-main-area').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; })()`);
+      const rectOf = (selector: string) => js<Box>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })()`);
+      const plain = await bench();
+      const plainMain = await mainRect();
+      check(
+        "workbench.hidden_it_is_the_main_area_and_a_message_strip",
+        plain.meta === null && plain.project === null && plain.details === null && plain.options === null && plain.statusPlain &&
+          plainMain[0] === 0 && plainMain[1] === 0 && plainMain[2] === 1000,
+        { plain, plainMain },
+      );
+      await control.eval(
+        `import tempfile, pathlib\n_wd = pathlib.Path(tempfile.mkdtemp()).resolve()\n` +
+          `for _n in ('alpha', 'beta'):\n    (_wd / _n).mkdir()\n    (_wd / _n / (_n + '.txt')).write_text('in ' + _n + '\\n')\n` +
+          `_wf = ed.frames[${frame}]\n_wa = ed.workspaces.add(_wd / 'alpha')\n_wb = ed.workspaces.add(_wd / 'beta')\n` +
+          `_wf.switch(_wa)\ned.show(ed.buffers.visit(_wd / 'alpha' / 'alpha.txt'), focus=True)\n` +
+          `_wf.switch(_wb)\ned.show(ed.buffers.visit(_wd / 'beta' / 'beta.txt'), focus=True)`,
+      );
+      await control.call("engine.call", "view.toggle_workbench", []);
+      await settle();
+      const open = await bench();
+      const openMain = await mainRect();
+      await shot("14-workbench");
+      const none: Box = [0, 0, 0, 0];
+      const [mx, my, mw, mh] = open.meta ?? none;
+      const [px, py, pw, ph] = open.project ?? none;
+      const [dx, dy, dw, dh] = open.details ?? none;
+      const [sx, sy, sw, sh] = open.status;
+      check(
+        "workbench.regions_are_where_they_are_named",
+        // The meta bar and the status bar span the frame, top and bottom.
+        mx === 0 && my === 0 && mw === 1000 && mh > 20 && sx === 0 && sw === 1000 && Math.abs(sy + sh - 700) <= 1 &&
+          // Between them: project sidebar, details sidebar, main area, left to right.
+          px === 0 && py === mh && Math.abs(py + ph - sy) <= 1 && pw > 100 &&
+          Math.abs(dx - (px + pw)) <= 3 && dy === mh && dh === ph && dw > 150 &&
+          Math.abs(openMain[0] - (dx + dw)) <= 3 && Math.abs(openMain[0] + openMain[2] - 1000) <= 1 && openMain[1] === mh &&
+          // The options sidebar is there to be shown, and is not at first.
+          open.options === null && !open.statusPlain &&
+          // The details sidebar is split at half its height: files above, git below.
+          Math.abs((open.files[3] as number) - (open.git[3] as number)) <= 2 && (open.files[1] as number) < (open.git[1] as number) && (open.files[3] as number) > 100,
+        { open, openMain },
+      );
+      check(
+        "workbench.project_sidebar_and_bars_show_what_the_engine_says",
+        JSON.stringify(open.projects.map((p) => [p.name, p.current])) === '[["alpha",false],["beta",true],["No project",false]]' &&
+          open.centre === "beta" && open.statusLeft[0] === "beta" && open.statusRight[0] === "Ln 1, Col 1" &&
+          open.statusRight.includes("UTF-8") && open.statusRight.includes("LF") &&
+          JSON.stringify(open.toggles) === '{"project":true,"details":true,"bottom":false,"options":false}',
+        open,
+      );
+
+      // A click on a project switches the main area to it.
+      const alpha = open.projects[0] as { rect: Box };
+      await mouseAt(centre(alpha.rect)[0], centre(alpha.rect)[1]);
+      await settle();
+      const switched = await bench();
+      const shownText = await js<string>("document.querySelector('.nm-window .nm-content')?.textContent ?? ''");
+      check(
+        "workbench.a_click_on_a_project_switches_to_it",
+        switched.projects[0]?.current === true && switched.centre === "alpha" && shownText === "in alpha" &&
+          (await pyText("_wf.workspace.name")) === "'alpha'" && (await js<string>("document.title")) === "alpha - Neomacs",
+        { projects: switched.projects, shownText, title: await js<string>("document.title") },
+      );
+      type("x");
+      await settle();
+      const dirty = await bench();
+      check("workbench.unsaved_work_is_marked_on_its_project", dirty.projects[0]?.unsaved === true && dirty.projects[1]?.unsaved === false, dirty.projects);
+      press("/", ["control"]);
+      await settle();
+
+      // The toggles: a key, and a button in the meta bar.
+      press("b", ["meta"]);
+      await settle();
+      const noDetails = await bench();
+      const widerMain = await mainRect();
+      const button = await rectOf('.nm-meta-toggle[data-region="project"]');
+      await mouseAt((button[0] as number) + (button[2] as number) / 2, (button[1] as number) + (button[3] as number) / 2);
+      await settle();
+      const noProject = await bench();
+      const widestMain = await mainRect();
+      check(
+        "workbench.sidebars_hide_and_give_their_room_to_the_main_area",
+        noDetails.details === null && noDetails.toggles["details"] === false && Math.abs(widerMain[0] - pw) <= 3 &&
+          noProject.project === null && noProject.toggles["project"] === false && widestMain[0] === 0 && widestMain[2] === 1000,
+        { widerMain, widestMain, toggles: noProject.toggles },
+      );
+      await control.call("engine.call", "view.toggle_project_sidebar", []);
+      await control.call("engine.call", "view.toggle_details_sidebar", []);
+      await control.call("engine.call", "view.toggle_options_sidebar", []);
+      await settle();
+      const all = await bench();
+      const narrowMain = await mainRect();
+      check(
+        "workbench.options_sidebar_is_at_the_right",
+        all.options !== null && Math.abs((all.options[0] as number) + (all.options[2] as number) - 1000) <= 1 &&
+          Math.abs(narrowMain[0] + narrowMain[2] - (all.options[0] as number)) <= 3 && all.toggles["options"] === true,
+        { options: all.options, narrowMain },
+      );
+      await control.call("engine.call", "view.toggle_options_sidebar", []);
+      await settle();
+
+      // Dragging a sidebar's edge resizes it, and the engine keeps the width.
+      const edge = await rectOf('.nm-sidebar-resizer[data-region="project"]');
+      const before = (await bench()).project as Box;
+      await dragFrom((edge[0] as number) + 2, 300, (edge[0] as number) + 62, 300);
+      const after = (await bench()).project as Box;
+      const kept = Number(await pyText("_wf.regions['project']['width']"));
+      check(
+        "workbench.dragging_an_edge_resizes_a_sidebar",
+        // Wider by about what the pointer moved (the first of the moves is spent
+        // taking hold), and the engine's width is the width that is drawn.
+        (after[2] as number) - (before[2] as number) >= 30 && (after[2] as number) - (before[2] as number) <= 64 &&
+          Math.abs(kept * 14 * 0.9 - (after[2] as number)) <= 3,
+        { before, after, kept },
+      );
+
+      // The palette field and the position in the status bar are commands.
+      const field = await rectOf(".nm-meta-centre");
+      await mouseAt((field[0] as number) + (field[2] as number) / 2, (field[1] as number) + (field[3] as number) / 2);
+      await settle();
+      const palette = (await ui()).chrome.prompt;
+      press("g", ["control"]);
+      await settle();
+      const position = await rectOf(".nm-status-right .nm-status-button");
+      await mouseAt((position[0] as number) + (position[2] as number) / 2, (position[1] as number) + (position[3] as number) / 2);
+      await settle();
+      const goto = (await ui()).chrome.prompt;
+      press("g", ["control"]);
+      await settle();
+      check("workbench.the_palette_field_and_status_items_run_commands", palette === "M-x " && goto === "Go to line: ", { palette, goto });
+
+      // Its colours are the theme's, and its regions are labelled.
+      const look = () =>
+        js<Record<string, string>>(
+          `(() => { const c = (s) => getComputedStyle(document.querySelector(s)).backgroundColor;
+            return { meta: c('.nm-meta-bar'), sidebar: c('.nm-project-sidebar'), status: c('.nm-status-bar') }; })()`,
+        );
+      const darkLook = await look();
+      // (Earlier checks gave the default face colours of their own, which a theme does not override.)
+      await control.eval("ed.faces.own.pop('default', None)\ned.options.theme = 'light'");
+      await settle();
+      const lightLook = await look();
+      await shot("14-workbench-light");
+      await control.eval("ed.options.theme = 'dark'");
+      await settle();
+      const labels = await js<(string | null)[]>(
+        `['.nm-meta-bar', '.nm-project-sidebar', '.nm-details-sidebar', '.nm-status-bar', '.nm-project-list'].map((s) => document.querySelector(s).getAttribute('aria-label'))`,
+      );
+      check(
+        "workbench.follows_the_theme_and_is_labelled",
+        darkLook["sidebar"] === "rgb(37, 37, 38)" && darkLook["meta"] === "rgb(50, 50, 51)" && darkLook["status"] === "rgb(45, 45, 45)" &&
+          lightLook["sidebar"] === "rgb(243, 244, 246)" && lightLook["status"] === "rgb(230, 233, 237)" &&
+          JSON.stringify(labels) === '["Meta bar","Project sidebar","Details sidebar","Status bar","Projects"]',
+        { darkLook, lightLook, labels },
+      );
+
+      // Put everything back as the checks before and after expect it.
+      await control.eval(
+        `_wf.switch(ed.workspaces.none)\nfor _w in (_wa, _wb):\n    for _b in ed.workspaces.buffers(_w): _b.saved_tick = _b.tick\n    ed.workspaces.remove(_w)\n` +
+          `for _r in _wf.regions.values(): _r['shown'] = False\ned.update_frames()`,
+      );
+      await settle();
+      const back = await mainRect();
+      check("workbench.hidden_again", back[0] === 0 && back[1] === 0 && back[2] === 1000 && (await bench()).projects.length === 1, back);
+    }
 
     // -- the kill ring chooser: a list with a preview beside it (KILLRING 7) --
     {
